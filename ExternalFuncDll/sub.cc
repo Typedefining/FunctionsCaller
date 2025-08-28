@@ -13,6 +13,10 @@ FCMarks::FCValue DLL testSub(void* any)
 	//测试操作数是否全为数字
 	bool numbersicFlag = true;
 	//记录所有浮点参数和
+
+	auto ff = 1.0;
+	auto f2 = 1.0f;
+
 	double sumDoubleRes = 0.0;
 	//记录所有整型参数和
 	int sumIntRes = 0;

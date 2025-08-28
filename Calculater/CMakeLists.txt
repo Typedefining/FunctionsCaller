@@ -20,7 +20,7 @@ set(SRC_LST
 	"preimpifunc.cc"
 	"main.cc"
 )
-
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 add_executable(${PROJECT_NAME} ${SRC_LST})
 
 target_link_libraries(${PROJECT_NAME} PUBLIC Qt5::Core Qt5::Gui Qt5::Widgets )
