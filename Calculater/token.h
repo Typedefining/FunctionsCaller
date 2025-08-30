@@ -104,11 +104,13 @@ namespace FCExprClass
 		FCValue m_exprVal, m_refVal;
 	public:
 		FCVariableExprAST(const ::std::string& name, const ::std::string& typeName, const ::std::string& funcName);
+		FCVariableExprAST(const ::std::string& name);
 		FCVariableExprAST(const FCVariableExprAST& othVarObj);
 		~FCVariableExprAST();
 		FCTypeDescribe type = FCMarks::FCTypeDescribe::VariableExpr;
 		void info() override;
 		FCValue evaluate() override;
+		void setValue(FCValue val) { m_exprVal = val; }
 	};
 
 	/// FCBinaryExprAST - Expression struct for a binary operator.

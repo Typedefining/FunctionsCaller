@@ -89,6 +89,18 @@ int FCScanner::getTok()
 			m_identifierStr += m_lastChar;
 		if (m_identifierStr == "def")
 			return static_cast<int>(FCToken::tok_def);
+		if (m_identifierStr == "if")
+			return static_cast<int>(FCToken::tok_if);
+		if (m_identifierStr == "for")
+			return static_cast<int>(FCToken::tok_for);
+		if (m_identifierStr == "then")
+			return static_cast<int>(FCToken::tok_then);
+		if (m_identifierStr == "else")
+			return static_cast<int>(FCToken::tok_else);
+		if (m_identifierStr == "in")
+			return static_cast<int>(FCToken::tok_in);
+		//默认视为变量标识符
+
 		return static_cast<int>(FCToken::tok_identifier);
 	}
 	//此时为数字字面量
@@ -463,6 +475,22 @@ int FCScanner::getTokPrecedence()
 	if (m_curTok != ',')
 		return logError("expected ',' after for start value");
 	getNextToken();
+
+	FCVariableExprAST varItem{ IdName , "int", m_currentFunc };
+	varItem.setValue(Start->evaluate());
+
+	auto varOfFuncItr = varTableInFunc->find(m_currentFunc);
+	//并放入符号表
+	if (varOfFuncItr == varTableInFunc->end())
+	{
+		return nullptr;
+	}
+	varOfFuncItr->second.insert(
+		{
+			IdName,
+			varItem,
+		}
+	);
 
 	auto End = parseExpression();
 	if (!End)

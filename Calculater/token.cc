@@ -8,6 +8,7 @@ using namespace FCExprClass;
 namespace FCMarks {
 	::std::map<char, int> binopPrecedence =
 	{
+		{'<',9},
 		{'+',10},
 		{'-',10},
 		{'*',20},
@@ -75,6 +76,12 @@ FCVariableExprAST::FCVariableExprAST(const ::std::string& Name, const ::std::str
 		m_refVal.type = FCValueCategory::Floating;
 	else
 		m_refVal.type = FCValueCategory::String;
+}
+
+FCVariableExprAST::FCVariableExprAST(const ::std::string& name) : Name(name)
+{
+	m_exprVal.evaluteVal.danglingVal = nullptr;
+	m_exprVal.type = FCValueCategory::Dangle;
 }
 
 FCVariableExprAST::FCVariableExprAST(const FCVariableExprAST& othVarObj)
@@ -164,6 +171,11 @@ FCValue FCBinaryExprAST::evaluate()
 			m_exprVal.type = FCValueCategory::Integer;
 			m_exprVal.evaluteVal.intVal = lhs_eva.evaluteVal.intVal /
 				rhs_eva.evaluteVal.intVal;
+			return m_exprVal;
+			break;
+		case '<':
+			m_exprVal.type = FCValueCategory::Integer;
+			m_exprVal.evaluteVal.intVal = lhs_eva.evaluteVal.intVal < rhs_eva.evaluteVal.intVal;
 			return m_exprVal;
 			break;
 		}
@@ -399,5 +411,20 @@ void FCForExprAST::info()
 
 FCValue FCForExprAST::evaluate()
 {
+	auto startVal = Start->evaluate();
+	auto endVal = End->evaluate();
+	auto stepVal = Step->evaluate();
+	if (startVal.type != FCValueCategory::Integer || endVal.type != FCValueCategory::Integer || stepVal.type != FCValueCategory::Integer)
+	{
+		fprintf(stderr, "LogError: For loop parameters must be Integer!\n");
+		m_exprVal.evaluteVal.danglingVal = nullptr;
+		m_exprVal.type = FCValueCategory::Dangle;
+		return m_exprVal;
+	}
+	for (int i = startVal.evaluteVal.intVal; i <= endVal.evaluteVal.intVal; i += stepVal.evaluteVal.intVal) {
+		auto tmpValue = Body->evaluate();
+		::std::cout << " Body: " << tmpValue.evaluteVal.intVal << ::std::endl;
+	}
+
 	return m_exprVal;
 }
