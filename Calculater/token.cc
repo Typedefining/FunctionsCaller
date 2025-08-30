@@ -347,3 +347,57 @@ FCValue FCFunctionAST::evaluate()
 	m_exprVal = mup_funcBody->evaluate();
 	return m_exprVal;
 }
+
+void FCIfExprAST::info()
+{
+	::std::cout << "FCIfExprAST Cond: ";
+	Cond->info();
+	::std::cout << " Then: ";
+	Then->info();
+	::std::cout << " Else: ";
+	Else->info();
+}
+
+FCValue FCIfExprAST::evaluate()
+{
+	auto condVal = Cond->evaluate();
+	if (condVal.type == FCValueCategory::Integer)
+	{
+		if (condVal.evaluteVal.intVal != 0)
+		{
+			m_exprVal = Then->evaluate();
+		}
+		else
+		{
+			m_exprVal = Else->evaluate();
+		}
+	}
+	else if (condVal.type == FCValueCategory::Floating)
+	{
+		if (condVal.evaluteVal.doubleVal != 0.0)
+		{
+			m_exprVal = Then->evaluate();
+		}
+		else
+		{
+			m_exprVal = Else->evaluate();
+		}
+	}
+	else
+	{
+		fprintf(stderr, "LogError: If condition is not Integer or Floating!\n");
+		m_exprVal.evaluteVal.danglingVal = nullptr;
+		m_exprVal.type = FCValueCategory::Dangle;
+	}
+	return m_exprVal;
+}
+
+void FCForExprAST::info()
+{
+
+}
+
+FCValue FCForExprAST::evaluate()
+{
+	return m_exprVal;
+}

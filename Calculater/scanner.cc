@@ -192,6 +192,12 @@ int FCScanner::getTokPrecedence()
 	case '(':
 		return parseParenExpr();
 		break;
+	case static_cast<int>(FCToken::tok_if):
+		return ParseIfExpr();
+		break;
+	case static_cast<int>(FCToken::tok_for):
+		return ParseForExpr();
+		break;
 	}
 }
 
@@ -405,6 +411,85 @@ int FCScanner::getTokPrecedence()
 	}
 	return nullptr;
 }
+
+::std::unique_ptr<FCExprAST> FCScanner::ParseIfExpr()
+{
+	getNextToken();  // eat the if.
+
+	// condition.
+	auto Cond = parseExpression();
+	if (!Cond)
+		return nullptr;
+
+	if (m_curTok != static_cast<int>(FCToken::tok_then))
+		return logError("expected then");
+	getNextToken();
+
+	auto Then = parseExpression();
+	if (!Then)
+		return nullptr;
+
+	if (m_curTok != static_cast<int>(FCToken::tok_else))
+		return logError("expected else");
+
+	getNextToken();
+
+	auto Else = parseExpression();
+	if (!Else)
+		return nullptr;
+
+	return std::make_unique<FCIfExprAST>(std::move(Cond), std::move(Then),
+										std::move(Else));
+}
+
+::std::unique_ptr<FCExprAST> FCScanner::ParseForExpr()
+{
+	getNextToken();  // eat the for.
+
+	if (m_curTok != static_cast<int>(FCToken::tok_identifier))
+		return logError("expected identifier after for");
+
+	std::string IdName = m_identifierStr;
+	getNextToken();  // eat identifier.
+
+	if (m_curTok != '=')
+		return logError("expected '=' after for");
+	getNextToken();  // eat '='.
+
+
+	auto Start = parseExpression();
+	if (!Start)
+		return nullptr;
+	if (m_curTok != ',')
+		return logError("expected ',' after for start value");
+	getNextToken();
+
+	auto End = parseExpression();
+	if (!End)
+		return nullptr;
+
+	// The step value is optional.
+	std::unique_ptr<FCExprAST> Step;
+	if (m_curTok == ',') {
+		getNextToken();
+		Step = parseExpression();
+		if (!Step)
+			return nullptr;
+	}
+
+	if (m_curTok != static_cast<int>(FCToken::tok_in))
+		return logError("expected 'in' after for");
+	getNextToken();  // eat 'in'.
+
+	auto Body = parseExpression();
+	if (!Body)
+		return nullptr;
+
+	return std::make_unique<FCForExprAST>(IdName, std::move(Start),
+										std::move(End), std::move(Step),
+										std::move(Body));
+}
+
 ::std::unique_ptr<FCExprAST> FCScanner::parseTopLevelExpr()
 {
 	if (auto E = parseExpression())

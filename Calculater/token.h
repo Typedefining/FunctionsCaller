@@ -14,7 +14,12 @@ namespace FCMarks
 		tok_def = -2,
 		tok_identifier = -3,
 		tok_number = -4,
-		tok_string = -5
+		tok_string = -5,
+		tok_if = -6,
+		tok_then = -7,
+		tok_else = -8,
+		tok_for = -9,
+		tok_in = -10,
 	};
 	enum struct FCTypeDescribe
 	{
@@ -167,6 +172,35 @@ namespace FCExprClass
 		FCTypeDescribe type = FCMarks::FCTypeDescribe::Function;
 		::std::string getProtoName();
 		FCExprAST* getBody();
+		void info() override;
+		FCValue evaluate() override;
+	};
+
+	class FCIfExprAST : public FCExprAST {
+		std::unique_ptr<FCExprAST> Cond, Then, Else;
+		FCValue m_exprVal;
+	public:
+	FCIfExprAST(std::unique_ptr<FCExprAST> Cond, std::unique_ptr<FCExprAST> Then,
+				std::unique_ptr<FCExprAST> Else)
+		: Cond(std::move(Cond)), Then(std::move(Then)), Else(std::move(Else)) {}
+
+		void info() override;
+		FCValue evaluate() override;
+	};
+
+	class FCForExprAST : public FCExprAST {
+		std::string VarName;
+		std::unique_ptr<FCExprAST> Start, End, Step, Body;
+		FCValue m_exprVal;
+	public:
+	FCForExprAST(const std::string& varName,
+		std::unique_ptr<FCExprAST> start,
+		std::unique_ptr<FCExprAST> end,
+		std::unique_ptr<FCExprAST> step,
+		std::unique_ptr<FCExprAST> body)
+		: VarName(varName), Start(std::move(start)), End(std::move(end)),
+		Step(std::move(step)), Body(std::move(body)) {}
+
 		void info() override;
 		FCValue evaluate() override;
 	};
