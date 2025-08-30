@@ -5,6 +5,8 @@
 #include <memory>
 #include <utility>
 #include <map>
+#include <cassert>
+#include <unordered_map>
 
 namespace FCMarks
 {
@@ -54,8 +56,43 @@ namespace FCMarks
 		FCValueUnion evaluteVal;
 	};
 
+
 	extern ::std::map<char, int> binopPrecedence;
+
+	struct VarDecl {
+		std::string name;
+		std::string typeName; // "int"/"double"/"string"
+		int slot = -1; // -1 表示尚未分配
+		VarDecl(const std::string &n, const std::string &t) : name(n), typeName(t) {}
+	};
+	using VarDeclPtr = std::shared_ptr<VarDecl>;
+	using Scope = std::unordered_map<std::string, VarDeclPtr>;
+	using ScopeStack = std::vector<Scope>;
+
+	struct Frame {
+		std::string funcName;
+		std::vector<FCMarks::FCValue> locals; // 按 decl->slot 访问
+	};
+
+	extern std::vector<Frame> g_callStack;
+	
+	// 解析期全局结构：每个函数名对应一个 ScopeStack（解析时使用）
+	extern std::unordered_map<std::string, ScopeStack> g_varTableInFunc;
+	// 每个函数的所有声明（按出现顺序），用于分配 slot
+	extern std::unordered_map<std::string, std::vector<VarDeclPtr>> g_funcDeclList;
+	// 函数每次调用需要多少 local slots
+	extern std::unordered_map<std::string, int> g_funcLocalCount;
+
+
+	void pushScopeForFunc(const std::string &func);
+	void popScopeForFunc(const std::string &func);
+	VarDeclPtr lookupVariableDecl(const std::string &func, const std::string &name);
+	void insertVariableInCurrentScope(const std::string &func, const std::string &name, VarDeclPtr decl);
+	void pushFrame(const std::string &func);
+	void popFrame();
+	Frame& currentFrame();
 }
+
 
 namespace FCExprClass
 {
@@ -98,14 +135,10 @@ namespace FCExprClass
 	/// FCVariableExprAST - Expression struct for referencing a variable, like "a".
 	struct FCVariableExprAST : public FCExprAST
 	{
-		::std::string Name;
-		::std::string typeName;
-		::std::string funcName;
+		VarDeclPtr decl;
 		FCValue m_exprVal, m_refVal;
 	public:
-		FCVariableExprAST(const ::std::string& name, const ::std::string& typeName, const ::std::string& funcName);
-		FCVariableExprAST(const ::std::string& name);
-		FCVariableExprAST(const FCVariableExprAST& othVarObj);
+		FCVariableExprAST(VarDeclPtr v);
 		~FCVariableExprAST();
 		FCTypeDescribe type = FCMarks::FCTypeDescribe::VariableExpr;
 		void info() override;
@@ -159,6 +192,7 @@ namespace FCExprClass
 		void info() override;
 		::std::string getProtoName();
 		FCValue evaluate() override;
+		std::vector<FCVariableExprAST>& getArgs() { return m_funcArgsVar; }
 	};
 
 	/// FCFunctionAST - This struct represents a function definition itself.
@@ -174,6 +208,7 @@ namespace FCExprClass
 		FCTypeDescribe type = FCMarks::FCTypeDescribe::Function;
 		::std::string getProtoName();
 		FCExprAST* getBody();
+		std::unique_ptr<FCPrototypeAST>& getProto() { return mup_funcProto; }
 		void info() override;
 		FCValue evaluate() override;
 	};
@@ -191,16 +226,16 @@ namespace FCExprClass
 	};
 
 	class FCForExprAST : public FCExprAST {
-		std::string VarName;
+		VarDeclPtr decl;
 		std::unique_ptr<FCExprAST> Start, End, Step, Body;
 		FCValue m_exprVal;
 	public:
-	FCForExprAST(const std::string& varName,
+	FCForExprAST(VarDeclPtr decl,
 		std::unique_ptr<FCExprAST> start,
 		std::unique_ptr<FCExprAST> end,
 		std::unique_ptr<FCExprAST> step,
 		std::unique_ptr<FCExprAST> body)
-		: VarName(varName), Start(std::move(start)), End(std::move(end)),
+		: decl(std::move(decl)), Start(std::move(start)), End(std::move(end)),
 		Step(std::move(step)), Body(std::move(body)) {}
 
 		void info() override;

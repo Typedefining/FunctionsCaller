@@ -8,9 +8,9 @@
 using namespace FCExprClass;
 using namespace FCMarks;
 
-FCScanner::FCScanner(FCMyFunctional* funcTable) :mp_findFunc(funcTable)
+FCScanner::FCScanner(FCMyFunctional *funcTable) : mp_findFunc(funcTable)
 {
-	//初始状态
+	// 初始状态
 	m_curTok = 0;
 	m_lastChar = ' ';
 	m_numIntgerVal = 0;
@@ -26,15 +26,15 @@ FCScanner::~FCScanner()
 {
 }
 
-::std::unique_ptr<FCExprClass::FCExprAST> FCScanner::analysis(const ::std::string& inputStr)
+::std::unique_ptr<FCExprClass::FCExprAST> FCScanner::analysis(const ::std::string &inputStr)
 {
 	m_inputsBuffer = inputStr;
 	m_idx = m_inputsBuffer.begin();
 
 	using namespace FCMarks;
 
-	//有效表达式要么为def函数定义
-	//要么为匿名函数调用
+	// 有效表达式要么为def函数定义
+	// 要么为匿名函数调用
 	getNextToken();
 	switch (m_curTok)
 	{
@@ -50,10 +50,9 @@ FCScanner::~FCScanner()
 	return nullptr;
 }
 
-
 void FCScanner::resetState()
 {
-	//解析过程出错时，重置扫描器状态
+	// 解析过程出错时，重置扫描器状态
 	m_curTok = 0;
 	m_lastChar = ' ';
 	m_numIntgerVal = 0;
@@ -68,20 +67,20 @@ void FCScanner::resetState()
 
 int FCScanner::getNextToken()
 {
-	//启动分析后，m_curTok为当前token
-	//getTok将返回下一个token
+	// 启动分析后，m_curTok为当前token
+	// getTok将返回下一个token
 	return m_curTok = getTok();
 }
 int FCScanner::getTok()
 {
 	using namespace FCMarks;
 
-	//跳过空白符
+	// 跳过空白符
 	while (isspace(m_lastChar))
 		m_lastChar = *m_idx++;
 
-	//此时为标识符
-	//函数标识符、变量标识符、函数定义标识符
+	// 此时为标识符
+	// 函数标识符、变量标识符、函数定义标识符
 	if (isalpha(m_lastChar))
 	{
 		m_identifierStr = m_lastChar;
@@ -99,12 +98,12 @@ int FCScanner::getTok()
 			return static_cast<int>(FCToken::tok_else);
 		if (m_identifierStr == "in")
 			return static_cast<int>(FCToken::tok_in);
-		//默认视为变量标识符
+		// 默认视为变量标识符
 
 		return static_cast<int>(FCToken::tok_identifier);
 	}
-	//此时为数字字面量
-	//支持整数、浮点数
+	// 此时为数字字面量
+	// 支持整数、浮点数
 	if (isdigit(m_lastChar) || m_lastChar == '.')
 	{
 		::std::string NumStr;
@@ -117,7 +116,7 @@ int FCScanner::getTok()
 		} while (isdigit(m_lastChar) || m_lastChar == '.');
 		if (m_curDouble)
 		{
-			//浮点数支持
+			// 浮点数支持
 			m_numFloatVal = strtod(NumStr.c_str(), 0);
 		}
 		else
@@ -126,7 +125,7 @@ int FCScanner::getTok()
 		}
 		return static_cast<int>(FCToken::tok_number);
 	}
-	//字符串标识符
+	// 字符串标识符
 	if (m_lastChar == '"')
 	{
 		m_lastChar = *m_idx++;
@@ -139,7 +138,7 @@ int FCScanner::getTok()
 		m_stringLiteral = m_identifierStr;
 		return static_cast<int>(FCToken::tok_string);
 	}
-	//注释标识符
+	// 注释标识符
 	if (m_lastChar == '#')
 	{
 		do
@@ -148,24 +147,24 @@ int FCScanner::getTok()
 		if (m_lastChar != EOF)
 			return getTok();
 	}
-	//解析结束
+	// 解析结束
 	if (m_lastChar == EOF || m_idx == m_inputsBuffer.end())
 	{
 		m_lastChar = ' ';
 		return static_cast<int>(FCToken::tok_eof);
 	}
-	//其他值
+	// 其他值
 	int ThisChar = m_lastChar;
 	m_lastChar = *m_idx++;
 	return ThisChar;
 }
 
-std::unique_ptr<FCExprAST> FCScanner::logError(const char* Str)
+std::unique_ptr<FCExprAST> FCScanner::logError(const char *Str)
 {
 	fprintf(stderr, "LogError: %s\n", Str);
 	return nullptr;
 }
-std::unique_ptr<FCPrototypeAST> FCScanner::logErrorP(const char* Str)
+std::unique_ptr<FCPrototypeAST> FCScanner::logErrorP(const char *Str)
 {
 	(void)logError(Str);
 	return nullptr;
@@ -177,7 +176,7 @@ int FCScanner::getTokPrecedence()
 	if (!isascii(m_curTok))
 		return -1;
 
-	//是否为二元操作
+	// 是否为二元操作
 	int TokPrec = binopPrecedence[m_curTok];
 	if (TokPrec <= 0)
 		return -1;
@@ -219,19 +218,19 @@ int FCScanner::getTokPrecedence()
 	{
 		int TokPrec = getTokPrecedence();
 
-		//无合法右操作数
+		// 无合法右操作数
 		if (TokPrec < ExprPrec)
 			return LHS;
 
 		int Binop = m_curTok;
 		getNextToken();
 
-		//获取右操作数
+		// 获取右操作数
 		auto RHS = parsePrimary();
 		if (!RHS)
 			return nullptr;
 		int NextPrec = getTokPrecedence();
-		//当前操作符优先级低于下一个，构建子树
+		// 当前操作符优先级低于下一个，构建子树
 		if (TokPrec < NextPrec)
 		{
 			RHS = parseBinOpRHS(TokPrec + 1, ::std::move(RHS));
@@ -239,16 +238,16 @@ int FCScanner::getTokPrecedence()
 				return nullptr;
 		}
 
-		//合并子树
+		// 合并子树
 		LHS = ::std::make_unique<FCBinaryExprAST>(Binop,
-			::std::move(LHS),
-			::std::move(RHS));
+												  ::std::move(LHS),
+												  ::std::move(RHS));
 	}
 }
 
 ::std::unique_ptr<FCExprAST> FCScanner::parseExpression()
 {
-	//将非函数定义表达式视为二元操作
+	// 将非函数定义表达式视为二元操作
 	auto LHS = parsePrimary();
 	if (!LHS)
 		return nullptr;
@@ -256,7 +255,7 @@ int FCScanner::getTokPrecedence()
 }
 ::std::unique_ptr<FCExprAST> FCScanner::parseNumberExpr()
 {
-	//区分浮点、整型
+	// 区分浮点、整型
 	if (m_curDouble)
 	{
 		m_curDouble = false;
@@ -293,37 +292,27 @@ int FCScanner::getTokPrecedence()
 ::std::unique_ptr<FCExprAST> FCScanner::parseIdentifierExpr()
 {
 	std::string IdName = m_identifierStr;
+	getNextToken(); // 拿掉 identifier
 
-	getNextToken(); //拿掉identifier.
-
-	if (m_curTok != '(') //变量名
+	// 如果后面不是 '(', 那就是变量引用（静态绑定：在 parse 时查找 VarDecl 并把 decl 绑入 AST）
+	if (m_curTok != '(')
 	{
-		//找到符号表中当前函数内的变量
-		if (m_currentFunc == "")
-		{//不在函数定义时使用变量，语法错误
-			return nullptr;
-		}
-		//从符号表中找到待处理函数
-		auto tarFuncItr = varTableInFunc->find(m_currentFunc);
-		if (tarFuncItr == varTableInFunc->end())
+		if (m_currentFunc.empty())
 		{
-			return nullptr;
+			return nullptr; // 在顶层使用变量，当前语法不允许
 		}
-		FCExprClass::FCVariableExprAST itm2{ "","","" };
-		auto tarFunc = tarFuncItr->second;
-		//在待处理函数中找到待处理变量
-		auto findResItr = tarFunc.find(IdName);
-		if (findResItr == tarFunc.end())
+		auto decl = lookupVariableDecl(m_currentFunc, IdName);
+		if (!decl)
 		{
+			// 找不到则解析错误（静态检查）
 			return nullptr;
 		}
-		//获取符号表中的变量
-		auto& realItem = findResItr->second;
-		return std::make_unique<FCVariableExprAST>(realItem);
+		return std::make_unique<FCVariableExprAST>(decl);
 	}
 
-	//函数调用
-	getNextToken(); // 拿掉(
+	// 函数调用分支
+	getNextToken(); // 拿掉 '('
+
 	std::vector<std::unique_ptr<FCExprAST>> funCallArgs;
 	if (m_curTok != ')')
 	{
@@ -340,7 +329,7 @@ int FCScanner::getTokPrecedence()
 			getNextToken();
 		}
 	}
-	//拿掉).
+	// 吃掉 ')'
 	getNextToken();
 
 	return std::make_unique<FCCallExprAST>(IdName, std::move(funCallArgs));
@@ -351,82 +340,80 @@ int FCScanner::getTokPrecedence()
 	if (m_curTok != static_cast<int>(FCToken::tok_identifier))
 		return logErrorP("Expected function name in prototype");
 
-	//变量存在的函数
+	// 变量存在的函数
 	std::string funName = m_identifierStr;
 	getNextToken();
 
 	if (m_curTok != '(')
 		return logErrorP("Expected '(' in prototype");
 
-	//获取所有的参数
-	std::vector<FCVariableExprAST> ArgNames;
-	std::string varName = "";
-	std::string typeName = "";
+	// 获取所有的参数
+	std::vector<std::tuple<std::string, std::string>> Args;
 	while (getNextToken() == static_cast<int>(FCToken::tok_identifier))
 	{
-		varName = m_identifierStr;
+		std::string varName = m_identifierStr;
 		getNextToken();
 		if (m_curTok != ':')
 			return nullptr;
 
 		getNextToken();
-		typeName = m_identifierStr;
+		std::string typeName = m_identifierStr;
 		if (typeName != "int" && typeName != "double" && typeName != "string")
 			return nullptr;
 
-		//记录参数名和类型名
-		FCVariableExprAST varItem{ varName, typeName,funName };
-		ArgNames.push_back(varItem);
-		auto varOfFuncItr = varTableInFunc->find(funName);
-		//并放入符号表
-		if (varOfFuncItr != varTableInFunc->end())
-		{
-			varOfFuncItr->second.insert(
-				{
-					varName,
-					varItem
-				}
-			);
-		}
-		else {
-			varTableInFunc->insert(
-				{
-					funName,
-					{
-						{
-							varName,
-							varItem
-						}
-					}
-				}
-			);
-		}
+		Args.push_back(std::make_tuple(varName, typeName));
 	}
+
 	if (m_curTok != ')')
 		return logErrorP("Expected ')' in prototype");
-	getNextToken(); //拿掉).
+	getNextToken(); // 拿掉).
+
+	pushScopeForFunc(funName);
+
+	std::vector<FCVariableExprAST> ArgNames;
+	for (auto &arg : Args) {
+		auto decl = std::make_shared<VarDecl>(std::get<0>(arg), std::get<1>(arg));
+		insertVariableInCurrentScope(funName, std::get<0>(arg), decl);
+		g_funcDeclList[funName].push_back(decl);
+		ArgNames.push_back(FCVariableExprAST(decl));
+	}
 	return std::make_unique<FCPrototypeAST>(funName, std::move(ArgNames));
 }
 ::std::unique_ptr<FCFunctionAST> FCScanner::parseDefinition()
 {
-	getNextToken(); //拿掉def
+	getNextToken(); // 吃掉 'def'
 	auto Proto = parsePrototype();
 	if (!Proto)
 		return nullptr;
-	//该变量被用于生成正确的变量-函数对应关系
+
+	// 将当前函数名设置为 Proto 名
 	m_currentFunc = Proto->m_funcName;
+
 	if (auto E = parseExpression())
 	{
-		//清除标记
+		// 在函数解析完成后，为该函数的所有 VarDecl 分配连续的 slot（包括形参 & 局部）
+		int slot = 0;
+		auto &decls = g_funcDeclList[m_currentFunc];
+		for (auto &d : decls)
+		{
+			if (d->slot < 0)
+				d->slot = slot++;
+		}
+		g_funcLocalCount[m_currentFunc] = slot;
+
+		popScopeForFunc(m_currentFunc); // 如果 parsePrototype 推入了栈并且不需要保留，则 pop
+
+		// 重置当前函数名
 		m_currentFunc = "";
 		return std::make_unique<FCFunctionAST>(std::move(Proto), std::move(E));
 	}
+
 	return nullptr;
 }
 
 ::std::unique_ptr<FCExprAST> FCScanner::ParseIfExpr()
 {
-	getNextToken();  // eat the if.
+	getNextToken(); // eat the if.
 
 	// condition.
 	auto Cond = parseExpression();
@@ -451,52 +438,42 @@ int FCScanner::getTokPrecedence()
 		return nullptr;
 
 	return std::make_unique<FCIfExprAST>(std::move(Cond), std::move(Then),
-										std::move(Else));
+										 std::move(Else));
 }
 
 ::std::unique_ptr<FCExprAST> FCScanner::ParseForExpr()
 {
-	getNextToken();  // eat the for.
+	getNextToken(); // 吃掉 'for'
 
 	if (m_curTok != static_cast<int>(FCToken::tok_identifier))
 		return logError("expected identifier after for");
 
-	std::string IdName = m_identifierStr;
-	getNextToken();  // eat identifier.
+	std::string VarName = m_identifierStr;
+	getNextToken(); // 吃掉 identifier
+
+	// 在解析期引入新作用域并声明循环变量
+	pushScopeForFunc(m_currentFunc);
+	// 默认使用 double 类型（或根据你语法读取类型信息）
+	VarDeclPtr decl = std::make_shared<VarDecl>(VarName, "int");
+	insertVariableInCurrentScope(m_currentFunc, VarName, decl);
 
 	if (m_curTok != '=')
-		return logError("expected '=' after for");
-	getNextToken();  // eat '='.
+		return logError("expected '=' after for variable");
+	getNextToken(); // 吃掉 '='
 
 
 	auto Start = parseExpression();
 	if (!Start)
 		return nullptr;
+
 	if (m_curTok != ',')
 		return logError("expected ',' after for start value");
 	getNextToken();
-
-	FCVariableExprAST varItem{ IdName , "int", m_currentFunc };
-	varItem.setValue(Start->evaluate());
-
-	auto varOfFuncItr = varTableInFunc->find(m_currentFunc);
-	//并放入符号表
-	if (varOfFuncItr == varTableInFunc->end())
-	{
-		return nullptr;
-	}
-	varOfFuncItr->second.insert(
-		{
-			IdName,
-			varItem,
-		}
-	);
 
 	auto End = parseExpression();
 	if (!End)
 		return nullptr;
 
-	// The step value is optional.
 	std::unique_ptr<FCExprAST> Step;
 	if (m_curTok == ',') {
 		getNextToken();
@@ -507,24 +484,25 @@ int FCScanner::getTokPrecedence()
 
 	if (m_curTok != static_cast<int>(FCToken::tok_in))
 		return logError("expected 'in' after for");
-	getNextToken();  // eat 'in'.
+	getNextToken(); // 吃掉 'in'
+
 
 	auto Body = parseExpression();
-	if (!Body)
-		return nullptr;
 
-	return std::make_unique<FCForExprAST>(IdName, std::move(Start),
-										std::move(End), std::move(Step),
-										std::move(Body));
+	popScopeForFunc(m_currentFunc);
+
+	// 注意：这里返回的 ForExprAST 应该包含 decl 或者 Body 已经通过 VarExpr 绑定了 decl
+	// 下面假设存在一个 FCForExprAST 构造函数接收 decl
+	return std::make_unique<FCForExprAST>(decl, std::move(Start), std::move(End), std::move(Step), std::move(Body));
 }
 
 ::std::unique_ptr<FCExprAST> FCScanner::parseTopLevelExpr()
 {
 	if (auto E = parseExpression())
 	{
-		//有名函数亦被封装为匿名函数调用
+		// 有名函数亦被封装为匿名函数调用
 		auto Proto = std::make_unique<FCPrototypeAST>("__anon_expr",
-			std::vector<FCVariableExprAST>());
+													  std::vector<FCVariableExprAST>());
 		return std::make_unique<FCFunctionAST>(std::move(Proto), std::move(E));
 	}
 	return nullptr;
