@@ -57,6 +57,7 @@ private:
 	::std::unique_ptr<FCExprClass::FCExprAST> parseBinOpRHS(int ExprPrec, std::unique_ptr<FCExprClass::FCExprAST> LHS);
 	::std::unique_ptr<FCExprClass::FCPrototypeAST> parsePrototype();
 	::std::unique_ptr<FCExprClass::FCFunctionAST> parseDefinition();
+	::std::unique_ptr<FCExprClass::FCExprAST> parseSeqExpr();
 	::std::unique_ptr<FCExprClass::FCExprAST> parseTopLevelExpr();
 	::std::unique_ptr<FCExprClass::FCExprAST> ParseIfExpr();
 	::std::unique_ptr<FCExprClass::FCExprAST> ParseForExpr();

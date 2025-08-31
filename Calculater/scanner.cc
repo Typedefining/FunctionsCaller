@@ -280,7 +280,7 @@ int FCScanner::getTokPrecedence()
 ::std::unique_ptr<FCExprAST> FCScanner::parseParenExpr()
 {
 	getNextToken(); // 拿掉(
-	auto V = parseExpression();
+	auto V = parseSeqExpr();
 	if (!V)
 		return nullptr;
 
@@ -389,7 +389,7 @@ int FCScanner::getTokPrecedence()
 	// 将当前函数名设置为 Proto 名
 	m_currentFunc = Proto->m_funcName;
 
-	if (auto E = parseExpression())
+	if (auto E = parseSeqExpr())
 	{
 		// 在函数解析完成后，为该函数的所有 VarDecl 分配连续的 slot（包括形参 & 局部）
 		int slot = 0;
@@ -416,7 +416,7 @@ int FCScanner::getTokPrecedence()
 	getNextToken(); // eat the if.
 
 	// condition.
-	auto Cond = parseExpression();
+	auto Cond = parseSeqExpr();
 	if (!Cond)
 		return nullptr;
 
@@ -424,7 +424,7 @@ int FCScanner::getTokPrecedence()
 		return logError("expected then");
 	getNextToken();
 
-	auto Then = parseExpression();
+	auto Then = parseSeqExpr();
 	if (!Then)
 		return nullptr;
 
@@ -433,7 +433,7 @@ int FCScanner::getTokPrecedence()
 
 	getNextToken();
 
-	auto Else = parseExpression();
+	auto Else = parseSeqExpr();
 	if (!Else)
 		return nullptr;
 
@@ -462,7 +462,7 @@ int FCScanner::getTokPrecedence()
 	getNextToken(); // 吃掉 '='
 
 
-	auto Start = parseExpression();
+	auto Start = parseSeqExpr();
 	if (!Start)
 		return nullptr;
 
@@ -487,7 +487,7 @@ int FCScanner::getTokPrecedence()
 	getNextToken(); // 吃掉 'in'
 
 
-	auto Body = parseExpression();
+	auto Body = parseSeqExpr();
 
 	popScopeForFunc(m_currentFunc);
 
@@ -496,9 +496,32 @@ int FCScanner::getTokPrecedence()
 	return std::make_unique<FCForExprAST>(decl, std::move(Start), std::move(End), std::move(Step), std::move(Body));
 }
 
+/// 解析表达式序列：expr (','|';' expr)*
+::std::unique_ptr<FCExprAST> FCScanner::parseSeqExpr() {
+	auto first = parseExpression(); // 先解析一个表达式
+	if (!first) return nullptr;
+
+	std::vector<std::unique_ptr<FCExprAST>> exprList;
+	exprList.push_back(std::move(first));
+
+	while (m_curTok == ',' || m_curTok == ';') {
+		getNextToken(); // 跳过分隔符
+		auto next = parseExpression();
+		if (!next) return nullptr;
+		exprList.push_back(std::move(next));
+	}
+
+	// 如果只有一个表达式，直接返回，不用包成 SeqExprAST
+	if (exprList.size() == 1)
+		return std::move(exprList[0]);
+
+	return std::make_unique<FCSeqExprAST>(std::move(exprList));
+}
+
+
 ::std::unique_ptr<FCExprAST> FCScanner::parseTopLevelExpr()
 {
-	if (auto E = parseExpression())
+	if (auto E = parseSeqExpr())
 	{
 		// 有名函数亦被封装为匿名函数调用
 		auto Proto = std::make_unique<FCPrototypeAST>("__anon_expr",

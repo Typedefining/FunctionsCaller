@@ -241,4 +241,25 @@ namespace FCExprClass
 		void info() override;
 		FCValue evaluate() override;
 	};
+
+
+	struct FCSeqExprAST : public FCExprAST {
+    std::vector<std::unique_ptr<FCExprAST>> exprs;
+    FCSeqExprAST(std::vector<std::unique_ptr<FCExprAST>> e) : exprs(std::move(e)) {}
+    FCValue evaluate() override {
+        FCValue last;
+        for (auto& e : exprs) {
+            last = e->evaluate();
+        }
+        return last;
+    }
+
+	void info() override {
+		for (auto& i : exprs) {
+			i->info();
+		}
+		
+	}
+};
+
 }
