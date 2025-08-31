@@ -8,6 +8,7 @@ using namespace FCExprClass;
 namespace FCMarks {
 	::std::map<char, int> binopPrecedence =
 	{
+		{'=', 5},
 		{'<',9},
 		{'+',10},
 		{'-',10},
@@ -179,6 +180,36 @@ void FCBinaryExprAST::info()
 	mup_RHS->info();
 }
 
+FCValue FCBinaryExprAST::assignExpression(FCValue lhs_eva, FCValue rhs_eva)
+{
+	auto* varLHS = dynamic_cast<FCVariableExprAST*>(mup_LHS.get());
+	if (!varLHS) {
+		fprintf(stderr, "LogError: LHS of assignment must be a variable\n");
+		m_exprVal.type = FCValueCategory::Dangle;
+		return m_exprVal;
+	}
+	if (!varLHS->decl) {
+		// 不应发生，因为解析期已检查
+		fprintf(stderr, "LogError: Variable %s not declared\n", varLHS->decl->name.c_str());
+		m_exprVal.type = FCValueCategory::Dangle;
+		return m_exprVal;
+	}
+	auto rhsVal = mup_RHS->evaluate();
+	if (rhsVal.type == FCValueCategory::Dangle) return rhsVal;
+	
+	Frame& frame = currentFrame();
+	int slot = varLHS->decl->slot;
+	if (slot >= 0 && slot < (int)frame.locals.size()) {
+		frame.locals[slot] = rhsVal;
+	} else {
+		fprintf(stderr, "LogError: Invalid slot for %s\n", varLHS->decl->name.c_str());
+		m_exprVal.type = FCValueCategory::Dangle;
+		return m_exprVal;
+	}
+	m_exprVal = rhsVal;
+	return m_exprVal;
+}
+
 FCValue FCBinaryExprAST::evaluate()
 {
 	auto lhs_eva = mup_LHS->evaluate();
@@ -221,6 +252,10 @@ FCValue FCBinaryExprAST::evaluate()
 		case '<':
 			m_exprVal.type = FCValueCategory::Integer;
 			m_exprVal.evaluteVal.intVal = lhs_eva.evaluteVal.intVal < rhs_eva.evaluteVal.intVal;
+			return m_exprVal;
+			break;
+		case '=':
+			assignExpression(lhs_eva, rhs_eva);
 			return m_exprVal;
 			break;
 		}
@@ -489,5 +524,33 @@ FCValue FCForExprAST::evaluate()
 		::std::cout << " Body: " << tmpValue.evaluteVal.intVal << ::std::endl;
 	}
 
+	return m_exprVal;
+}
+
+void FCVarDeclExprAST::info() {
+	std::cout << "FCVarDeclExprAST Name: " << decl->name << " Type: " << decl->typeName << std::endl;
+	if (initExpr) {
+		std::cout << " Init: ";
+		initExpr->info();
+	}
+}
+
+FCValue FCVarDeclExprAST::evaluate() {
+	if (initExpr) {
+		FCValue val = initExpr->evaluate();
+		if (val.type == FCValueCategory::Dangle) return val;
+		Frame& frame = currentFrame();
+		if (decl->slot >= 0 && decl->slot < (int)frame.locals.size()) {
+			frame.locals[decl->slot] = val;
+		} else {
+			// 槽位错误（不应发生，因为静态分配）
+			m_exprVal.type = FCValueCategory::Dangle;
+			return m_exprVal;
+		}
+		m_exprVal = val;  // 返回初始化值
+		return m_exprVal;
+	}
+	// 无初始化，返回 Dangle 或默认值
+	m_exprVal.type = FCValueCategory::Dangle;
 	return m_exprVal;
 }

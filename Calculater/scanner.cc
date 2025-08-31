@@ -98,6 +98,8 @@ int FCScanner::getTok()
 			return static_cast<int>(FCToken::tok_else);
 		if (m_identifierStr == "in")
 			return static_cast<int>(FCToken::tok_in);
+		if (m_identifierStr == "var")
+			return static_cast<int>(FCToken::tok_var);
 		// 默认视为变量标识符
 
 		return static_cast<int>(FCToken::tok_identifier);
@@ -208,6 +210,9 @@ int FCScanner::getTokPrecedence()
 		break;
 	case static_cast<int>(FCToken::tok_for):
 		return ParseForExpr();
+		break;
+	case static_cast<int>(FCToken::tok_var):
+		return ParseVarExpr();
 		break;
 	}
 }
@@ -371,7 +376,8 @@ int FCScanner::getTokPrecedence()
 	pushScopeForFunc(funName);
 
 	std::vector<FCVariableExprAST> ArgNames;
-	for (auto &arg : Args) {
+	for (auto &arg : Args)
+	{
 		auto decl = std::make_shared<VarDecl>(std::get<0>(arg), std::get<1>(arg));
 		insertVariableInCurrentScope(funName, std::get<0>(arg), decl);
 		g_funcDeclList[funName].push_back(decl);
@@ -415,8 +421,11 @@ int FCScanner::getTokPrecedence()
 {
 	getNextToken(); // eat the if.
 
+
+	pushScopeForFunc(m_currentFunc);
+	popScopeForFunc(m_currentFunc);
 	// condition.
-	auto Cond = parseSeqExpr();
+	auto Cond = parseExpression();
 	if (!Cond)
 		return nullptr;
 
@@ -424,7 +433,9 @@ int FCScanner::getTokPrecedence()
 		return logError("expected then");
 	getNextToken();
 
+	pushScopeForFunc(m_currentFunc);
 	auto Then = parseSeqExpr();
+	popScopeForFunc(m_currentFunc);
 	if (!Then)
 		return nullptr;
 
@@ -433,7 +444,9 @@ int FCScanner::getTokPrecedence()
 
 	getNextToken();
 
+	pushScopeForFunc(m_currentFunc);
 	auto Else = parseSeqExpr();
+	popScopeForFunc(m_currentFunc);
 	if (!Else)
 		return nullptr;
 
@@ -461,8 +474,7 @@ int FCScanner::getTokPrecedence()
 		return logError("expected '=' after for variable");
 	getNextToken(); // 吃掉 '='
 
-
-	auto Start = parseSeqExpr();
+	auto Start = parseExpression();
 	if (!Start)
 		return nullptr;
 
@@ -475,7 +487,8 @@ int FCScanner::getTokPrecedence()
 		return nullptr;
 
 	std::unique_ptr<FCExprAST> Step;
-	if (m_curTok == ',') {
+	if (m_curTok == ',')
+	{
 		getNextToken();
 		Step = parseExpression();
 		if (!Step)
@@ -486,7 +499,6 @@ int FCScanner::getTokPrecedence()
 		return logError("expected 'in' after for");
 	getNextToken(); // 吃掉 'in'
 
-
 	auto Body = parseSeqExpr();
 
 	popScopeForFunc(m_currentFunc);
@@ -496,18 +508,72 @@ int FCScanner::getTokPrecedence()
 	return std::make_unique<FCForExprAST>(decl, std::move(Start), std::move(End), std::move(Step), std::move(Body));
 }
 
+std::unique_ptr<FCExprAST> FCScanner::ParseVarExpr()
+{
+	getNextToken(); // 吃掉 var
+	if (m_curTok != static_cast<int>(FCToken::tok_identifier))
+	{
+		return logError("expected identifier after var");
+	}
+	std::string varName = m_identifierStr;
+	getNextToken(); // 吃掉 name
+	if (m_curTok != ':')
+	{
+		return logError("expected ':' after var name");
+	}
+	getNextToken(); // 吃掉 :
+	if (m_curTok != static_cast<int>(FCToken::tok_identifier))
+	{
+		return logError("expected type after ':'");
+	}
+	std::string typeName = m_identifierStr;
+	if (typeName != "int" && typeName != "double" && typeName != "string")
+	{
+		return logError("invalid type");
+	}
+	getNextToken(); // 吃掉 type
+	if (m_curTok != '=')
+	{
+		return logError("expected '=' after type (initialization required)");
+	}
+	getNextToken(); // 吃掉 =
+	auto init = parseExpression();
+	if (!init)
+		return nullptr;
+
+	// 静态插入作用域
+	if (m_currentFunc.empty())
+	{
+		return logError("var declaration outside function not allowed");
+	}
+	if (lookupVariableDecl(m_currentFunc, varName))
+	{
+		return logError("variable redeclaration");
+	}
+	auto decl = std::make_shared<VarDecl>(varName, typeName);
+	insertVariableInCurrentScope(m_currentFunc, varName, decl);
+
+	return std::make_unique<FCVarDeclExprAST>(decl, std::move(init));
+}
+
 /// 解析表达式序列：expr (','|';' expr)*
-::std::unique_ptr<FCExprAST> FCScanner::parseSeqExpr() {
+::std::unique_ptr<FCExprAST> FCScanner::parseSeqExpr()
+{
 	auto first = parseExpression(); // 先解析一个表达式
-	if (!first) return nullptr;
+	if (!first)
+		return nullptr;
 
 	std::vector<std::unique_ptr<FCExprAST>> exprList;
 	exprList.push_back(std::move(first));
 
-	while (m_curTok == ',' || m_curTok == ';') {
+	while (m_curTok == ';')
+	{
 		getNextToken(); // 跳过分隔符
 		auto next = parseExpression();
-		if (!next) return nullptr;
+		if (m_curTok > static_cast<int>(FCToken::tok_end) && m_curTok <= static_cast<int>(FCToken::tok_begin))
+			return nullptr;
+		if (!next)
+			break;
 		exprList.push_back(std::move(next));
 	}
 
@@ -517,7 +583,6 @@ int FCScanner::getTokPrecedence()
 
 	return std::make_unique<FCSeqExprAST>(std::move(exprList));
 }
-
 
 ::std::unique_ptr<FCExprAST> FCScanner::parseTopLevelExpr()
 {

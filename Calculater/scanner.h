@@ -61,6 +61,7 @@ private:
 	::std::unique_ptr<FCExprClass::FCExprAST> parseTopLevelExpr();
 	::std::unique_ptr<FCExprClass::FCExprAST> ParseIfExpr();
 	::std::unique_ptr<FCExprClass::FCExprAST> ParseForExpr();
+	::std::unique_ptr<FCExprClass::FCExprAST> ParseVarExpr();
 
 	::std::unique_ptr<FCExprClass::FCExprAST> handledDefinition();
 	::std::unique_ptr<FCExprClass::FCExprAST> handledTopLevelExpression();

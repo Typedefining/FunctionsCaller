@@ -12,16 +12,19 @@ namespace FCMarks
 {
 	enum struct FCToken
 	{
-		tok_eof = -1,
-		tok_def = -2,
-		tok_identifier = -3,
-		tok_number = -4,
-		tok_string = -5,
-		tok_if = -6,
-		tok_then = -7,
-		tok_else = -8,
-		tok_for = -9,
-		tok_in = -10,
+		tok_begin = 0,
+		tok_eof = 1,
+		tok_def = 2,
+		tok_identifier = 3,
+		tok_number = 4,
+		tok_string = 5,
+		tok_if = 6,
+		tok_then = 7,
+		tok_else = 8,
+		tok_for = 9,
+		tok_in = 10,
+		tok_var = 11,
+		tok_end,
 	};
 	enum struct FCTypeDescribe
 	{
@@ -160,6 +163,9 @@ namespace FCExprClass
 		FCTypeDescribe type = FCMarks::FCTypeDescribe::BinaryExpr;
 		void info() override;
 		FCValue evaluate() override;
+
+	private:
+		FCValue assignExpression(FCValue lhs_eva, FCValue rhs_eva);
 	};
 
 	/// FCCallExprAST - Expression struct for function calls.
@@ -242,24 +248,36 @@ namespace FCExprClass
 		FCValue evaluate() override;
 	};
 
-
 	struct FCSeqExprAST : public FCExprAST {
-    std::vector<std::unique_ptr<FCExprAST>> exprs;
-    FCSeqExprAST(std::vector<std::unique_ptr<FCExprAST>> e) : exprs(std::move(e)) {}
-    FCValue evaluate() override {
-        FCValue last;
-        for (auto& e : exprs) {
-            last = e->evaluate();
-        }
-        return last;
-    }
-
-	void info() override {
-		for (auto& i : exprs) {
-			i->info();
+		std::vector<std::unique_ptr<FCExprAST>> exprs;
+		FCSeqExprAST(std::vector<std::unique_ptr<FCExprAST>> e) : exprs(std::move(e)) {}
+		FCValue evaluate() override {
+			FCValue last;
+			for (auto& e : exprs) {
+				last = e->evaluate();
+			}
+			return last;
 		}
-		
-	}
-};
 
+		void info() override {
+			for (auto& i : exprs) {
+				i->info();
+			}
+
+		}
+	};
+
+	struct FCVarDeclExprAST : public FCExprAST {
+	public:
+		VarDeclPtr decl;
+		std::unique_ptr<FCExprAST> initExpr;  // 初始化表达式
+		FCValue m_exprVal;
+		FCVarDeclExprAST(VarDeclPtr d, std::unique_ptr<FCExprAST> init)
+			: decl(std::move(d)), initExpr(std::move(init)) {
+			m_exprVal.type = FCValueCategory::Dangle;
+		}
+		~FCVarDeclExprAST() {}
+		void info() override;
+		FCValue evaluate() override;
+	};
 }
