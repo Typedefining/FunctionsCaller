@@ -21,6 +21,7 @@ private:
 
 	void updateFuncLits();
 	FCMarks::FCValue resolveExprValue(::std::unique_ptr<FCExprClass::FCExprAST> expression);
+	void compileAndRun(const std::string &sourceFile);
 
 	FCScanner* mp_scanner;
 	FCMyFunctional* mp_funcInfo;

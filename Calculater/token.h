@@ -2,11 +2,13 @@
 
 #include <string>
 #include <vector>
+#include <stack>
 #include <memory>
 #include <utility>
 #include <map>
 #include <cassert>
 #include <unordered_map>
+#include <iostream>
 
 namespace FCMarks
 {
@@ -100,6 +102,62 @@ namespace FCMarks
 namespace FCExprClass
 {
 	using namespace FCMarks;
+
+		// 将参数类型映射到 C++ 类型
+	auto mapType = [](const std::string &type) -> std::string {
+		if (type == "int") return "int";
+		if (type == "double") return "double";
+		if (type == "string") return "std::string";
+		return "auto"; // 未知类型
+	};
+
+	class CodeGenContext {
+	private:
+		std::stack<std::unordered_map<std::string, std::string>> m_scopes;
+		int m_varCounter = 0;
+		std::unordered_map<std::string, std::string> m_funcDecls;
+		
+	public:
+		void pushScope() {
+			m_scopes.push({});
+		}
+		
+		void popScope() {
+			m_scopes.pop();
+		}
+		
+		// 将语言中的变量名映射到 C++ 变量名
+		std::string getVarName(const std::string &origName) {
+			if (m_scopes.empty()) return origName;
+			
+			auto &currentScope = m_scopes.top();
+			auto it = currentScope.find(origName);
+			if (it != currentScope.end()) {
+				return it->second;
+			}
+			
+			// 创建新的映射
+			std::string cppName = "var_" + std::to_string(m_varCounter++);
+			currentScope[origName] = cppName;
+			return cppName;
+		}
+		
+		void addFunctionDecl(const std::string &funcName, const std::string &cppDecl) {
+			m_funcDecls[funcName] = cppDecl;
+		}
+		
+		std::string getFunctionDecl(const std::string &funcName) {
+			auto it = m_funcDecls.find(funcName);
+			if (it != m_funcDecls.end()) return it->second;
+			return "";
+		}
+		
+		// 生成唯一的临时变量名
+		std::string createTempVar() {
+			return "tmp_" + std::to_string(m_varCounter++);
+		}
+	};
+
 	struct FCExprAST
 	{
 	public:
@@ -107,6 +165,9 @@ namespace FCExprClass
 		virtual ~FCExprAST() {};
 		virtual void info() = 0;
 		virtual FCValue evaluate() = 0;
+		// 新增：C++ 代码生成方法
+		virtual void codeGenCpp(std::ostream &os, CodeGenContext &ctx) = 0;
+
 		FCTypeDescribe type = FCTypeDescribe::Expr;
 	};
 	struct FCNumberExprAST : public FCExprAST
@@ -121,6 +182,9 @@ namespace FCExprClass
 		FCTypeDescribe type = FCMarks::FCTypeDescribe::NumberExpr;
 		void info() override;
 		FCValue evaluate() override;
+
+		// FCNumberExprAST::codeGenCpp
+		void codeGenCpp(std::ostream &os, CodeGenContext &ctx) override;
 	};
 
 	struct FCStringExprAST : public FCExprAST
@@ -133,6 +197,8 @@ namespace FCExprClass
 		FCTypeDescribe type = FCMarks::FCTypeDescribe::StringExpr;
 		void info() override;
 		FCValue evaluate() override;
+
+		void codeGenCpp(std::ostream &os, CodeGenContext &ctx) override;
 	};
 
 	/// FCVariableExprAST - Expression struct for referencing a variable, like "a".
@@ -147,6 +213,8 @@ namespace FCExprClass
 		void info() override;
 		FCValue evaluate() override;
 		void setValue(FCValue val) { m_exprVal = val; }
+		void codeGenCpp(std::ostream &os, CodeGenContext &ctx) override;
+
 	};
 
 	/// FCBinaryExprAST - Expression struct for a binary operator.
@@ -163,6 +231,8 @@ namespace FCExprClass
 		FCTypeDescribe type = FCMarks::FCTypeDescribe::BinaryExpr;
 		void info() override;
 		FCValue evaluate() override;
+		void codeGenCpp(std::ostream &os, CodeGenContext &ctx) override;
+
 
 	private:
 		FCValue assignExpression(FCValue lhs_eva, FCValue rhs_eva);
@@ -183,6 +253,8 @@ namespace FCExprClass
 		FCTypeDescribe type = FCMarks::FCTypeDescribe::CallExpr;
 		void info() override;
 		FCValue evaluate() override;
+		void codeGenCpp(std::ostream &os, CodeGenContext &ctx) override;
+
 	};
 
 	struct FCPrototypeAST : public FCExprAST
@@ -198,6 +270,7 @@ namespace FCExprClass
 		void info() override;
 		::std::string getProtoName();
 		FCValue evaluate() override;
+		void codeGenCpp(std::ostream &os, CodeGenContext &ctx) override;
 		std::vector<FCVariableExprAST>& getArgs() { return m_funcArgsVar; }
 	};
 
@@ -217,23 +290,29 @@ namespace FCExprClass
 		std::unique_ptr<FCPrototypeAST>& getProto() { return mup_funcProto; }
 		void info() override;
 		FCValue evaluate() override;
+		void codeGenCpp(std::ostream &os, CodeGenContext &ctx) override;
+
 	};
 
 	class FCIfExprAST : public FCExprAST {
-		std::unique_ptr<FCExprAST> Cond, Then, Else;
+		std::unique_ptr<FCExprAST> m_cond, m_then, m_else;
 		FCValue m_exprVal;
 	public:
 	FCIfExprAST(std::unique_ptr<FCExprAST> Cond, std::unique_ptr<FCExprAST> Then,
 				std::unique_ptr<FCExprAST> Else)
-		: Cond(std::move(Cond)), Then(std::move(Then)), Else(std::move(Else)) {}
+		: m_cond(std::move(Cond)), m_then(std::move(Then)), m_else(std::move(Else)) {
+		m_exprVal.type = FCValueCategory::Dangle;
+	}
 
 		void info() override;
 		FCValue evaluate() override;
+
+		void codeGenCpp(std::ostream &os, CodeGenContext &ctx) override;
 	};
 
 	class FCForExprAST : public FCExprAST {
 		VarDeclPtr decl;
-		std::unique_ptr<FCExprAST> Start, End, Step, Body;
+		std::unique_ptr<FCExprAST> m_start, m_end, m_step, m_body;
 		FCValue m_exprVal;
 	public:
 	FCForExprAST(VarDeclPtr decl,
@@ -241,11 +320,15 @@ namespace FCExprClass
 		std::unique_ptr<FCExprAST> end,
 		std::unique_ptr<FCExprAST> step,
 		std::unique_ptr<FCExprAST> body)
-		: decl(std::move(decl)), Start(std::move(start)), End(std::move(end)),
-		Step(std::move(step)), Body(std::move(body)) {}
+		: decl(std::move(decl)), m_start(std::move(start)), m_end(std::move(end)),
+		m_step(std::move(step)), m_body(std::move(body)) {
+		m_exprVal.type = FCValueCategory::Dangle;
+	}
 
 		void info() override;
 		FCValue evaluate() override;
+
+		void codeGenCpp(std::ostream &os, CodeGenContext &ctx) override;
 	};
 
 	struct FCSeqExprAST : public FCExprAST {
@@ -265,6 +348,8 @@ namespace FCExprClass
 			}
 
 		}
+
+		void codeGenCpp(std::ostream &os, CodeGenContext &ctx) override;
 	};
 
 	struct FCVarDeclExprAST : public FCExprAST {
@@ -279,6 +364,9 @@ namespace FCExprClass
 		~FCVarDeclExprAST() {}
 		void info() override;
 		FCValue evaluate() override;
+
+		void codeGenCpp(std::ostream &os, CodeGenContext &ctx) override;
+	};
 
 	class FCProgramAST : public FCExprAST {
 	private:
@@ -296,7 +384,7 @@ namespace FCExprClass
 		}
 		
 		FCValue evaluate() override {
-			FCValue lastResult;
+			FCValue lastResult{ FCValueCategory::Dangle };
 			for (auto& stmt : m_statements) {
 				lastResult = stmt->evaluate();
 			}
@@ -306,5 +394,7 @@ namespace FCExprClass
 		const std::vector<std::unique_ptr<FCExprAST>>& getStatements() const {
 			return m_statements;
 		}
+		
+		void codeGenCpp(std::ostream& os, CodeGenContext& ctx) override;
 	};
 }

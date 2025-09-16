@@ -2,6 +2,8 @@
 #include "functionmanager.h"
 #include <iostream>
 #include <numeric>
+#include <sstream>
+#include <algorithm>
 
 using namespace FCExprClass;
 
@@ -103,6 +105,14 @@ FCValue FCNumberExprAST::evaluate()
 	return m_exprVal;
 }
 
+void FCNumberExprAST::codeGenCpp(std::ostream &os, CodeGenContext &ctx) {
+	if (m_exprVal.type == FCValueCategory::Integer) {
+		os << m_intVal;
+	} else {
+		os << m_doubleVal;
+	}
+}
+
 FCStringExprAST::FCStringExprAST(std::string val) : m_stringVal(val)
 {
 	memset(m_exprVal.evaluteVal.charVal, 0, 1024);
@@ -120,6 +130,11 @@ void FCStringExprAST::info()
 FCValue FCStringExprAST::evaluate()
 {
 	return m_exprVal;
+}
+
+void FCExprClass::FCStringExprAST::codeGenCpp(std::ostream& os, CodeGenContext& ctx)
+{
+	os << m_stringVal;
 }
 
 FCVariableExprAST::FCVariableExprAST(VarDeclPtr d) : decl(std::move(d))
@@ -159,6 +174,11 @@ FCValue FCVariableExprAST::evaluate()
 		FCMarks::FCValue r; r.evaluteVal.danglingVal = nullptr; r.type = FCMarks::FCValueCategory::Dangle; return r;
 	}
 	return fr.locals[decl->slot];
+}
+
+void FCVariableExprAST::codeGenCpp(std::ostream &os, CodeGenContext &ctx) {
+    std::string cppName = ctx.getVarName(decl->name);
+    os << cppName;
 }
 
 FCBinaryExprAST::FCBinaryExprAST(char op,
@@ -310,6 +330,30 @@ FCValue FCBinaryExprAST::evaluate()
 	return errorRes;
 }
 
+void FCBinaryExprAST::codeGenCpp(std::ostream &os, CodeGenContext &ctx) {
+    // 赋值操作特殊处理
+    if (m_Op == '=') {
+        // 左值必须是变量
+        auto varLHS = dynamic_cast<FCVariableExprAST*>(mup_LHS.get());
+        if (varLHS) {
+            std::string cppName = ctx.getVarName(varLHS->decl->name);
+            os << cppName << " = ";
+            mup_RHS->codeGenCpp(os, ctx);
+        } else {
+            // 错误处理
+            os << "/* Error: LHS of assignment must be variable */";
+        }
+        return;
+    }
+    
+    // 普通二元运算
+    os << "(";
+    mup_LHS->codeGenCpp(os, ctx);
+    os << " " << m_Op << " ";
+    mup_RHS->codeGenCpp(os, ctx);
+    os << ")";
+}
+
 FCCallExprAST::FCCallExprAST(const std::string& callee,
 	std::vector<std::unique_ptr<FCExprAST>> args)
 	: m_callee(callee), m_args(std::move(args))
@@ -396,6 +440,31 @@ FCValue FCCallExprAST::evaluate()
 	return m_exprVal;
 }
 
+void FCCallExprAST::codeGenCpp(std::ostream &os, CodeGenContext &ctx) {
+    // 检查是否是特殊函数（如print）
+    if (m_callee == "print") {
+        os << "std::cout << ";
+        if (!m_args.empty()) {
+            m_args[0]->codeGenCpp(os, ctx);
+        }
+        os << " << std::endl";
+        return;
+    }
+    
+    // 普通函数调用
+    os << m_callee << "(";
+    
+    // 生成参数代码
+    for (size_t i = 0; i < m_args.size(); ++i) {
+        m_args[i]->codeGenCpp(os, ctx);
+        if (i < m_args.size() - 1) {
+            os << ", ";
+        }
+    }
+    
+    os << ")";
+}
+
 FCPrototypeAST::FCPrototypeAST(const std::string& name, std::vector<FCVariableExprAST> args)
 	: m_funcName(name), m_funcArgsVar(std::move(args))
 {
@@ -421,6 +490,43 @@ void FCPrototypeAST::info()
 FCValue FCPrototypeAST::evaluate()
 {
 	return m_exprVal;
+}
+
+void FCPrototypeAST::codeGenCpp(std::ostream &os, CodeGenContext &ctx) {
+	// 确定返回类型（简化处理，假设最后一个表达式的类型）
+	std::string returnType = "auto";
+	
+	// 生成函数声明
+	os << returnType << " " << m_funcName << "(";
+	
+	// 生成参数列表
+	for (size_t i = 0; i < m_funcArgsVar.size(); ++i) {
+		auto &arg = m_funcArgsVar[i];
+		std::string cppType = mapType(arg.decl->typeName);
+		std::string cppName = ctx.getVarName(arg.decl->name);
+		
+		os << cppType << " " << cppName;
+		if (i < m_funcArgsVar.size() - 1) {
+			os << ", ";
+		}
+	}
+	
+	os << ")";
+	
+	// 保存函数声明供后续调用使用
+	std::stringstream declStream;
+	declStream << returnType << " " << m_funcName << "(";
+	for (size_t i = 0; i < m_funcArgsVar.size(); ++i) {
+		auto &arg = m_funcArgsVar[i];
+		std::string cppType = mapType(arg.decl->typeName);
+		declStream << cppType;
+		if (i < m_funcArgsVar.size() - 1) {
+			declStream << ", ";
+		}
+	}
+	declStream << ")";
+	
+	ctx.addFunctionDecl(m_funcName, declStream.str());
 }
 
 FCFunctionAST::FCFunctionAST(std::unique_ptr<FCPrototypeAST> proto,
@@ -454,39 +560,66 @@ FCValue FCFunctionAST::evaluate()
 	return m_exprVal;
 }
 
+void FCFunctionAST::codeGenCpp(std::ostream &os, CodeGenContext &ctx) {
+	// 生成函数声明
+	mup_funcProto->codeGenCpp(os, ctx);
+	
+	os << " {\n";
+	
+	// 进入新的作用域
+	ctx.pushScope();
+	
+	// 为函数参数创建局部变量
+	auto &proto = *mup_funcProto;
+	for (auto &arg : proto.m_funcArgsVar) {
+		std::string cppName = ctx.getVarName(arg.decl->name);
+		os << "    " << mapType(arg.decl->typeName) << " " << cppName << " = " 
+		<< arg.decl->name << ";\n";
+	}
+	
+	// 生成函数体代码
+	mup_funcBody->codeGenCpp(os, ctx);
+	
+	// 退出作用域
+	ctx.popScope();
+	
+	os << "}\n\n";
+}
+
 void FCIfExprAST::info()
 {
 	::std::cout << "FCIfExprAST Cond: ";
-	Cond->info();
+	m_cond->info();
 	::std::cout << " Then: ";
-	Then->info();
+	m_then->info();
 	::std::cout << " Else: ";
-	Else->info();
+	m_else->info();
 }
+
 
 FCValue FCIfExprAST::evaluate()
 {
-	auto condVal = Cond->evaluate();
+	auto condVal = m_cond->evaluate();
 	if (condVal.type == FCValueCategory::Integer)
 	{
 		if (condVal.evaluteVal.intVal != 0)
 		{
-			m_exprVal = Then->evaluate();
+			m_exprVal = m_then->evaluate();
 		}
 		else
 		{
-			m_exprVal = Else->evaluate();
+			m_exprVal = m_else->evaluate();
 		}
 	}
 	else if (condVal.type == FCValueCategory::Floating)
 	{
 		if (condVal.evaluteVal.doubleVal != 0.0)
 		{
-			m_exprVal = Then->evaluate();
+			m_exprVal = m_then->evaluate();
 		}
 		else
 		{
-			m_exprVal = Else->evaluate();
+			m_exprVal = m_else->evaluate();
 		}
 	}
 	else
@@ -498,6 +631,19 @@ FCValue FCIfExprAST::evaluate()
 	return m_exprVal;
 }
 
+void FCExprClass::FCIfExprAST::codeGenCpp(std::ostream& os, CodeGenContext& ctx)
+{
+	os << "if (";
+	m_cond->codeGenCpp(os, ctx);
+	os << ") {";
+	m_then->codeGenCpp(os, ctx);
+	os << "}";
+
+	os << " else {";
+	m_else->codeGenCpp(os, ctx);
+	os << "}";
+}
+
 void FCForExprAST::info()
 {
 
@@ -505,13 +651,13 @@ void FCForExprAST::info()
 
 FCValue FCForExprAST::evaluate()
 {
-	auto startVal = Start->evaluate();
+	auto startVal = m_start->evaluate();
 	int slot = decl->slot;
 	auto& frame = currentFrame();
 	frame.locals[slot] = startVal;
 
-	auto endVal = End->evaluate();
-	auto stepVal = Step->evaluate();
+	auto endVal = m_end->evaluate();
+	auto stepVal = m_step->evaluate();
 	if (startVal.type != FCValueCategory::Integer || endVal.type != FCValueCategory::Integer || stepVal.type != FCValueCategory::Integer)
 	{
 		fprintf(stderr, "LogError: For loop parameters must be Integer!\n");
@@ -519,12 +665,25 @@ FCValue FCForExprAST::evaluate()
 		m_exprVal.type = FCValueCategory::Dangle;
 		return m_exprVal;
 	}
-	for (; End->evaluate().evaluteVal.intVal; frame.locals[slot].evaluteVal.intVal += stepVal.evaluteVal.intVal) {
-		auto tmpValue = Body->evaluate();
+	for (; m_end->evaluate().evaluteVal.intVal; frame.locals[slot].evaluteVal.intVal += stepVal.evaluteVal.intVal) {
+		auto tmpValue = m_body->evaluate();
 		::std::cout << " Body: " << tmpValue.evaluteVal.intVal << ::std::endl;
 	}
 
 	return m_exprVal;
+}
+
+void FCExprClass::FCForExprAST::codeGenCpp(std::ostream& os, CodeGenContext& ctx)
+{
+	os << "for ( int (";
+	m_start->codeGenCpp(os, ctx);
+	os << "); ";
+	m_end->codeGenCpp(os, ctx);
+	os << ";";
+	m_step->codeGenCpp(os, ctx);
+	os << "{";
+	m_body->codeGenCpp(os, ctx);
+	os << "}";
 }
 
 void FCVarDeclExprAST::info() {
@@ -554,3 +713,53 @@ FCValue FCVarDeclExprAST::evaluate() {
 	m_exprVal.type = FCValueCategory::Dangle;
 	return m_exprVal;
 }
+
+void FCExprClass::FCVarDeclExprAST::codeGenCpp(std::ostream& os, CodeGenContext& ctx)
+{
+	os << decl->typeName << " " << decl->name << " = " ;
+	initExpr->codeGenCpp(os, ctx);
+}
+
+// 处理程序节点的代码生成
+void FCProgramAST::codeGenCpp(std::ostream& os, CodeGenContext& ctx) {
+	// 首先生成所有函数定义
+	for (auto& stmt : m_statements) {
+		if (dynamic_cast<FCFunctionAST*>(stmt.get()) || 
+			dynamic_cast<FCPrototypeAST*>(stmt.get())) {
+			stmt->codeGenCpp(os, ctx);
+			os << "\n";
+		}
+	}
+	
+	// 然后检查是否有顶级表达式需要包装在main函数中
+	bool hasTopLevelExpr = false;
+	for (auto& stmt : m_statements) {
+		if (!dynamic_cast<FCFunctionAST*>(stmt.get()) && 
+			!dynamic_cast<FCPrototypeAST*>(stmt.get())) {
+			hasTopLevelExpr = true;
+			break;
+		}
+	}
+	
+	if (hasTopLevelExpr) {
+		os << "int main() {\n";
+		for (auto& stmt : m_statements) {
+			if (!dynamic_cast<FCFunctionAST*>(stmt.get()) && 
+				!dynamic_cast<FCPrototypeAST*>(stmt.get())) {
+				os << "    ";
+				stmt->codeGenCpp(os, ctx);
+				os << ";\n";
+			}
+		}
+		os << "    return 0;\n";
+		os << "}\n";
+	}
+}
+
+void FCSeqExprAST::codeGenCpp(std::ostream& os, CodeGenContext& ctx)
+{
+	std::for_each(exprs.begin(), exprs.end(), [&](auto& statment) {
+		statment->codeGenCpp(os, ctx);
+		});
+}
+
