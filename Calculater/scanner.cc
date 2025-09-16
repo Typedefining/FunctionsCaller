@@ -26,28 +26,47 @@ FCScanner::~FCScanner()
 {
 }
 
-::std::unique_ptr<FCExprClass::FCExprAST> FCScanner::analysis(const ::std::string &inputStr)
-{
+//def aaa(a:int,b:double) a+b*2.0;
+::std::unique_ptr<FCExprAST> FCScanner::analysis(const ::std::string &inputStr) {
 	m_inputsBuffer = inputStr;
 	m_idx = m_inputsBuffer.begin();
-
-	using namespace FCMarks;
-
-	// 有效表达式要么为def函数定义
-	// 要么为匿名函数调用
+	
 	getNextToken();
-	switch (m_curTok)
-	{
-	case static_cast<int>(FCToken::tok_eof):
-		break;
-	case ';':
-		break;
-	case static_cast<int>(FCToken::tok_def):
-		return handledDefinition();
-	default:
-		return handledTopLevelExpression();
+	
+	std::vector<std::unique_ptr<FCExprAST>> statements;
+	
+	// 循环解析所有语句，直到遇到文件结束
+	while (m_curTok != static_cast<int>(FCToken::tok_eof)) {
+		std::unique_ptr<FCExprAST> stmt;
+		
+		switch (m_curTok) {
+		case static_cast<int>(FCToken::tok_def):
+			stmt = parseDefinition();
+			break;
+		case ';':
+			// 空语句，跳过
+			getNextToken();
+			continue;
+		default:
+			stmt = parseSeqExpr();
+			break;
+		}
+		
+		if (stmt) {
+			statements.push_back(std::move(stmt));
+		} else {
+			// 解析失败，跳过当前token继续尝试
+			getNextToken();
+		}
 	}
-	return nullptr;
+	
+	// 如果只有一个语句，直接返回它
+	if (statements.size() == 1) {
+		return std::move(statements[0]);
+	}
+	
+	// 如果有多个语句，包装成程序节点
+	return std::make_unique<FCProgramAST>(std::move(statements));
 }
 
 void FCScanner::resetState()

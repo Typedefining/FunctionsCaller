@@ -279,5 +279,32 @@ namespace FCExprClass
 		~FCVarDeclExprAST() {}
 		void info() override;
 		FCValue evaluate() override;
+
+	class FCProgramAST : public FCExprAST {
+	private:
+		std::vector<std::unique_ptr<FCExprAST>> m_statements;
+		
+	public:
+		FCProgramAST(std::vector<std::unique_ptr<FCExprAST>> statements)
+			: m_statements(std::move(statements)) {}
+		
+		void info() override {
+			std::cout << "FCProgramAST with " << m_statements.size() << " statements:\n";
+			for (auto& stmt : m_statements) {
+				stmt->info();
+			}
+		}
+		
+		FCValue evaluate() override {
+			FCValue lastResult;
+			for (auto& stmt : m_statements) {
+				lastResult = stmt->evaluate();
+			}
+			return lastResult;
+		}
+		
+		const std::vector<std::unique_ptr<FCExprAST>>& getStatements() const {
+			return m_statements;
+		}
 	};
 }
