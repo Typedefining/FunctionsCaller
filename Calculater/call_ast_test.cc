@@ -9,7 +9,7 @@ int main()
 {
 	FCScanner scanner;
 	auto program = scanner.analysis(
-		"def add(a:int b:int) a+b\n"
+		"def add(a:int, b:int) a+b\n"
 		"add(2,3);");
 	if (!program)
 	{
@@ -53,7 +53,7 @@ int main()
 
 	FCScanner stringScanner;
 	auto stringFunction = stringScanner.analysis(
-		"def concat(a:string b:string) a+b");
+		"def concat(a:string, b:string) a+b");
 	if (!stringFunction)
 	{
 		std::cerr << "failed to parse string function\n";
