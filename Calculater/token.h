@@ -7,6 +7,7 @@
 #include <map>
 #include <cassert>
 #include <unordered_map>
+#include <iostream>
 
 namespace FCMarks
 {
@@ -107,6 +108,7 @@ namespace FCExprClass
 		virtual ~FCExprAST() {};
 		virtual void info() = 0;
 		virtual FCValue evaluate() = 0;
+		// virtual Value *codegen() = 0;
 		FCTypeDescribe type = FCTypeDescribe::Expr;
 	};
 	struct FCNumberExprAST : public FCExprAST
@@ -279,6 +281,7 @@ namespace FCExprClass
 		~FCVarDeclExprAST() {}
 		void info() override;
 		FCValue evaluate() override;
+	};
 
 	class FCProgramAST : public FCExprAST {
 	private:

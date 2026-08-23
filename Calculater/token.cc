@@ -1,5 +1,4 @@
 ﻿#include "token.h"
-#include "functionmanager.h"
 #include <iostream>
 #include <numeric>
 
@@ -341,57 +340,57 @@ const std::vector<std::unique_ptr<FCExprAST>>& FCCallExprAST::getArgs()
 
 FCValue FCCallExprAST::evaluate()
 {
-	m_exprVal.evaluteVal.danglingVal = nullptr;
-	m_exprVal.type = FCValueCategory::Dangle;
+	// m_exprVal.evaluteVal.danglingVal = nullptr;
+	// m_exprVal.type = FCValueCategory::Dangle;
 
 
-	FCFunctionAST* sfitr = nullptr;
-	for (auto& i : *specailFunc)
-	{
-		if (i->getProtoName() == m_callee)
-		{
-			sfitr = i;
-		}
-	}
-	auto func = funcManager->getFuncByName(m_callee);
-	if (func == nullptr)
-	{
-		fprintf(stderr, "LogError: %s is not FOUND!", m_callee.c_str());
-		FCMarks::FCValue errorRes;
-		errorRes.evaluteVal.danglingVal = nullptr;
-		errorRes.type = FCMarks::FCValueCategory::Dangle;
-		return errorRes;
-	}
+	// FCFunctionAST* sfitr = nullptr;
+	// for (auto& i : *specailFunc)
+	// {
+	// 	if (i->getProtoName() == m_callee)
+	// 	{
+	// 		sfitr = i;
+	// 	}
+	// }
+	// auto func = funcManager->getFuncByName(m_callee);
+	// if (func == nullptr)
+	// {
+	// 	fprintf(stderr, "LogError: %s is not FOUND!", m_callee.c_str());
+	// 	FCMarks::FCValue errorRes;
+	// 	errorRes.evaluteVal.danglingVal = nullptr;
+	// 	errorRes.type = FCMarks::FCValueCategory::Dangle;
+	// 	return errorRes;
+	// }
 
-	if (sfitr != nullptr)
-	{
-		// === 创建新的 Frame 并写入实参 ===
-		pushFrame(m_callee); // 为当前函数调用创建局部变量数组
+	// if (sfitr != nullptr)
+	// {
+	// 	// === 创建新的 Frame 并写入实参 ===
+	// 	pushFrame(m_callee); // 为当前函数调用创建局部变量数组
 
-		auto& frame = currentFrame();
-		auto& declList = g_funcDeclList[m_callee]; // 静态声明列表，slot 已分配
-		auto& prototype = sfitr->getProto();
-		if (m_args.size() != prototype->getArgs().size()) {
-			fprintf(stderr, "LogError: argument count mismatch in %s\n", m_callee.c_str());
-			popFrame();
-			return m_exprVal;
-		}
+	// 	auto& frame = currentFrame();
+	// 	auto& declList = g_funcDeclList[m_callee]; // 静态声明列表，slot 已分配
+	// 	auto& prototype = sfitr->getProto();
+	// 	if (m_args.size() != prototype->getArgs().size()) {
+	// 		fprintf(stderr, "LogError: argument count mismatch in %s\n", m_callee.c_str());
+	// 		popFrame();
+	// 		return m_exprVal;
+	// 	}
 
-		// 将实参 evaluate 后写入对应 slot
-		for (size_t i = 0; i < m_args.size(); ++i) {
-			FCValue val = m_args[i]->evaluate();
-			prototype->getArgs()[i].setValue(val);
-			int slot = prototype->getArgs()[i].decl->slot;
-			frame.locals[slot] = val;
-		}
+	// 	// 将实参 evaluate 后写入对应 slot
+	// 	for (size_t i = 0; i < m_args.size(); ++i) {
+	// 		FCValue val = m_args[i]->evaluate();
+	// 		prototype->getArgs()[i].setValue(val);
+	// 		int slot = prototype->getArgs()[i].decl->slot;
+	// 		frame.locals[slot] = val;
+	// 	}
 
-		m_exprVal = sfitr->mup_funcBody->evaluate();
-		popFrame();
-	}
-	else
-	{
-		m_exprVal = func(&m_args);
-	}
+	// 	m_exprVal = sfitr->mup_funcBody->evaluate();
+	// 	popFrame();
+	// }
+	// else
+	// {
+	// 	m_exprVal = func(&m_args);
+	// }
 
 	return m_exprVal;
 }

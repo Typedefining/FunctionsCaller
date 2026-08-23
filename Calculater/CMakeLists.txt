@@ -2,25 +2,37 @@
 
 project(FunctionsCalculater)
 
-find_package(Qt5Gui REQUIRED)
-find_package(Qt5Widgets REQUIRED)
-find_package(Qt5Core REQUIRED)
-
 set(SRC_LST
-	"ui_calculaterUI.h"
-	"calculater.h"
-	"calculater.cc"
 	"token.h"
 	"token.cc"
 	"scanner.h"
 	"scanner.cc"
-	"functionmanager.h"
-	"functionmanager.cc"
-	"preimpifunc.h"
-	"preimpifunc.cc"
 	"main.cc"
 )
+
+separate_arguments(
+	LLVM_DEFINITIONS_LIST
+	NATIVE_COMMAND
+	${LLVM_DEFINITIONS}
+)
+
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+add_definitions(${LLVM_DEFINITIONS_LIST})
+
 add_executable(${PROJECT_NAME} ${SRC_LST})
 
-target_link_libraries(${PROJECT_NAME} PUBLIC Qt5::Core Qt5::Gui Qt5::Widgets )
+target_include_directories(${PROJECT_NAME}
+	PRIVATE
+	${LLVM_INCLUDE_DIRS}
+)
+
+llvm_map_components_to_libnames(LLVM_LIBS
+	core
+	support
+	analysis
+)
+
+target_link_libraries(
+	${PROJECT_NAME} PUBLIC 
+	${LLVM_LIBS})

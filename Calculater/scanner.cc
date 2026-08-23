@@ -8,7 +8,7 @@
 using namespace FCExprClass;
 using namespace FCMarks;
 
-FCScanner::FCScanner(FCMyFunctional *funcTable) : mp_findFunc(funcTable)
+FCScanner::FCScanner()
 {
 	// 初始状态
 	m_curTok = 0;
