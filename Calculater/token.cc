@@ -20,7 +20,6 @@ namespace FCMarks {
 	std::unordered_map<std::string, std::vector<VarDeclPtr>> g_funcDeclList;
 	// 函数每次调用需要多少 local slots
 	std::unordered_map<std::string, int> g_funcLocalCount;
-	std::vector<Frame> g_callStack;
 
 	void pushScopeForFunc(const std::string &func)
 	{
@@ -50,26 +49,86 @@ namespace FCMarks {
 		g_funcDeclList[func].push_back(decl);
 	}
 
-	void pushFrame(const std::string &func)
+}
+
+namespace {
+FCValue makeDangleValue()
+{
+	FCValue value{};
+	value.type = FCValueCategory::Dangle;
+	value.evaluteVal.danglingVal = nullptr;
+	return value;
+}
+}
+
+bool FCFunctionRegistry::registerFunction(FCFunctionAST* function)
+{
+	if (function == nullptr)
+		return false;
+
+	const auto name = function->getProtoName();
+	auto it = m_functions.find(name);
+	if (it != m_functions.end())
+		return it->second == function;
+
+	m_functions.emplace(name, function);
+	return true;
+}
+
+FCFunctionAST* FCFunctionRegistry::findFunction(const std::string& name) const
+{
+	auto it = m_functions.find(name);
+	return it == m_functions.end() ? nullptr : it->second;
+}
+
+void FCFunctionRegistry::clear()
+{
+	m_functions.clear();
+}
+
+bool FCFunctionRegistry::index(FCExprAST* root)
+{
+	if (root == nullptr)
+		return false;
+
+	bool success = true;
+	if (auto* function = dynamic_cast<FCFunctionAST*>(root))
+		return registerFunction(function);
+
+	if (auto* program = dynamic_cast<FCProgramAST*>(root))
 	{
-		Frame f;
-		f.funcName = func;
-		int n = 0;
-		auto it = g_funcLocalCount.find(func);
-		if (it != g_funcLocalCount.end()) n = it->second;
-		f.locals.resize(n);
-		g_callStack.push_back(std::move(f));
+		for (const auto& statement : program->getStatements())
+		{
+			if (auto* function = dynamic_cast<FCFunctionAST*>(statement.get()))
+				success = registerFunction(function) && success;
+		}
 	}
-	void popFrame()
-	{
-		assert(!g_callStack.empty());
-		g_callStack.pop_back();
-	}
-	Frame& currentFrame()
-	{
-		assert(!g_callStack.empty());
-		return g_callStack.back();
-	}
+
+	return success;
+}
+
+void FCEvaluationContext::pushFrame(const std::string& functionName)
+{
+	Frame frame;
+	frame.funcName = functionName;
+
+	auto it = g_funcLocalCount.find(functionName);
+	if (it != g_funcLocalCount.end())
+		frame.locals.resize(it->second);
+
+	callStack.push_back(std::move(frame));
+}
+
+void FCEvaluationContext::popFrame()
+{
+	assert(!callStack.empty());
+	callStack.pop_back();
+}
+
+Frame& FCEvaluationContext::currentFrame()
+{
+	assert(!callStack.empty());
+	return callStack.back();
 }
 
 
@@ -97,7 +156,7 @@ void FCNumberExprAST::info()
 	return;
 }
 
-FCValue FCNumberExprAST::evaluate()
+FCValue FCNumberExprAST::evaluate(FCEvaluationContext&)
 {
 	return m_exprVal;
 }
@@ -116,7 +175,7 @@ void FCStringExprAST::info()
 	::std::cout << "FCStringExprAST Val: " << m_exprVal.evaluteVal.charVal << ::std::endl;
 }
 
-FCValue FCStringExprAST::evaluate()
+FCValue FCStringExprAST::evaluate(FCEvaluationContext&)
 {
 	return m_exprVal;
 }
@@ -143,7 +202,7 @@ void FCVariableExprAST::info()
 	}
 }
 
-FCValue FCVariableExprAST::evaluate()
+FCValue FCVariableExprAST::evaluate(FCEvaluationContext& context)
 {
 	if (!decl) {
 		FCMarks::FCValue r; r.evaluteVal.danglingVal = nullptr; r.type = FCMarks::FCValueCategory::Dangle; return r;
@@ -153,7 +212,7 @@ FCValue FCVariableExprAST::evaluate()
 		FCMarks::FCValue r; r.evaluteVal.danglingVal = nullptr; r.type = FCMarks::FCValueCategory::Dangle; return r;
 	}
 	// 通过当前帧访问
-	Frame &fr = currentFrame();
+	Frame &fr = context.currentFrame();
 	if (decl->slot >= (int)fr.locals.size()) {
 		FCMarks::FCValue r; r.evaluteVal.danglingVal = nullptr; r.type = FCMarks::FCValueCategory::Dangle; return r;
 	}
@@ -179,7 +238,10 @@ void FCBinaryExprAST::info()
 	mup_RHS->info();
 }
 
-FCValue FCBinaryExprAST::assignExpression(FCValue lhs_eva, FCValue rhs_eva)
+FCValue FCBinaryExprAST::assignExpression(
+	FCValue lhs_eva,
+	FCValue rhs_eva,
+	FCEvaluationContext& context)
 {
 	auto* varLHS = dynamic_cast<FCVariableExprAST*>(mup_LHS.get());
 	if (!varLHS) {
@@ -193,10 +255,10 @@ FCValue FCBinaryExprAST::assignExpression(FCValue lhs_eva, FCValue rhs_eva)
 		m_exprVal.type = FCValueCategory::Dangle;
 		return m_exprVal;
 	}
-	auto rhsVal = mup_RHS->evaluate();
+	auto rhsVal = mup_RHS->evaluate(context);
 	if (rhsVal.type == FCValueCategory::Dangle) return rhsVal;
 	
-	Frame& frame = currentFrame();
+	Frame& frame = context.currentFrame();
 	int slot = varLHS->decl->slot;
 	if (slot >= 0 && slot < (int)frame.locals.size()) {
 		frame.locals[slot] = rhsVal;
@@ -209,10 +271,10 @@ FCValue FCBinaryExprAST::assignExpression(FCValue lhs_eva, FCValue rhs_eva)
 	return m_exprVal;
 }
 
-FCValue FCBinaryExprAST::evaluate()
+FCValue FCBinaryExprAST::evaluate(FCEvaluationContext& context)
 {
-	auto lhs_eva = mup_LHS->evaluate();
-	auto rhs_eva = mup_RHS->evaluate();
+	auto lhs_eva = mup_LHS->evaluate(context);
+	auto rhs_eva = mup_RHS->evaluate(context);
 
 	if (lhs_eva.type == FCValueCategory::Integer && rhs_eva.type == FCValueCategory::Integer)
 	{
@@ -254,7 +316,7 @@ FCValue FCBinaryExprAST::evaluate()
 			return m_exprVal;
 			break;
 		case '=':
-			assignExpression(lhs_eva, rhs_eva);
+			assignExpression(lhs_eva, rhs_eva, context);
 			return m_exprVal;
 			break;
 		}
@@ -338,61 +400,60 @@ const std::vector<std::unique_ptr<FCExprAST>>& FCCallExprAST::getArgs()
 	return m_args;
 }
 
-FCValue FCCallExprAST::evaluate()
+FCValue FCCallExprAST::evaluate(FCEvaluationContext& context)
 {
-	// m_exprVal.evaluteVal.danglingVal = nullptr;
-	// m_exprVal.type = FCValueCategory::Dangle;
+	auto* function = context.functions.findFunction(m_callee);
+	if (function == nullptr)
+	{
+		fprintf(stderr, "Function not found: %s\n", m_callee.c_str());
+		return makeDangleValue();
+	}
 
+	auto& prototype = function->getProto();
+	if (m_args.size() != prototype->getArgs().size())
+	{
+		fprintf(stderr, "Argument count mismatch in %s\n", m_callee.c_str());
+		return makeDangleValue();
+	}
 
-	// FCFunctionAST* sfitr = nullptr;
-	// for (auto& i : *specailFunc)
-	// {
-	// 	if (i->getProtoName() == m_callee)
-	// 	{
-	// 		sfitr = i;
-	// 	}
-	// }
-	// auto func = funcManager->getFuncByName(m_callee);
-	// if (func == nullptr)
-	// {
-	// 	fprintf(stderr, "LogError: %s is not FOUND!", m_callee.c_str());
-	// 	FCMarks::FCValue errorRes;
-	// 	errorRes.evaluteVal.danglingVal = nullptr;
-	// 	errorRes.type = FCMarks::FCValueCategory::Dangle;
-	// 	return errorRes;
-	// }
+	// 求值实参必须发生在创建被调用函数栈帧之前，
+	// 这样实参中的变量仍然从调用者栈帧读取。
+	std::vector<FCValue> argumentValues;
+	argumentValues.reserve(m_args.size());
+	for (const auto& argument : m_args)
+	{
+		FCValue value = argument->evaluate(context);
+		if (value.type == FCValueCategory::Dangle)
+			return value;
+		argumentValues.push_back(value);
+	}
 
-	// if (sfitr != nullptr)
-	// {
-	// 	// === 创建新的 Frame 并写入实参 ===
-	// 	pushFrame(m_callee); // 为当前函数调用创建局部变量数组
+	context.pushFrame(m_callee);
+	Frame& frame = context.currentFrame();
 
-	// 	auto& frame = currentFrame();
-	// 	auto& declList = g_funcDeclList[m_callee]; // 静态声明列表，slot 已分配
-	// 	auto& prototype = sfitr->getProto();
-	// 	if (m_args.size() != prototype->getArgs().size()) {
-	// 		fprintf(stderr, "LogError: argument count mismatch in %s\n", m_callee.c_str());
-	// 		popFrame();
-	// 		return m_exprVal;
-	// 	}
+	for (size_t i = 0; i < argumentValues.size(); ++i)
+	{
+		auto& parameter = prototype->getArgs()[i];
+		if (!parameter.decl)
+		{
+			context.popFrame();
+			return makeDangleValue();
+		}
 
-	// 	// 将实参 evaluate 后写入对应 slot
-	// 	for (size_t i = 0; i < m_args.size(); ++i) {
-	// 		FCValue val = m_args[i]->evaluate();
-	// 		prototype->getArgs()[i].setValue(val);
-	// 		int slot = prototype->getArgs()[i].decl->slot;
-	// 		frame.locals[slot] = val;
-	// 	}
+		const int slot = parameter.decl->slot;
+		if (slot < 0 || slot >= static_cast<int>(frame.locals.size()))
+		{
+			fprintf(stderr, "Invalid parameter slot in %s\n", m_callee.c_str());
+			context.popFrame();
+			return makeDangleValue();
+		}
 
-	// 	m_exprVal = sfitr->mup_funcBody->evaluate();
-	// 	popFrame();
-	// }
-	// else
-	// {
-	// 	m_exprVal = func(&m_args);
-	// }
+		frame.locals[slot] = argumentValues[i];
+	}
 
-	return m_exprVal;
+	FCValue result = function->getBody()->evaluate(context);
+	context.popFrame();
+	return result;
 }
 
 FCPrototypeAST::FCPrototypeAST(const std::string& name, std::vector<FCVariableExprAST> args)
@@ -417,7 +478,7 @@ void FCPrototypeAST::info()
 {
 	return m_funcName;
 }
-FCValue FCPrototypeAST::evaluate()
+FCValue FCPrototypeAST::evaluate(FCEvaluationContext&)
 {
 	return m_exprVal;
 }
@@ -447,10 +508,10 @@ FCExprAST* FCFunctionAST::getBody()
 	return mup_funcProto->getProtoName();
 }
 
-FCValue FCFunctionAST::evaluate()
+FCValue FCFunctionAST::evaluate(FCEvaluationContext& context)
 {
-	m_exprVal = mup_funcBody->evaluate();
-	return m_exprVal;
+	context.functions.registerFunction(this);
+	return makeDangleValue();
 }
 
 void FCIfExprAST::info()
@@ -463,29 +524,29 @@ void FCIfExprAST::info()
 	Else->info();
 }
 
-FCValue FCIfExprAST::evaluate()
+FCValue FCIfExprAST::evaluate(FCEvaluationContext& context)
 {
-	auto condVal = Cond->evaluate();
+	auto condVal = Cond->evaluate(context);
 	if (condVal.type == FCValueCategory::Integer)
 	{
 		if (condVal.evaluteVal.intVal != 0)
 		{
-			m_exprVal = Then->evaluate();
+			m_exprVal = Then->evaluate(context);
 		}
 		else
 		{
-			m_exprVal = Else->evaluate();
+			m_exprVal = Else->evaluate(context);
 		}
 	}
 	else if (condVal.type == FCValueCategory::Floating)
 	{
 		if (condVal.evaluteVal.doubleVal != 0.0)
 		{
-			m_exprVal = Then->evaluate();
+			m_exprVal = Then->evaluate(context);
 		}
 		else
 		{
-			m_exprVal = Else->evaluate();
+			m_exprVal = Else->evaluate(context);
 		}
 	}
 	else
@@ -502,15 +563,15 @@ void FCForExprAST::info()
 
 }
 
-FCValue FCForExprAST::evaluate()
+FCValue FCForExprAST::evaluate(FCEvaluationContext& context)
 {
-	auto startVal = Start->evaluate();
+	auto startVal = Start->evaluate(context);
 	int slot = decl->slot;
-	auto& frame = currentFrame();
+	auto& frame = context.currentFrame();
 	frame.locals[slot] = startVal;
 
-	auto endVal = End->evaluate();
-	auto stepVal = Step->evaluate();
+	auto endVal = End->evaluate(context);
+	auto stepVal = Step->evaluate(context);
 	if (startVal.type != FCValueCategory::Integer || endVal.type != FCValueCategory::Integer || stepVal.type != FCValueCategory::Integer)
 	{
 		fprintf(stderr, "LogError: For loop parameters must be Integer!\n");
@@ -518,8 +579,8 @@ FCValue FCForExprAST::evaluate()
 		m_exprVal.type = FCValueCategory::Dangle;
 		return m_exprVal;
 	}
-	for (; End->evaluate().evaluteVal.intVal; frame.locals[slot].evaluteVal.intVal += stepVal.evaluteVal.intVal) {
-		auto tmpValue = Body->evaluate();
+	for (; End->evaluate(context).evaluteVal.intVal; frame.locals[slot].evaluteVal.intVal += stepVal.evaluteVal.intVal) {
+		auto tmpValue = Body->evaluate(context);
 		::std::cout << " Body: " << tmpValue.evaluteVal.intVal << ::std::endl;
 	}
 
@@ -534,11 +595,11 @@ void FCVarDeclExprAST::info() {
 	}
 }
 
-FCValue FCVarDeclExprAST::evaluate() {
+FCValue FCVarDeclExprAST::evaluate(FCEvaluationContext& context) {
 	if (initExpr) {
-		FCValue val = initExpr->evaluate();
+		FCValue val = initExpr->evaluate(context);
 		if (val.type == FCValueCategory::Dangle) return val;
-		Frame& frame = currentFrame();
+		Frame& frame = context.currentFrame();
 		if (decl->slot >= 0 && decl->slot < (int)frame.locals.size()) {
 			frame.locals[decl->slot] = val;
 		} else {

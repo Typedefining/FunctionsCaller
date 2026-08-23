@@ -78,8 +78,6 @@ namespace FCMarks
 		std::vector<FCMarks::FCValue> locals; // 按 decl->slot 访问
 	};
 
-	extern std::vector<Frame> g_callStack;
-	
 	// 解析期全局结构：每个函数名对应一个 ScopeStack（解析时使用）
 	extern std::unordered_map<std::string, ScopeStack> g_varTableInFunc;
 	// 每个函数的所有声明（按出现顺序），用于分配 slot
@@ -92,22 +90,20 @@ namespace FCMarks
 	void popScopeForFunc(const std::string &func);
 	VarDeclPtr lookupVariableDecl(const std::string &func, const std::string &name);
 	void insertVariableInCurrentScope(const std::string &func, const std::string &name, VarDeclPtr decl);
-	void pushFrame(const std::string &func);
-	void popFrame();
-	Frame& currentFrame();
 }
 
 
 namespace FCExprClass
 {
 	using namespace FCMarks;
+	struct FCEvaluationContext;
 	struct FCExprAST
 	{
 	public:
 		FCExprAST() = default;
 		virtual ~FCExprAST() {};
 		virtual void info() = 0;
-		virtual FCValue evaluate() = 0;
+		virtual FCValue evaluate(FCEvaluationContext&) = 0;
 		// virtual Value *codegen() = 0;
 		FCTypeDescribe type = FCTypeDescribe::Expr;
 	};
@@ -122,7 +118,7 @@ namespace FCExprClass
 		~FCNumberExprAST();
 		FCTypeDescribe type = FCMarks::FCTypeDescribe::NumberExpr;
 		void info() override;
-		FCValue evaluate() override;
+		FCValue evaluate(FCEvaluationContext&) override;
 	};
 
 	struct FCStringExprAST : public FCExprAST
@@ -134,7 +130,7 @@ namespace FCExprClass
 		~FCStringExprAST();
 		FCTypeDescribe type = FCMarks::FCTypeDescribe::StringExpr;
 		void info() override;
-		FCValue evaluate() override;
+		FCValue evaluate(FCEvaluationContext&) override;
 	};
 
 	/// FCVariableExprAST - Expression struct for referencing a variable, like "a".
@@ -147,7 +143,7 @@ namespace FCExprClass
 		~FCVariableExprAST();
 		FCTypeDescribe type = FCMarks::FCTypeDescribe::VariableExpr;
 		void info() override;
-		FCValue evaluate() override;
+		FCValue evaluate(FCEvaluationContext&) override;
 		void setValue(FCValue val) { m_exprVal = val; }
 	};
 
@@ -164,10 +160,11 @@ namespace FCExprClass
 		~FCBinaryExprAST();
 		FCTypeDescribe type = FCMarks::FCTypeDescribe::BinaryExpr;
 		void info() override;
-		FCValue evaluate() override;
+		FCValue evaluate(FCEvaluationContext&) override;
 
 	private:
-		FCValue assignExpression(FCValue lhs_eva, FCValue rhs_eva);
+		FCValue assignExpression(FCValue lhs_eva, FCValue rhs_eva,
+			FCEvaluationContext& context);
 	};
 
 	/// FCCallExprAST - Expression struct for function calls.
@@ -184,7 +181,7 @@ namespace FCExprClass
 		const std::vector<std::unique_ptr<FCExprAST>>& getArgs();
 		FCTypeDescribe type = FCMarks::FCTypeDescribe::CallExpr;
 		void info() override;
-		FCValue evaluate() override;
+		FCValue evaluate(FCEvaluationContext&) override;
 	};
 
 	struct FCPrototypeAST : public FCExprAST
@@ -199,7 +196,7 @@ namespace FCExprClass
 
 		void info() override;
 		::std::string getProtoName();
-		FCValue evaluate() override;
+		FCValue evaluate(FCEvaluationContext&) override;
 		std::vector<FCVariableExprAST>& getArgs() { return m_funcArgsVar; }
 	};
 
@@ -218,7 +215,29 @@ namespace FCExprClass
 		FCExprAST* getBody();
 		std::unique_ptr<FCPrototypeAST>& getProto() { return mup_funcProto; }
 		void info() override;
-		FCValue evaluate() override;
+		FCValue evaluate(FCEvaluationContext&) override;
+	};
+
+	class FCFunctionRegistry
+	{
+	public:
+		bool registerFunction(FCFunctionAST* function);
+		FCFunctionAST* findFunction(const std::string& name) const;
+		bool index(FCExprAST* root);
+		void clear();
+
+	private:
+		std::unordered_map<std::string, FCFunctionAST*> m_functions;
+	};
+
+	struct FCEvaluationContext
+	{
+		FCFunctionRegistry functions;
+		std::vector<Frame> callStack;
+
+		void pushFrame(const std::string& functionName);
+		void popFrame();
+		Frame& currentFrame();
 	};
 
 	class FCIfExprAST : public FCExprAST {
@@ -230,7 +249,7 @@ namespace FCExprClass
 		: Cond(std::move(Cond)), Then(std::move(Then)), Else(std::move(Else)) {}
 
 		void info() override;
-		FCValue evaluate() override;
+		FCValue evaluate(FCEvaluationContext&) override;
 	};
 
 	class FCForExprAST : public FCExprAST {
@@ -247,16 +266,16 @@ namespace FCExprClass
 		Step(std::move(step)), Body(std::move(body)) {}
 
 		void info() override;
-		FCValue evaluate() override;
+		FCValue evaluate(FCEvaluationContext&) override;
 	};
 
 	struct FCSeqExprAST : public FCExprAST {
 		std::vector<std::unique_ptr<FCExprAST>> exprs;
 		FCSeqExprAST(std::vector<std::unique_ptr<FCExprAST>> e) : exprs(std::move(e)) {}
-		FCValue evaluate() override {
+		FCValue evaluate(FCEvaluationContext& context) override {
 			FCValue last;
 			for (auto& e : exprs) {
-				last = e->evaluate();
+				last = e->evaluate(context);
 			}
 			return last;
 		}
@@ -280,7 +299,7 @@ namespace FCExprClass
 		}
 		~FCVarDeclExprAST() {}
 		void info() override;
-		FCValue evaluate() override;
+		FCValue evaluate(FCEvaluationContext&) override;
 	};
 
 	class FCProgramAST : public FCExprAST {
@@ -298,10 +317,13 @@ namespace FCExprClass
 			}
 		}
 		
-		FCValue evaluate() override {
+		FCValue evaluate(FCEvaluationContext& context) override {
+			context.functions.index(this);
 			FCValue lastResult;
 			for (auto& stmt : m_statements) {
-				lastResult = stmt->evaluate();
+				if (dynamic_cast<FCFunctionAST*>(stmt.get()) != nullptr)
+					continue;
+				lastResult = stmt->evaluate(context);
 			}
 			return lastResult;
 		}
