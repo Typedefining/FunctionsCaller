@@ -29,9 +29,17 @@ target_include_directories(FunctionsCore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 add_library(FunctionsEvaluator STATIC
 	evaluator.h
 	evaluator.cc
+	runtime.h
 )
 target_link_libraries(FunctionsEvaluator PUBLIC FunctionsCore)
 target_include_directories(FunctionsEvaluator PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+
+add_library(FunctionsSemantic STATIC
+	semantic.h
+	semantic.cc
+)
+target_link_libraries(FunctionsSemantic PUBLIC FunctionsCore)
+target_include_directories(FunctionsSemantic PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_library(FunctionsCodegen STATIC
 	codegen.h
@@ -46,7 +54,7 @@ add_library(FunctionsFrontend STATIC
 	scanner.h
 	scanner.cc
 )
-target_link_libraries(FunctionsFrontend PUBLIC FunctionsCore)
+target_link_libraries(FunctionsFrontend PUBLIC FunctionsCore FunctionsSemantic)
 target_include_directories(FunctionsFrontend PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_executable(${PROJECT_NAME} main.cc)

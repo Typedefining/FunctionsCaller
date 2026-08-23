@@ -51,7 +51,7 @@ llvm::Type* inferExprType(const FCExprAST* expression,
 
 	if (auto* number = dynamic_cast<const FCNumberExprAST*>(expression))
 	{
-		return number->m_exprVal.type == FCValueCategory::Floating
+		return number->isFloating()
 			? llvm::Type::getDoubleTy(context.llvmContext)
 			: integerType(context);
 	}
@@ -237,38 +237,42 @@ llvm::AllocaInst* FCCodegenContext::createEntryBlockAlloca(
 	return entryBuilder.CreateAlloca(type, nullptr, name);
 }
 
-llvm::Value* FCNumberExprAST::codegen(FCCodegenContext& context)
+llvm::Value* codegenNumber(const FCNumberExprAST* expression,
+	FCCodegenContext& context)
 {
-	if (m_exprVal.type == FCValueCategory::Floating)
+	if (expression->isFloating())
 		return llvm::ConstantFP::get(
-			llvm::Type::getDoubleTy(context.llvmContext), m_doubleVal);
+			llvm::Type::getDoubleTy(context.llvmContext), expression->m_doubleVal);
 	return llvm::ConstantInt::get(
-		llvm::Type::getInt32Ty(context.llvmContext), m_intVal, true);
+		llvm::Type::getInt32Ty(context.llvmContext), expression->m_intVal, true);
 }
 
-llvm::Value* FCStringExprAST::codegen(FCCodegenContext& context)
+llvm::Value* codegenString(const FCStringExprAST* expression,
+	FCCodegenContext& context)
 {
-	return context.builder.CreateGlobalStringPtr(m_stringVal, "str");
+	return context.builder.CreateGlobalStringPtr(expression->m_stringVal, "str");
 }
 
-llvm::Value* FCVariableExprAST::codegen(FCCodegenContext& context)
+llvm::Value* codegenVariable(const FCVariableExprAST* expression,
+	FCCodegenContext& context)
 {
-	if (decl == nullptr)
+	if (expression->decl == nullptr)
 		return logCodegenError("variable declaration is missing");
 
-	auto it = context.namedValues.find(decl.get());
+	auto it = context.namedValues.find(expression->decl.get());
 	if (it == context.namedValues.end())
 		return logCodegenError("variable is not allocated in the current function");
 
 	return context.builder.CreateLoad(
-		it->second->getAllocatedType(), it->second, decl->name);
+		it->second->getAllocatedType(), it->second, expression->decl->name);
 }
 
-llvm::Value* FCBinaryExprAST::codegen(FCCodegenContext& context)
+llvm::Value* codegenBinary(const FCBinaryExprAST* expression,
+	FCCodegenContext& context)
 {
-	if (m_Op == '=')
+	if (expression->getOperator() == '=')
 	{
-		auto* variable = dynamic_cast<FCVariableExprAST*>(mup_LHS.get());
+		auto* variable = dynamic_cast<const FCVariableExprAST*>(expression->getLHS());
 		if (variable == nullptr || variable->decl == nullptr)
 			return logCodegenError("left side of assignment must be a variable");
 
@@ -276,7 +280,7 @@ llvm::Value* FCBinaryExprAST::codegen(FCCodegenContext& context)
 		if (address == context.namedValues.end())
 			return logCodegenError("assigned variable is not allocated");
 
-		auto* rhs = mup_RHS->codegen(context);
+		auto* rhs = codegen(expression->getRHS(), context);
 		if (rhs == nullptr)
 			return nullptr;
 		rhs = castValue(context, rhs, address->second->getAllocatedType());
@@ -287,14 +291,14 @@ llvm::Value* FCBinaryExprAST::codegen(FCCodegenContext& context)
 		return rhs;
 	}
 
-	auto* lhs = mup_LHS->codegen(context);
-	auto* rhs = mup_RHS->codegen(context);
+	auto* lhs = codegen(expression->getLHS(), context);
+	auto* rhs = codegen(expression->getRHS(), context);
 	if (lhs == nullptr || rhs == nullptr)
 		return nullptr;
 
 	if (lhs->getType()->isPointerTy() || rhs->getType()->isPointerTy())
 	{
-		if (m_Op != '+' || !lhs->getType()->isPointerTy() ||
+		if (expression->getOperator() != '+' || !lhs->getType()->isPointerTy() ||
 			!rhs->getType()->isPointerTy())
 			return logCodegenError("only string concatenation is supported");
 
@@ -328,7 +332,7 @@ llvm::Value* FCBinaryExprAST::codegen(FCCodegenContext& context)
 		if (lhs == nullptr || rhs == nullptr)
 			return logCodegenError("numeric type conversion failed");
 
-		switch (m_Op)
+		switch (expression->getOperator())
 		{
 		case '+': return context.builder.CreateFAdd(lhs, rhs, "addtmp");
 		case '-': return context.builder.CreateFSub(lhs, rhs, "subtmp");
@@ -351,7 +355,7 @@ llvm::Value* FCBinaryExprAST::codegen(FCCodegenContext& context)
 			rhs = castValue(context, rhs, integerType(context));
 		}
 
-		switch (m_Op)
+		switch (expression->getOperator())
 		{
 		case '+': return context.builder.CreateAdd(lhs, rhs, "addtmp");
 		case '-': return context.builder.CreateSub(lhs, rhs, "subtmp");
@@ -370,26 +374,27 @@ llvm::Value* FCBinaryExprAST::codegen(FCCodegenContext& context)
 	return logCodegenError("unknown binary operator");
 }
 
-llvm::Value* FCCallExprAST::codegen(FCCodegenContext& context)
+llvm::Value* codegenCall(const FCCallExprAST* expression,
+	FCCodegenContext& context)
 {
-	auto* function = context.module->getFunction(m_callee);
+	auto* function = context.module->getFunction(expression->getName());
 	if (function == nullptr)
 	{
-		fprintf(stderr, "Codegen error: function not found: %s\n", m_callee.c_str());
+		fprintf(stderr, "Codegen error: function not found: %s\n", expression->getName().c_str());
 		return nullptr;
 	}
-	if (m_args.size() != function->arg_size())
+	if (expression->getArgs().size() != function->arg_size())
 	{
-		fprintf(stderr, "Codegen error: argument count mismatch in %s\n", m_callee.c_str());
+		fprintf(stderr, "Codegen error: argument count mismatch in %s\n", expression->getName().c_str());
 		return nullptr;
 	}
 
 	std::vector<llvm::Value*> arguments;
-	arguments.reserve(m_args.size());
+	arguments.reserve(expression->getArgs().size());
 	unsigned index = 0;
-	for (const auto& argument : m_args)
+	for (const auto& argument : expression->getArgs())
 	{
-		auto* value = argument->codegen(context);
+		auto* value = codegen(argument.get(), context);
 		if (value == nullptr)
 			return nullptr;
 		value = castValue(context, value, function->getArg(index)->getType());
@@ -402,15 +407,17 @@ llvm::Value* FCCallExprAST::codegen(FCCodegenContext& context)
 	return context.builder.CreateCall(function, arguments, "calltmp");
 }
 
-llvm::Value* FCPrototypeAST::codegen(FCCodegenContext& context)
+llvm::Value* codegenPrototype(const FCPrototypeAST* expression,
+	FCCodegenContext& context)
 {
 	return createFunctionDeclaration(
-		context, m_funcName, m_funcArgsVar, integerType(context));
+		context, expression->getProtoName(), expression->getArgs(), integerType(context));
 }
 
-llvm::Value* FCFunctionAST::codegen(FCCodegenContext& context)
+llvm::Value* codegenFunction(FCFunctionAST* expression,
+	FCCodegenContext& context)
 {
-	auto* function = declareFunction(this, context);
+	auto* function = declareFunction(expression, context);
 	if (function == nullptr)
 		return nullptr;
 	if (!function->empty())
@@ -428,7 +435,7 @@ llvm::Value* FCFunctionAST::codegen(FCCodegenContext& context)
 	unsigned index = 0;
 	for (auto& argument : function->args())
 	{
-		auto& parameter = getProto()->getArgs()[index];
+		auto& parameter = expression->getProto()->getArgs()[index];
 		if (parameter.decl == nullptr)
 		{
 			context.namedValues = std::move(oldNamedValues);
@@ -444,7 +451,8 @@ llvm::Value* FCFunctionAST::codegen(FCCodegenContext& context)
 		++index;
 	}
 
-	auto* body = mup_funcBody == nullptr ? nullptr : mup_funcBody->codegen(context);
+	auto* body = expression->getBody() == nullptr
+		? nullptr : codegen(expression->getBody(), context);
 	if (body == nullptr)
 	{
 		context.namedValues = std::move(oldNamedValues);
@@ -477,12 +485,13 @@ llvm::Value* FCFunctionAST::codegen(FCCodegenContext& context)
 	return function;
 }
 
-llvm::Value* FCIfExprAST::codegen(FCCodegenContext& context)
+llvm::Value* codegenIf(const FCIfExprAST* expression,
+	FCCodegenContext& context)
 {
 	if (context.currentFunction == nullptr)
 		return logCodegenError("if expression is outside a function");
 
-	auto* condition = createCondition(context, Cond->codegen(context));
+	auto* condition = createCondition(context, codegen(expression->getCondition(), context));
 	if (condition == nullptr)
 		return logCodegenError("if condition must be numeric");
 
@@ -493,7 +502,7 @@ llvm::Value* FCIfExprAST::codegen(FCCodegenContext& context)
 	context.builder.CreateCondBr(condition, thenBlock, elseBlock);
 
 	context.builder.SetInsertPoint(thenBlock);
-	auto* thenValue = Then->codegen(context);
+	auto* thenValue = codegen(expression->getThen(), context);
 	if (thenValue == nullptr)
 		return nullptr;
 	if (context.builder.GetInsertBlock()->getTerminator() == nullptr)
@@ -502,7 +511,7 @@ llvm::Value* FCIfExprAST::codegen(FCCodegenContext& context)
 
 	function->insert(function->end(), elseBlock);
 	context.builder.SetInsertPoint(elseBlock);
-	auto* elseValue = Else->codegen(context);
+	auto* elseValue = codegen(expression->getElse(), context);
 	if (elseValue == nullptr)
 		return nullptr;
 	if (context.builder.GetInsertBlock()->getTerminator() == nullptr)
@@ -514,8 +523,8 @@ llvm::Value* FCIfExprAST::codegen(FCCodegenContext& context)
 
 	std::unordered_set<const FCFunctionAST*> noFunctions;
 	// The branch type is inferred independently from the two branches.
-	auto* thenType = inferExprType(Then.get(), context, noFunctions);
-	auto* elseType = inferExprType(Else.get(), context, noFunctions);
+	auto* thenType = inferExprType(expression->getThen(), context, noFunctions);
+	auto* elseType = inferExprType(expression->getElse(), context, noFunctions);
 	auto* phiType = thenType->isDoubleTy() || elseType->isDoubleTy()
 		? llvm::Type::getDoubleTy(context.llvmContext) : thenType;
 	thenValue = castValue(context, thenValue, phiType);
@@ -529,19 +538,21 @@ llvm::Value* FCIfExprAST::codegen(FCCodegenContext& context)
 	return phi;
 }
 
-llvm::Value* FCForExprAST::codegen(FCCodegenContext& context)
+llvm::Value* codegenFor(const FCForExprAST* expression,
+	FCCodegenContext& context)
 {
-	if (context.currentFunction == nullptr || decl == nullptr)
+	if (context.currentFunction == nullptr || expression->getDecl() == nullptr)
 		return logCodegenError("for expression is outside a function");
 
-	auto oldDeclaration = context.namedValues.find(decl.get());
+	auto oldDeclaration = context.namedValues.find(expression->getDecl().get());
 	llvm::AllocaInst* oldAddress = oldDeclaration == context.namedValues.end()
 		? nullptr : oldDeclaration->second;
 	auto* variable = context.createEntryBlockAlloca(
-		context.currentFunction, decl->name, context.getType(decl->typeName));
-	context.namedValues[decl.get()] = variable;
+		context.currentFunction, expression->getDecl()->name,
+		context.getType(expression->getDecl()->typeName));
+	context.namedValues[expression->getDecl().get()] = variable;
 
-	auto* start = Start->codegen(context);
+	auto* start = codegen(expression->getStart(), context);
 	start = castValue(context, start, variable->getAllocatedType());
 	if (start == nullptr)
 		return logCodegenError("for start value type mismatch");
@@ -553,7 +564,7 @@ llvm::Value* FCForExprAST::codegen(FCCodegenContext& context)
 	context.builder.CreateBr(loopBlock);
 	context.builder.SetInsertPoint(loopBlock);
 
-	auto* end = End->codegen(context);
+	auto* end = codegen(expression->getEnd(), context);
 	auto* condition = createCondition(context, end);
 	if (condition == nullptr)
 		return logCodegenError("for end condition must be numeric");
@@ -562,20 +573,20 @@ llvm::Value* FCForExprAST::codegen(FCCodegenContext& context)
 
 	function->insert(function->end(), bodyBlock);
 	context.builder.SetInsertPoint(bodyBlock);
-	if (Body->codegen(context) == nullptr)
+	if (codegen(expression->getBody(), context) == nullptr)
 		return nullptr;
 
 	if (context.builder.GetInsertBlock()->getTerminator() == nullptr)
 	{
-		auto* step = Step == nullptr
+		auto* step = expression->getStep() == nullptr
 			? llvm::ConstantInt::get(integerType(context), 1)
-			: Step->codegen(context);
+			: codegen(expression->getStep(), context);
 		step = castValue(context, step, variable->getAllocatedType());
 		if (step == nullptr)
 			return logCodegenError("for step value type mismatch");
 
 		auto* current = context.builder.CreateLoad(
-			variable->getAllocatedType(), variable, decl->name);
+			variable->getAllocatedType(), variable, expression->getDecl()->name);
 		auto* next = variable->getAllocatedType()->isFloatingPointTy()
 			? context.builder.CreateFAdd(current, step, "nextvar")
 			: context.builder.CreateAdd(current, step, "nextvar");
@@ -587,36 +598,39 @@ llvm::Value* FCForExprAST::codegen(FCCodegenContext& context)
 	context.builder.SetInsertPoint(afterBlock);
 
 	if (oldDeclaration == context.namedValues.end())
-		context.namedValues.erase(decl.get());
+		context.namedValues.erase(expression->getDecl().get());
 	else
-		context.namedValues[decl.get()] = oldAddress;
+		context.namedValues[expression->getDecl().get()] = oldAddress;
 	return llvm::ConstantInt::get(integerType(context), 0);
 }
 
-llvm::Value* FCSeqExprAST::codegen(FCCodegenContext& context)
+llvm::Value* codegenSequence(const FCSeqExprAST* expression,
+	FCCodegenContext& context)
 {
 	llvm::Value* last = nullptr;
-	for (const auto& expression : exprs)
+	for (const auto& item : expression->getExpressions())
 	{
-		last = expression->codegen(context);
+		last = codegen(item.get(), context);
 		if (last == nullptr)
 			return nullptr;
 	}
 	return last;
 }
 
-llvm::Value* FCVarDeclExprAST::codegen(FCCodegenContext& context)
+llvm::Value* codegenDeclaration(const FCVarDeclExprAST* expression,
+	FCCodegenContext& context)
 {
-	if (context.currentFunction == nullptr || decl == nullptr)
+	if (context.currentFunction == nullptr || expression->decl == nullptr)
 		return logCodegenError("variable declaration is outside a function");
 
 	auto* variable = context.createEntryBlockAlloca(
-		context.currentFunction, decl->name, context.getType(decl->typeName));
-	context.namedValues[decl.get()] = variable;
+		context.currentFunction, expression->decl->name,
+		context.getType(expression->decl->typeName));
+	context.namedValues[expression->decl.get()] = variable;
 
-	llvm::Value* initialValue = initExpr == nullptr
+	llvm::Value* initialValue = expression->initExpr == nullptr
 		? llvm::Constant::getNullValue(variable->getAllocatedType())
-		: initExpr->codegen(context);
+		: codegen(expression->initExpr.get(), context);
 	initialValue = castValue(context, initialValue, variable->getAllocatedType());
 	if (initialValue == nullptr)
 		return logCodegenError("variable initializer type mismatch");
@@ -625,15 +639,16 @@ llvm::Value* FCVarDeclExprAST::codegen(FCCodegenContext& context)
 	return initialValue;
 }
 
-llvm::Value* FCProgramAST::codegen(FCCodegenContext& context)
+llvm::Value* codegenProgram(const FCProgramAST* expression,
+	FCCodegenContext& context)
 {
-	for (const auto& statement : m_statements)
+	for (const auto& statement : expression->getStatements())
 	{
 		if (auto* function = dynamic_cast<FCFunctionAST*>(statement.get()))
 			context.definitions[function->getProtoName()] = function;
 	}
 
-	for (const auto& statement : m_statements)
+	for (const auto& statement : expression->getStatements())
 	{
 		if (auto* function = dynamic_cast<FCFunctionAST*>(statement.get()))
 		{
@@ -642,23 +657,24 @@ llvm::Value* FCProgramAST::codegen(FCCodegenContext& context)
 		}
 	}
 
-	for (const auto& statement : m_statements)
+	for (const auto& statement : expression->getStatements())
 	{
 		if (auto* function = dynamic_cast<FCFunctionAST*>(statement.get()))
 		{
-			if (function->codegen(context) == nullptr)
+			if (codegen(function, context) == nullptr)
 				return nullptr;
 		}
 	}
 
 	std::vector<const FCExprAST*> runtimeStatements;
-	for (const auto& statement : m_statements)
+	for (const auto& statement : expression->getStatements())
 	{
 		if (dynamic_cast<FCFunctionAST*>(statement.get()) == nullptr)
 			runtimeStatements.push_back(statement.get());
 	}
 	if (runtimeStatements.empty())
-		return m_statements.empty() ? nullptr : m_statements.back()->codegen(context);
+		return expression->getStatements().empty()
+			? nullptr : codegen(expression->getStatements().back().get(), context);
 
 	auto* mainFunction = context.module->getFunction("__fc_main");
 	if (mainFunction == nullptr)
@@ -684,7 +700,7 @@ llvm::Value* FCProgramAST::codegen(FCCodegenContext& context)
 	llvm::Value* last = nullptr;
 	for (const auto* statement : runtimeStatements)
 	{
-		last = const_cast<FCExprAST*>(statement)->codegen(context);
+		last = codegen(const_cast<FCExprAST*>(statement), context);
 		if (last == nullptr)
 		{
 			context.namedValues = std::move(oldNamedValues);
@@ -711,3 +727,40 @@ llvm::Value* FCProgramAST::codegen(FCCodegenContext& context)
 	return invalid ? nullptr : mainFunction;
 }
 
+llvm::Value* FCExprClass::codegen(FCExprAST* expression,
+	FCCodegenContext& context)
+{
+	if (expression == nullptr)
+		return nullptr;
+	if (auto* number = dynamic_cast<FCNumberExprAST*>(expression))
+		return codegenNumber(number, context);
+	if (auto* string = dynamic_cast<FCStringExprAST*>(expression))
+		return codegenString(string, context);
+	if (auto* variable = dynamic_cast<FCVariableExprAST*>(expression))
+		return codegenVariable(variable, context);
+	if (auto* binary = dynamic_cast<FCBinaryExprAST*>(expression))
+		return codegenBinary(binary, context);
+	if (auto* call = dynamic_cast<FCCallExprAST*>(expression))
+		return codegenCall(call, context);
+	if (auto* prototype = dynamic_cast<FCPrototypeAST*>(expression))
+		return codegenPrototype(prototype, context);
+	if (auto* function = dynamic_cast<FCFunctionAST*>(expression))
+		return codegenFunction(function, context);
+	if (auto* conditional = dynamic_cast<FCIfExprAST*>(expression))
+		return codegenIf(conditional, context);
+	if (auto* loop = dynamic_cast<FCForExprAST*>(expression))
+		return codegenFor(loop, context);
+	if (auto* sequence = dynamic_cast<FCSeqExprAST*>(expression))
+		return codegenSequence(sequence, context);
+	if (auto* declaration = dynamic_cast<FCVarDeclExprAST*>(expression))
+		return codegenDeclaration(declaration, context);
+	if (auto* program = dynamic_cast<FCProgramAST*>(expression))
+		return codegenProgram(program, context);
+	return nullptr;
+}
+
+llvm::Value* FCExprClass::codegen(const FCExprAST* expression,
+	FCCodegenContext& context)
+{
+	return FCExprClass::codegen(const_cast<FCExprAST*>(expression), context);
+}

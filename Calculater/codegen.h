@@ -1,5 +1,7 @@
 #pragma once
 
+#include <map>
+
 #include "token.h"
 
 #include "llvm/IR/BasicBlock.h"
@@ -15,6 +17,9 @@
 
 namespace FCExprClass
 {
+	llvm::Value* codegen(FCExprAST* expression, struct FCCodegenContext& context);
+	llvm::Value* codegen(const FCExprAST* expression, struct FCCodegenContext& context);
+
 	struct FCCodegenContext
 	{
 		llvm::LLVMContext llvmContext;

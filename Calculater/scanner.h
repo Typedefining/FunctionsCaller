@@ -3,7 +3,7 @@
 #include <stack>
 
 
-#include "token.h"
+#include "semantic.h"
 
 class FCScanner
 {
@@ -12,8 +12,12 @@ public:
 	~FCScanner();
 	void resetState();
 	::std::unique_ptr<FCExprClass::FCExprAST> analysis(const ::std::string &);
+	FCMarks::FCSemanticContext& semanticContext() { return m_semanticContext; }
+	const FCMarks::FCSemanticContext& semanticContext() const { return m_semanticContext; }
 
 private:
+	FCMarks::FCSemanticContext m_semanticContext;
+
 	// 当前处理的标识
 	int m_curTok;
 	// 最新待处理字符

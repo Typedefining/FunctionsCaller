@@ -29,6 +29,7 @@ FCScanner::~FCScanner()
 // def aaa(a:int,b:double) a+b*2.0;
 ::std::unique_ptr<FCExprAST> FCScanner::analysis(const ::std::string &inputStr)
 {
+	resetState();
 	m_inputsBuffer = inputStr;
 	m_idx = m_inputsBuffer.begin();
 
@@ -79,6 +80,7 @@ FCScanner::~FCScanner()
 void FCScanner::resetState()
 {
 	// 解析过程出错时，重置扫描器状态
+	m_semanticContext.reset();
 	m_curTok = 0;
 	m_lastChar = ' ';
 	m_numIntgerVal = 0;
@@ -217,7 +219,8 @@ int FCScanner::getTokPrecedence()
 		return -1;
 
 	// 是否为二元操作
-	int TokPrec = binopPrecedence[m_curTok];
+	int TokPrec = m_semanticContext.getOperatorPrecedence(
+		static_cast<char>(m_curTok));
 	if (TokPrec <= 0)
 		return -1;
 	return TokPrec;
@@ -344,7 +347,7 @@ int FCScanner::getTokPrecedence()
 		{
 			return nullptr; // 在顶层使用变量，当前语法不允许
 		}
-		auto decl = lookupVariableDecl(m_currentFunc, IdName);
+		auto decl = m_semanticContext.lookupVariableDecl(m_currentFunc, IdName);
 		if (!decl)
 		{
 			// 找不到则解析错误（静态检查）
@@ -411,14 +414,14 @@ int FCScanner::getTokPrecedence()
 		return logErrorP("Expected ')' in prototype");
 	getNextToken(); // 拿掉).
 
-	pushScopeForFunc(funName);
+	m_semanticContext.pushScopeForFunc(funName);
 
 	std::vector<FCVariableExprAST> ArgNames;
 	for (auto &arg : Args)
 	{
 		auto decl = std::make_shared<VarDecl>(std::get<0>(arg), std::get<1>(arg));
-		insertVariableInCurrentScope(funName, std::get<0>(arg), decl);
-		g_funcDeclList[funName].push_back(decl);
+		m_semanticContext.insertVariableInCurrentScope(
+			funName, std::get<0>(arg), decl);
 		ArgNames.push_back(FCVariableExprAST(decl));
 	}
 	return std::make_unique<FCPrototypeAST>(funName, std::move(ArgNames));
@@ -437,19 +440,17 @@ int FCScanner::getTokPrecedence()
 	{
 		// 在函数解析完成后，为该函数的所有 VarDecl 分配连续的 slot（包括形参 & 局部）
 		int slot = 0;
-		auto &decls = g_funcDeclList[m_currentFunc];
+		auto& decls = m_semanticContext.functionDeclarations(m_currentFunc);
 		for (auto &d : decls)
 		{
 			if (d->slot < 0)
 				d->slot = slot++;
 		}
-		g_funcLocalCount[m_currentFunc] = slot;
-
-		popScopeForFunc(m_currentFunc); // 如果 parsePrototype 推入了栈并且不需要保留，则 pop
+		m_semanticContext.popScopeForFunc(m_currentFunc);
 
 		// 重置当前函数名
 		m_currentFunc = "";
-		return std::make_unique<FCFunctionAST>(std::move(Proto), std::move(E));
+		return std::make_unique<FCFunctionAST>(std::move(Proto), std::move(E), slot);
 	}
 
 	return nullptr;
@@ -459,8 +460,8 @@ int FCScanner::getTokPrecedence()
 {
 	getNextToken(); // eat the if.
 
-	pushScopeForFunc(m_currentFunc);
-	popScopeForFunc(m_currentFunc);
+	m_semanticContext.pushScopeForFunc(m_currentFunc);
+	m_semanticContext.popScopeForFunc(m_currentFunc);
 	// condition.
 	auto Cond = parseExpression();
 	if (!Cond)
@@ -470,9 +471,9 @@ int FCScanner::getTokPrecedence()
 		return logError("expected then");
 	getNextToken();
 
-	pushScopeForFunc(m_currentFunc);
+	m_semanticContext.pushScopeForFunc(m_currentFunc);
 	auto Then = parseSeqExpr();
-	popScopeForFunc(m_currentFunc);
+	m_semanticContext.popScopeForFunc(m_currentFunc);
 	if (!Then)
 		return nullptr;
 
@@ -481,9 +482,9 @@ int FCScanner::getTokPrecedence()
 
 	getNextToken();
 
-	pushScopeForFunc(m_currentFunc);
+	m_semanticContext.pushScopeForFunc(m_currentFunc);
 	auto Else = parseSeqExpr();
-	popScopeForFunc(m_currentFunc);
+	m_semanticContext.popScopeForFunc(m_currentFunc);
 	if (!Else)
 		return nullptr;
 
@@ -502,10 +503,10 @@ int FCScanner::getTokPrecedence()
 	getNextToken(); // 吃掉 identifier
 
 	// 在解析期引入新作用域并声明循环变量
-	pushScopeForFunc(m_currentFunc);
+	m_semanticContext.pushScopeForFunc(m_currentFunc);
 	// 默认使用 double 类型（或根据你语法读取类型信息）
 	VarDeclPtr decl = std::make_shared<VarDecl>(VarName, "int");
-	insertVariableInCurrentScope(m_currentFunc, VarName, decl);
+	m_semanticContext.insertVariableInCurrentScope(m_currentFunc, VarName, decl);
 
 	if (m_curTok != '=')
 		return logError("expected '=' after for variable");
@@ -538,7 +539,7 @@ int FCScanner::getTokPrecedence()
 
 	auto Body = parseSeqExpr();
 
-	popScopeForFunc(m_currentFunc);
+	m_semanticContext.popScopeForFunc(m_currentFunc);
 
 	// 注意：这里返回的 ForExprAST 应该包含 decl 或者 Body 已经通过 VarExpr 绑定了 decl
 	// 下面假设存在一个 FCForExprAST 构造函数接收 decl
@@ -583,12 +584,12 @@ std::unique_ptr<FCExprAST> FCScanner::ParseVarExpr()
 	{
 		return logError("var declaration outside function not allowed");
 	}
-	if (lookupVariableDecl(m_currentFunc, varName))
+	if (m_semanticContext.lookupVariableDecl(m_currentFunc, varName))
 	{
 		return logError("variable redeclaration");
 	}
 	auto decl = std::make_shared<VarDecl>(varName, typeName);
-	insertVariableInCurrentScope(m_currentFunc, varName, decl);
+	m_semanticContext.insertVariableInCurrentScope(m_currentFunc, varName, decl);
 
 	return std::make_unique<FCVarDeclExprAST>(decl, std::move(init));
 }

@@ -18,7 +18,7 @@ int main()
 	}
 
 	FCExprClass::FCEvaluationContext context;
-	const auto result = program->evaluate(context);
+	const auto result = FCExprClass::evaluate(program.get(), context);
 	if (result.type != FCMarks::FCValueCategory::Integer || result.evaluteVal.intVal != 5)
 	{
 		std::cerr << "unexpected result from function call\n";
@@ -32,7 +32,7 @@ int main()
 	}
 
 	FCExprClass::FCCodegenContext codegenContext("FunctionCallASTTest");
-	if (program->codegen(codegenContext) == nullptr)
+	if (FCExprClass::codegen(program.get(), codegenContext) == nullptr)
 	{
 		std::cerr << "failed to generate LLVM IR\n";
 		return 4;
@@ -60,7 +60,7 @@ int main()
 		return 7;
 	}
 	FCExprClass::FCCodegenContext stringCodegen("StringCodegenTest");
-	if (stringFunction->codegen(stringCodegen) == nullptr ||
+	if (FCExprClass::codegen(stringFunction.get(), stringCodegen) == nullptr ||
 		llvm::verifyModule(*stringCodegen.module, &llvm::errs()) ||
 		stringCodegen.module->getFunction("concat") == nullptr)
 	{
@@ -68,6 +68,29 @@ int main()
 		return 8;
 	}
 	stringCodegen.module->print(llvm::outs(), nullptr);
+
+	FCScanner reusableScanner;
+	if (!reusableScanner.analysis("def first(a:int) a"))
+	{
+		std::cerr << "failed to parse first reusable scanner input\n";
+		return 9;
+	}
+	if (reusableScanner.semanticContext().functionDeclarations("first").empty())
+	{
+		std::cerr << "semantic context did not record declarations\n";
+		return 10;
+	}
+	if (!reusableScanner.analysis("def second(b:int) b"))
+	{
+		std::cerr << "failed to parse second reusable scanner input\n";
+		return 11;
+	}
+	if (!reusableScanner.semanticContext().functionDeclarations("first").empty() ||
+		reusableScanner.semanticContext().functionDeclarations("second").empty())
+	{
+		std::cerr << "semantic context was not reset between inputs\n";
+		return 12;
+	}
 
 	return 0;
 }

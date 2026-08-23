@@ -1,9 +1,13 @@
 #pragma once
 
 #include "token.h"
+#include "runtime.h"
 
 namespace FCExprClass
 {
+	FCValue evaluate(FCExprAST* expression, struct FCEvaluationContext& context);
+	FCValue evaluate(const FCExprAST* expression, struct FCEvaluationContext& context);
+
 	class FCFunctionRegistry
 	{
 	public:
