@@ -41,6 +41,7 @@ namespace FCMarks
 		std::string name;
 		std::string typeName; // "int"/"double"/"string"
 		int slot = -1; // -1 表示尚未分配
+		bool isGlobal = false;
 		VarDecl(const std::string &n, const std::string &t) : name(n), typeName(t) {}
 	};
 	using VarDeclPtr = std::shared_ptr<VarDecl>;

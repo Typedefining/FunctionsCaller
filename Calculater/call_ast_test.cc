@@ -69,6 +69,78 @@ int main()
 	}
 	stringCodegen.module->print(llvm::outs(), nullptr);
 
+	FCScanner standaloneGlobalScanner;
+	auto standaloneGlobal = standaloneGlobalScanner.analysis("var only:int = 7");
+	FCExprClass::FCEvaluationContext standaloneContext;
+	const auto standaloneResult = standaloneGlobal == nullptr
+		? FCMarks::FCValue{}
+		: FCExprClass::evaluate(standaloneGlobal.get(), standaloneContext);
+	FCExprClass::FCCodegenContext standaloneCodegen("StandaloneGlobalTest");
+	if (standaloneGlobal == nullptr ||
+		standaloneResult.type != FCMarks::FCValueCategory::Integer ||
+		standaloneResult.evaluteVal.intVal != 7 ||
+		FCExprClass::codegen(standaloneGlobal.get(), standaloneCodegen) == nullptr ||
+		llvm::verifyModule(*standaloneCodegen.module, &llvm::errs()) ||
+		standaloneCodegen.module->getGlobalVariable("only", true) == nullptr ||
+		standaloneCodegen.module->getFunction("__fc_main") == nullptr)
+	{
+		std::cerr << "standalone top-level variable failed\n";
+		return 13;
+	}
+
+	FCScanner globalScanner;
+	auto globalProgram = globalScanner.analysis(
+		"var counter:int = 10;"
+		"def read() counter;"
+		"def increment() counter = counter + 1");
+	if (!globalProgram || globalScanner.semanticContext().globalDeclarations().size() != 1)
+	{
+		std::cerr << "failed to parse top-level variable\n";
+		return 14;
+	}
+	FCExprClass::FCEvaluationContext globalContext;
+	FCExprClass::evaluate(globalProgram.get(), globalContext);
+	FCExprClass::FCCallExprAST incrementCall("increment", {});
+	FCExprClass::evaluate(&incrementCall, globalContext);
+	FCExprClass::FCCallExprAST readCall("read", {});
+	const auto globalResult = FCExprClass::evaluate(&readCall, globalContext);
+	if (globalResult.type != FCMarks::FCValueCategory::Integer ||
+		globalResult.evaluteVal.intVal != 11)
+	{
+		std::cerr << "top-level variable evaluation failed\n";
+		return 15;
+	}
+	FCExprClass::FCCodegenContext globalCodegen("GlobalVariableTest");
+	const auto globalCodegenResult = FCExprClass::codegen(globalProgram.get(), globalCodegen);
+	const auto globalModuleInvalid = llvm::verifyModule(*globalCodegen.module, &llvm::errs());
+	if (globalCodegenResult == nullptr || globalModuleInvalid ||
+		globalCodegen.module->getGlobalVariable("counter", true) == nullptr ||
+		globalCodegen.module->getFunction("read") == nullptr ||
+		globalCodegen.module->getFunction("increment") == nullptr ||
+		globalCodegen.module->getFunction("__fc_main") == nullptr)
+	{
+		std::cerr << "top-level variable LLVM codegen failed\n";
+		return 16;
+	}
+
+	FCScanner shadowScanner;
+	auto shadowProgram = shadowScanner.analysis(
+		"var value:int = 10;"
+		"def local() var value:int = 3; value");
+	FCExprClass::FCEvaluationContext shadowContext;
+	if (shadowProgram != nullptr)
+		FCExprClass::evaluate(shadowProgram.get(), shadowContext);
+	FCExprClass::FCCallExprAST localCall("local", {});
+	const auto shadowResult = shadowProgram == nullptr
+		? FCMarks::FCValue{}
+		: FCExprClass::evaluate(&localCall, shadowContext);
+	if (shadowProgram == nullptr || shadowResult.type != FCMarks::FCValueCategory::Integer ||
+		shadowResult.evaluteVal.intVal != 3)
+	{
+		std::cerr << "local variable did not shadow global variable\n";
+		return 17;
+	}
+
 	FCScanner reusableScanner;
 	if (!reusableScanner.analysis("def first(a:int) a"))
 	{

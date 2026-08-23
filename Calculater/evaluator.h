@@ -23,6 +23,7 @@ namespace FCExprClass
 	struct FCEvaluationContext
 	{
 		FCFunctionRegistry functions;
+		Frame globalFrame{"<global>", {}};
 		std::vector<Frame> callStack;
 
 		void pushFrame(const std::string& functionName);

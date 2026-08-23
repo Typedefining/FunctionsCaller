@@ -8,6 +8,7 @@
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/LLVMContext.h"
@@ -26,6 +27,7 @@ namespace FCExprClass
 		llvm::IRBuilder<> builder;
 		std::unique_ptr<llvm::Module> module;
 		std::map<const VarDecl*, llvm::AllocaInst*> namedValues;
+		std::map<const VarDecl*, llvm::GlobalVariable*> globalValues;
 		std::unordered_map<std::string, FCFunctionAST*> definitions;
 		llvm::Function* currentFunction = nullptr;
 

@@ -31,6 +31,27 @@ FCValue makeStringValue(const std::string& text)
 FCValue evaluateExpression(const FCExprAST* expression,
 	FCEvaluationContext& context);
 
+Frame* frameForDeclaration(const VarDecl* declaration,
+	FCEvaluationContext& context)
+{
+	if (declaration == nullptr)
+		return nullptr;
+	if (declaration->isGlobal)
+	{
+		if (declaration->slot < 0)
+			return nullptr;
+		if (declaration->slot >= static_cast<int>(context.globalFrame.locals.size()))
+			context.globalFrame.locals.resize(declaration->slot + 1);
+		return &context.globalFrame;
+	}
+	if (context.callStack.empty() || declaration->slot < 0)
+		return nullptr;
+	Frame& frame = context.currentFrame();
+	if (declaration->slot >= static_cast<int>(frame.locals.size()))
+		return nullptr;
+	return &frame;
+}
+
 FCValue evaluateBinary(const FCBinaryExprAST* expression,
 	FCEvaluationContext& context)
 {
@@ -49,16 +70,15 @@ FCValue evaluateBinary(const FCBinaryExprAST* expression,
 		if (value.type == FCValueCategory::Dangle)
 			return value;
 
-		Frame& frame = context.currentFrame();
-		const int slot = variable->decl->slot;
-		if (slot < 0 || slot >= static_cast<int>(frame.locals.size()))
+		Frame* frame = frameForDeclaration(variable->decl.get(), context);
+		if (frame == nullptr)
 		{
 			std::fprintf(stderr, "LogError: Invalid slot for %s\n",
 				variable->decl->name.c_str());
 			return makeDangleValue();
 		}
 
-		frame.locals[slot] = value;
+		frame->locals[variable->decl->slot] = value;
 		return value;
 	}
 
@@ -185,12 +205,10 @@ FCValue evaluateExpression(const FCExprAST* expression,
 
 	if (const auto* variable = dynamic_cast<const FCVariableExprAST*>(expression))
 	{
-		if (variable->decl == nullptr || variable->decl->slot < 0 || context.callStack.empty())
+		Frame* frame = frameForDeclaration(variable->decl.get(), context);
+		if (frame == nullptr)
 			return makeDangleValue();
-		const auto& frame = context.currentFrame();
-		if (variable->decl->slot >= static_cast<int>(frame.locals.size()))
-			return makeDangleValue();
-		return frame.locals[variable->decl->slot];
+		return frame->locals[variable->decl->slot];
 	}
 
 	if (const auto* binary = dynamic_cast<const FCBinaryExprAST*>(expression))
@@ -262,16 +280,15 @@ FCValue evaluateExpression(const FCExprAST* expression,
 
 	if (const auto* declaration = dynamic_cast<const FCVarDeclExprAST*>(expression))
 	{
-		if (declaration->decl == nullptr || declaration->initExpr == nullptr || context.callStack.empty())
+		if (declaration->decl == nullptr || declaration->initExpr == nullptr)
 			return makeDangleValue();
 		const auto value = evaluateExpression(declaration->initExpr.get(), context);
 		if (value.type == FCValueCategory::Dangle)
 			return value;
-		Frame& frame = context.currentFrame();
-		const int slot = declaration->decl->slot;
-		if (slot < 0 || slot >= static_cast<int>(frame.locals.size()))
+		Frame* frame = frameForDeclaration(declaration->decl.get(), context);
+		if (frame == nullptr)
 			return makeDangleValue();
-		frame.locals[slot] = value;
+		frame->locals[declaration->decl->slot] = value;
 		return value;
 	}
 

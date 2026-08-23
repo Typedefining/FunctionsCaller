@@ -324,15 +324,9 @@ int FCScanner::getTokPrecedence()
 	// 如果后面不是 '(', 那就是变量引用（静态绑定：在 parse 时查找 VarDecl 并把 decl 绑入 AST）
 	if (m_curTok != '(')
 	{
-		if (m_currentFunc.empty())
-		{
-			return nullptr;
-		}
 		auto decl = m_semanticContext.lookupVariableDecl(m_currentFunc, IdName);
 		if (!decl)
-		{
-			return nullptr;
-		}
+			return logError("unknown variable");
 		return std::make_unique<FCVariableExprAST>(decl);
 	}
 
@@ -571,12 +565,16 @@ std::unique_ptr<FCExprAST> FCScanner::ParseVarExpr()
 	if (!init)
 		return nullptr;
 
-	// 静态插入作用域
+	// 顶层声明进入程序全局作用域；函数内声明进入当前函数作用域。
 	if (m_currentFunc.empty())
 	{
-		return logError("var declaration outside function not allowed");
+		if (m_semanticContext.lookupGlobalVariable(varName))
+			return logError("global variable redeclaration");
+		auto decl = std::make_shared<VarDecl>(varName, typeName);
+		m_semanticContext.insertGlobalVariable(varName, decl);
+		return std::make_unique<FCVarDeclExprAST>(decl, std::move(init));
 	}
-	if (m_semanticContext.lookupVariableDecl(m_currentFunc, varName))
+	if (m_semanticContext.lookupVariableInCurrentScope(m_currentFunc, varName))
 	{
 		return logError("variable redeclaration");
 	}
