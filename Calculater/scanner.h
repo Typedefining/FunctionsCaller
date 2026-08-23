@@ -1,18 +1,13 @@
 ﻿#pragma once
 
-#include <stack>
-
-
 #include "semantic.h"
 
 class FCScanner
 {
 public:
 	FCScanner();
-	~FCScanner();
 	void resetState();
 	::std::unique_ptr<FCExprClass::FCExprAST> analysis(const ::std::string &);
-	FCMarks::FCSemanticContext& semanticContext() { return m_semanticContext; }
 	const FCMarks::FCSemanticContext& semanticContext() const { return m_semanticContext; }
 
 private:
@@ -60,11 +55,7 @@ private:
 	::std::unique_ptr<FCExprClass::FCPrototypeAST> parsePrototype();
 	::std::unique_ptr<FCExprClass::FCFunctionAST> parseDefinition();
 	::std::unique_ptr<FCExprClass::FCExprAST> parseSeqExpr();
-	::std::unique_ptr<FCExprClass::FCExprAST> parseTopLevelExpr();
 	::std::unique_ptr<FCExprClass::FCExprAST> ParseIfExpr();
 	::std::unique_ptr<FCExprClass::FCExprAST> ParseForExpr();
 	::std::unique_ptr<FCExprClass::FCExprAST> ParseVarExpr();
-
-	::std::unique_ptr<FCExprClass::FCExprAST> handledDefinition();
-	::std::unique_ptr<FCExprClass::FCExprAST> handledTopLevelExpression();
 };

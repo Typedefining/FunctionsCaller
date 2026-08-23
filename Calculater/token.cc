@@ -11,9 +11,6 @@ FCNumberExprAST::FCNumberExprAST(double val)
 	: m_intVal(0), m_doubleVal(val), m_isFloating(true)
 {
 }
-FCNumberExprAST::~FCNumberExprAST()
-{
-}
 void FCNumberExprAST::info()
 {
 	if (!m_isFloating)
@@ -26,19 +23,12 @@ void FCNumberExprAST::info()
 FCStringExprAST::FCStringExprAST(std::string val) : m_stringVal(val)
 {
 }
-FCStringExprAST::~FCStringExprAST()
-{
-}
 void FCStringExprAST::info()
 {
 	::std::cout << "FCStringExprAST Val: " << m_stringVal << ::std::endl;
 }
 
 FCVariableExprAST::FCVariableExprAST(VarDeclPtr d) : decl(std::move(d))
-{
-}
-
-FCVariableExprAST::~FCVariableExprAST()
 {
 }
 
@@ -53,10 +43,6 @@ FCBinaryExprAST::FCBinaryExprAST(char op,
 	: m_Op(op), mup_LHS(::std::move(lhs)), mup_RHS(::std::move(rhs))
 {
 }
-FCBinaryExprAST::~FCBinaryExprAST()
-{
-}
-
 void FCBinaryExprAST::info()
 {
 	::std::cout << "FCBinaryExprAST Op: " << m_Op << " LHS: ";
@@ -70,10 +56,6 @@ FCCallExprAST::FCCallExprAST(const std::string& callee,
 	: m_callee(callee), m_args(std::move(args))
 {
 }
-FCCallExprAST::~FCCallExprAST()
-{
-}
-
 void FCCallExprAST::info()
 {
 	::std::cout << "FCCallExprAST Callee: " << m_callee;
@@ -84,17 +66,9 @@ void FCCallExprAST::info()
 		i->info();
 	}
 }
-const ::std::string& FCCallExprAST::getName()
-{
-	return m_callee;
-}
 const ::std::string& FCCallExprAST::getName() const
 {
 	return m_callee;
-}
-const std::vector<std::unique_ptr<FCExprAST>>& FCCallExprAST::getArgs()
-{
-	return m_args;
 }
 const std::vector<std::unique_ptr<FCExprAST>>& FCCallExprAST::getArgs() const
 {
@@ -105,8 +79,6 @@ FCPrototypeAST::FCPrototypeAST(const std::string& name, std::vector<FCVariableEx
 	: m_funcName(name), m_funcArgsVar(std::move(args))
 {
 }
-FCPrototypeAST::~FCPrototypeAST() {}
-
 void FCPrototypeAST::info()
 {
 	::std::cout << "FCPrototypeAST Name: " << m_funcName;
@@ -117,10 +89,6 @@ void FCPrototypeAST::info()
 	}
 }
 
-::std::string FCPrototypeAST::getProtoName()
-{
-	return m_funcName;
-}
 ::std::string FCPrototypeAST::getProtoName() const
 {
 	return m_funcName;
@@ -131,7 +99,11 @@ FCFunctionAST::FCFunctionAST(std::unique_ptr<FCPrototypeAST> proto,
 	  m_localCount(localCount)
 {
 }
-FCFunctionAST::~FCFunctionAST() {}
+
+::std::string FCFunctionAST::getProtoName() const
+{
+	return mup_funcProto->getProtoName();
+}
 
 void FCFunctionAST::info()
 {
@@ -141,19 +113,10 @@ void FCFunctionAST::info()
 	mup_funcBody->info();
 }
 
-FCExprAST* FCFunctionAST::getBody()
-{
-	return mup_funcBody.get();
-}
 const FCExprAST* FCFunctionAST::getBody() const
 {
 	return mup_funcBody.get();
 }
-::std::string FCFunctionAST::getProtoName()
-{
-	return mup_funcProto->getProtoName();
-}
-
 void FCIfExprAST::info()
 {
 	::std::cout << "FCIfExprAST Cond: ";

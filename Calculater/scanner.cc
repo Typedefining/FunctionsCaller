@@ -1,8 +1,5 @@
 ﻿#include <cctype>
 #include <cstdlib>
-#include <functional>
-#include <map>
-#include <iostream>
 #include "scanner.h"
 
 using namespace FCExprClass;
@@ -22,10 +19,6 @@ FCScanner::FCScanner()
 	m_inputsBuffer = "";
 	m_idx = m_identifierStr.begin();
 }
-FCScanner::~FCScanner()
-{
-}
-
 // def aaa(a:int,b:double) a+b*2.0;
 ::std::unique_ptr<FCExprAST> FCScanner::analysis(const ::std::string &inputStr)
 {
@@ -101,7 +94,6 @@ int FCScanner::getNextToken()
 }
 int FCScanner::getTok()
 {
-	using namespace FCMarks;
 	auto readChar = [this]() -> int
 	{
 		if (m_idx == m_inputsBuffer.end())
@@ -214,7 +206,6 @@ std::unique_ptr<FCPrototypeAST> FCScanner::logErrorP(const char *Str)
 
 int FCScanner::getTokPrecedence()
 {
-	using namespace FCMarks;
 	if (!isascii(m_curTok))
 		return -1;
 
@@ -228,33 +219,24 @@ int FCScanner::getTokPrecedence()
 
 ::std::unique_ptr<FCExprAST> FCScanner::parsePrimary()
 {
-	using namespace FCMarks;
 	switch (m_curTok)
 	{
 	default:
 		return logError("unknown FCToken when expecting an expression");
-		break;
 	case static_cast<int>(FCToken::tok_identifier):
 		return parseIdentifierExpr();
-		break;
 	case static_cast<int>(FCToken::tok_number):
 		return parseNumberExpr();
-		break;
 	case static_cast<int>(FCToken::tok_string):
 		return parseStringExpr();
-		break;
 	case '(':
 		return parseParenExpr();
-		break;
 	case static_cast<int>(FCToken::tok_if):
 		return ParseIfExpr();
-		break;
 	case static_cast<int>(FCToken::tok_for):
 		return ParseForExpr();
-		break;
 	case static_cast<int>(FCToken::tok_var):
 		return ParseVarExpr();
-		break;
 	}
 }
 
@@ -307,20 +289,20 @@ int FCScanner::getTokPrecedence()
 		m_curDouble = false;
 		auto Result = ::std::make_unique<FCNumberExprAST>(m_numFloatVal);
 		getNextToken();
-		return ::std::move(Result);
+		return Result;
 	}
 	else
 	{
 		auto Result = ::std::make_unique<FCNumberExprAST>(m_numIntgerVal);
 		getNextToken();
-		return ::std::move(Result);
+		return Result;
 	}
 }
 ::std::unique_ptr<FCExprAST> FCScanner::parseStringExpr()
 {
 	auto Result = ::std::make_unique<FCStringExprAST>(m_stringLiteral);
 	getNextToken();
-	return ::std::move(Result);
+	return Result;
 }
 
 ::std::unique_ptr<FCExprAST> FCScanner::parseParenExpr()
@@ -613,8 +595,6 @@ std::unique_ptr<FCExprAST> FCScanner::ParseVarExpr()
 			m_curTok == static_cast<int>(FCToken::tok_end))
 			break;
 		auto next = parseExpression();
-		if (m_curTok > static_cast<int>(FCToken::tok_end) && m_curTok <= static_cast<int>(FCToken::tok_begin))
-			return nullptr;
 		if (!next)
 			break;
 		exprList.push_back(std::move(next));
@@ -625,33 +605,4 @@ std::unique_ptr<FCExprAST> FCScanner::ParseVarExpr()
 		return std::move(exprList[0]);
 
 	return std::make_unique<FCSeqExprAST>(std::move(exprList));
-}
-
-::std::unique_ptr<FCExprAST> FCScanner::parseTopLevelExpr()
-{
-	if (auto E = parseSeqExpr())
-	{
-		// 有名函数亦被封装为匿名函数调用
-		auto Proto = std::make_unique<FCPrototypeAST>("__anon_expr",
-													  std::vector<FCVariableExprAST>());
-		return std::make_unique<FCFunctionAST>(std::move(Proto), std::move(E));
-	}
-	return nullptr;
-}
-
-::std::unique_ptr<FCExprClass::FCExprAST> FCScanner::handledDefinition()
-{
-	return parseDefinition();
-}
-::std::unique_ptr<FCExprClass::FCExprAST> FCScanner::handledTopLevelExpression()
-{
-	if (auto itm = parseTopLevelExpr())
-	{
-		return itm;
-	}
-	else
-	{
-		::std::fprintf(stderr, "Syntax Error\n");
-	}
-	return nullptr;
 }

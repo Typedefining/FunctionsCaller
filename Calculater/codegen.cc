@@ -700,7 +700,7 @@ llvm::Value* codegenProgram(const FCProgramAST* expression,
 	llvm::Value* last = nullptr;
 	for (const auto* statement : runtimeStatements)
 	{
-		last = codegen(const_cast<FCExprAST*>(statement), context);
+		last = codegen(statement, context);
 		if (last == nullptr)
 		{
 			context.namedValues = std::move(oldNamedValues);

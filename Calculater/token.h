@@ -57,7 +57,7 @@ namespace FCExprClass
 	{
 	public:
 		FCExprAST() = default;
-		virtual ~FCExprAST() {};
+		virtual ~FCExprAST() = default;
 		virtual void info() = 0;
 		FCTypeDescribe type = FCTypeDescribe::Expr;
 	};
@@ -69,7 +69,6 @@ namespace FCExprClass
 	public:
 		FCNumberExprAST(int val);
 		FCNumberExprAST(double val);
-		~FCNumberExprAST();
 		bool isFloating() const { return m_isFloating; }
 		FCTypeDescribe type = FCMarks::FCTypeDescribe::NumberExpr;
 		void info() override;
@@ -80,7 +79,6 @@ namespace FCExprClass
 		std::string m_stringVal;
 	public:
 		FCStringExprAST(std::string val);
-		~FCStringExprAST();
 		FCTypeDescribe type = FCMarks::FCTypeDescribe::StringExpr;
 		void info() override;
 	};
@@ -91,7 +89,6 @@ namespace FCExprClass
 		VarDeclPtr decl;
 	public:
 		FCVariableExprAST(VarDeclPtr v);
-		~FCVariableExprAST();
 		FCTypeDescribe type = FCMarks::FCTypeDescribe::VariableExpr;
 		void info() override;
 	};
@@ -105,7 +102,6 @@ namespace FCExprClass
 		FCBinaryExprAST(char op,
 			::std::unique_ptr<FCExprAST> lhs,
 			::std::unique_ptr<FCExprAST> rhs);
-		~FCBinaryExprAST();
 		FCTypeDescribe type = FCMarks::FCTypeDescribe::BinaryExpr;
 		void info() override;
 		char getOperator() const { return m_Op; }
@@ -122,10 +118,7 @@ namespace FCExprClass
 	public:
 		FCCallExprAST(const std::string& callee,
 			std::vector<std::unique_ptr<FCExprAST>> args);
-		~FCCallExprAST();
-		const ::std::string& getName();
 		const ::std::string& getName() const;
-		const std::vector<std::unique_ptr<FCExprAST>>& getArgs();
 		const std::vector<std::unique_ptr<FCExprAST>>& getArgs() const;
 		FCTypeDescribe type = FCMarks::FCTypeDescribe::CallExpr;
 		void info() override;
@@ -137,13 +130,10 @@ namespace FCExprClass
 		std::vector<FCVariableExprAST> m_funcArgsVar;
 	public:
 		FCPrototypeAST(const std::string& name, std::vector<FCVariableExprAST> args);
-		~FCPrototypeAST();
 		FCTypeDescribe type = FCMarks::FCTypeDescribe::Prototype;
 
 		void info() override;
-		::std::string getProtoName();
 		::std::string getProtoName() const;
-		std::vector<FCVariableExprAST>& getArgs() { return m_funcArgsVar; }
 		const std::vector<FCVariableExprAST>& getArgs() const { return m_funcArgsVar; }
 	};
 
@@ -156,12 +146,9 @@ namespace FCExprClass
 	public:
 		FCFunctionAST(std::unique_ptr<FCPrototypeAST> proto,
 			std::unique_ptr<FCExprAST> body, int localCount = 0);
-		~FCFunctionAST();
 		FCTypeDescribe type = FCMarks::FCTypeDescribe::Function;
-		::std::string getProtoName();
-		FCExprAST* getBody();
+		::std::string getProtoName() const;
 		const FCExprAST* getBody() const;
-		std::unique_ptr<FCPrototypeAST>& getProto() { return mup_funcProto; }
 		const std::unique_ptr<FCPrototypeAST>& getProto() const { return mup_funcProto; }
 		int getLocalCount() const { return m_localCount; }
 		void info() override;
@@ -219,7 +206,6 @@ namespace FCExprClass
 		std::unique_ptr<FCExprAST> initExpr;  // 初始化表达式
 		FCVarDeclExprAST(VarDeclPtr d, std::unique_ptr<FCExprAST> init)
 			: decl(std::move(d)), initExpr(std::move(init)) {}
-		~FCVarDeclExprAST() {}
 		void info() override;
 	};
 
