@@ -1,17 +1,10 @@
 ﻿#pragma once
 
-#include "token.h"
 #include <stack>
-// static std::unique_ptr<LLVMContext> TheContext;
-// static std::unique_ptr<IRBuilder<>> Builder;
-// static std::unique_ptr<Module> TheModule;
-// static std::map<std::string, Value *> NamedValues;
 
-// Value *LogErrorV(const char *Str)
-// {
-	// LogError(Str);
-	// return nullptr;
-// }
+
+#include "token.h"
+
 class FCScanner
 {
 public:
@@ -45,7 +38,7 @@ private:
 	// 输入的字符串
 	::std::string m_inputsBuffer;
 
-private:
+	private:
 	int getNextToken();
 	int getTok();
 	int getTokPrecedence();

@@ -100,17 +100,24 @@ int FCScanner::getNextToken()
 int FCScanner::getTok()
 {
 	using namespace FCMarks;
+	auto readChar = [this]() -> int
+	{
+		if (m_idx == m_inputsBuffer.end())
+			return EOF;
+		return static_cast<unsigned char>(*m_idx++);
+	};
 
 	// 跳过空白符
-	while (isspace(m_lastChar))
-		m_lastChar = *m_idx++;
+	while (m_lastChar != EOF && isspace(static_cast<unsigned char>(m_lastChar)))
+		m_lastChar = readChar();
 
 	// 此时为标识符
 	// 函数标识符、变量标识符、函数定义标识符
-	if (isalpha(m_lastChar))
+	if (m_lastChar != EOF && isalpha(static_cast<unsigned char>(m_lastChar)))
 	{
 		m_identifierStr = m_lastChar;
-		while (isalnum((m_lastChar = *m_idx++)))
+		while ((m_lastChar = readChar()) != EOF &&
+			isalnum(static_cast<unsigned char>(m_lastChar)))
 			m_identifierStr += m_lastChar;
 		if (m_identifierStr == "def")
 			return static_cast<int>(FCToken::tok_def);
@@ -132,16 +139,18 @@ int FCScanner::getTok()
 	}
 	// 此时为数字字面量
 	// 支持整数、浮点数
-	if (isdigit(m_lastChar) || m_lastChar == '.')
+	if (m_lastChar != EOF &&
+		(isdigit(static_cast<unsigned char>(m_lastChar)) || m_lastChar == '.'))
 	{
 		::std::string NumStr;
 		do
 		{
 			NumStr += m_lastChar;
-			m_lastChar = *m_idx++;
+			m_lastChar = readChar();
 			if (m_lastChar == '.')
 				m_curDouble = true;
-		} while (isdigit(m_lastChar) || m_lastChar == '.');
+		} while (m_lastChar != EOF &&
+			(isdigit(static_cast<unsigned char>(m_lastChar)) || m_lastChar == '.'));
 		if (m_curDouble)
 		{
 			// 浮点数支持
@@ -156,13 +165,16 @@ int FCScanner::getTok()
 	// 字符串标识符
 	if (m_lastChar == '"')
 	{
-		m_lastChar = *m_idx++;
-		m_identifierStr = m_lastChar;
-		while (isalpha((m_lastChar = *m_idx++)))
-			m_identifierStr += m_lastChar;
+		m_lastChar = readChar();
+		m_identifierStr.clear();
+		while (m_lastChar != EOF && m_lastChar != '"')
+		{
+			m_identifierStr += static_cast<char>(m_lastChar);
+			m_lastChar = readChar();
+		}
 		if (m_lastChar != '"')
 			return static_cast<int>(FCToken::tok_eof);
-		m_lastChar = *m_idx++;
+		m_lastChar = readChar();
 		m_stringLiteral = m_identifierStr;
 		return static_cast<int>(FCToken::tok_string);
 	}
@@ -170,20 +182,20 @@ int FCScanner::getTok()
 	if (m_lastChar == '#')
 	{
 		do
-			m_lastChar = *m_idx++;
+			m_lastChar = readChar();
 		while (m_lastChar != EOF && m_lastChar != '\n' && m_lastChar != '\r');
 		if (m_lastChar != EOF)
 			return getTok();
 	}
 	// 解析结束
-	if (m_lastChar == EOF || m_idx == m_inputsBuffer.end())
+	if (m_lastChar == EOF)
 	{
 		m_lastChar = ' ';
 		return static_cast<int>(FCToken::tok_eof);
 	}
 	// 其他值
 	int ThisChar = m_lastChar;
-	m_lastChar = *m_idx++;
+	m_lastChar = readChar();
 	return ThisChar;
 }
 
@@ -594,6 +606,11 @@ std::unique_ptr<FCExprAST> FCScanner::ParseVarExpr()
 	while (m_curTok == ';')
 	{
 		getNextToken(); // 跳过分隔符
+		if (m_curTok == static_cast<int>(FCToken::tok_eof) ||
+			m_curTok == static_cast<int>(FCToken::tok_def) ||
+			m_curTok == static_cast<int>(FCToken::tok_else) ||
+			m_curTok == static_cast<int>(FCToken::tok_end))
+			break;
 		auto next = parseExpression();
 		if (m_curTok > static_cast<int>(FCToken::tok_end) && m_curTok <= static_cast<int>(FCToken::tok_begin))
 			return nullptr;

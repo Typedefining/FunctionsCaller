@@ -8,6 +8,23 @@
 #include <cassert>
 #include <unordered_map>
 #include <iostream>
+#include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Module.h"
+#include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/Value.h"
+#include "llvm/ADT/APFloat.h"
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/IR/BasicBlock.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Module.h"
+#include "llvm/IR/Type.h"
+#include "llvm/IR/Verifier.h"
+#include "llvm/IR/Instructions.h"
+
 
 namespace FCMarks
 {
@@ -97,6 +114,7 @@ namespace FCExprClass
 {
 	using namespace FCMarks;
 	struct FCEvaluationContext;
+	struct FCCodegenContext;
 	struct FCExprAST
 	{
 	public:
@@ -104,7 +122,7 @@ namespace FCExprClass
 		virtual ~FCExprAST() {};
 		virtual void info() = 0;
 		virtual FCValue evaluate(FCEvaluationContext&) = 0;
-		// virtual Value *codegen() = 0;
+		virtual llvm::Value *codegen(FCCodegenContext&) = 0;
 		FCTypeDescribe type = FCTypeDescribe::Expr;
 	};
 	struct FCNumberExprAST : public FCExprAST
@@ -119,6 +137,7 @@ namespace FCExprClass
 		FCTypeDescribe type = FCMarks::FCTypeDescribe::NumberExpr;
 		void info() override;
 		FCValue evaluate(FCEvaluationContext&) override;
+		llvm::Value *codegen(FCCodegenContext&) override;
 	};
 
 	struct FCStringExprAST : public FCExprAST
@@ -131,6 +150,7 @@ namespace FCExprClass
 		FCTypeDescribe type = FCMarks::FCTypeDescribe::StringExpr;
 		void info() override;
 		FCValue evaluate(FCEvaluationContext&) override;
+		llvm::Value *codegen(FCCodegenContext&) override;
 	};
 
 	/// FCVariableExprAST - Expression struct for referencing a variable, like "a".
@@ -144,6 +164,7 @@ namespace FCExprClass
 		FCTypeDescribe type = FCMarks::FCTypeDescribe::VariableExpr;
 		void info() override;
 		FCValue evaluate(FCEvaluationContext&) override;
+		llvm::Value *codegen(FCCodegenContext&) override;
 		void setValue(FCValue val) { m_exprVal = val; }
 	};
 
@@ -161,6 +182,10 @@ namespace FCExprClass
 		FCTypeDescribe type = FCMarks::FCTypeDescribe::BinaryExpr;
 		void info() override;
 		FCValue evaluate(FCEvaluationContext&) override;
+		llvm::Value *codegen(FCCodegenContext&) override;
+		char getOperator() const { return m_Op; }
+		const FCExprAST* getLHS() const { return mup_LHS.get(); }
+		const FCExprAST* getRHS() const { return mup_RHS.get(); }
 
 	private:
 		FCValue assignExpression(FCValue lhs_eva, FCValue rhs_eva,
@@ -178,10 +203,13 @@ namespace FCExprClass
 			std::vector<std::unique_ptr<FCExprAST>> args);
 		~FCCallExprAST();
 		const ::std::string& getName();
+		const ::std::string& getName() const;
 		const std::vector<std::unique_ptr<FCExprAST>>& getArgs();
+		const std::vector<std::unique_ptr<FCExprAST>>& getArgs() const;
 		FCTypeDescribe type = FCMarks::FCTypeDescribe::CallExpr;
 		void info() override;
 		FCValue evaluate(FCEvaluationContext&) override;
+		llvm::Value *codegen(FCCodegenContext&) override;
 	};
 
 	struct FCPrototypeAST : public FCExprAST
@@ -197,7 +225,9 @@ namespace FCExprClass
 		void info() override;
 		::std::string getProtoName();
 		FCValue evaluate(FCEvaluationContext&) override;
+		llvm::Value *codegen(FCCodegenContext&) override;
 		std::vector<FCVariableExprAST>& getArgs() { return m_funcArgsVar; }
+		const std::vector<FCVariableExprAST>& getArgs() const { return m_funcArgsVar; }
 	};
 
 	/// FCFunctionAST - This struct represents a function definition itself.
@@ -213,9 +243,12 @@ namespace FCExprClass
 		FCTypeDescribe type = FCMarks::FCTypeDescribe::Function;
 		::std::string getProtoName();
 		FCExprAST* getBody();
+		const FCExprAST* getBody() const;
 		std::unique_ptr<FCPrototypeAST>& getProto() { return mup_funcProto; }
+		const std::unique_ptr<FCPrototypeAST>& getProto() const { return mup_funcProto; }
 		void info() override;
 		FCValue evaluate(FCEvaluationContext&) override;
+		llvm::Value *codegen(FCCodegenContext&) override;
 	};
 
 	class FCFunctionRegistry
@@ -250,6 +283,10 @@ namespace FCExprClass
 
 		void info() override;
 		FCValue evaluate(FCEvaluationContext&) override;
+		llvm::Value *codegen(FCCodegenContext&) override;
+		const FCExprAST* getCondition() const { return Cond.get(); }
+		const FCExprAST* getThen() const { return Then.get(); }
+		const FCExprAST* getElse() const { return Else.get(); }
 	};
 
 	class FCForExprAST : public FCExprAST {
@@ -267,6 +304,12 @@ namespace FCExprClass
 
 		void info() override;
 		FCValue evaluate(FCEvaluationContext&) override;
+		llvm::Value *codegen(FCCodegenContext&) override;
+		const VarDeclPtr& getDecl() const { return decl; }
+		const FCExprAST* getStart() const { return Start.get(); }
+		const FCExprAST* getEnd() const { return End.get(); }
+		const FCExprAST* getStep() const { return Step.get(); }
+		const FCExprAST* getBody() const { return Body.get(); }
 	};
 
 	struct FCSeqExprAST : public FCExprAST {
@@ -286,6 +329,8 @@ namespace FCExprClass
 			}
 
 		}
+		llvm::Value *codegen(FCCodegenContext&) override;
+		const std::vector<std::unique_ptr<FCExprAST>>& getExpressions() const { return exprs; }
 	};
 
 	struct FCVarDeclExprAST : public FCExprAST {
@@ -300,6 +345,7 @@ namespace FCExprClass
 		~FCVarDeclExprAST() {}
 		void info() override;
 		FCValue evaluate(FCEvaluationContext&) override;
+		llvm::Value *codegen(FCCodegenContext&) override;
 	};
 
 	class FCProgramAST : public FCExprAST {
@@ -331,5 +377,21 @@ namespace FCExprClass
 		const std::vector<std::unique_ptr<FCExprAST>>& getStatements() const {
 			return m_statements;
 		}
+		llvm::Value *codegen(FCCodegenContext&) override;
+	};
+
+	struct FCCodegenContext
+	{
+		llvm::LLVMContext llvmContext;
+		llvm::IRBuilder<> builder;
+		std::unique_ptr<llvm::Module> module;
+		std::map<const VarDecl*, llvm::AllocaInst*> namedValues;
+		std::unordered_map<std::string, FCFunctionAST*> definitions;
+		llvm::Function* currentFunction = nullptr;
+
+		explicit FCCodegenContext(const std::string& moduleName);
+		llvm::Type* getType(const std::string& typeName);
+		llvm::AllocaInst* createEntryBlockAlloca(llvm::Function* function,
+			const std::string& name, llvm::Type* type);
 	};
 }

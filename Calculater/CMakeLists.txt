@@ -31,6 +31,7 @@ add_executable(FunctionCallASTTest
 )
 
 target_include_directories(${PROJECT_NAME}
+	SYSTEM
 	PRIVATE
 	${LLVM_INCLUDE_DIRS}
 )
@@ -46,6 +47,7 @@ target_link_libraries(
 	${LLVM_LIBS})
 
 target_include_directories(FunctionCallASTTest
+	SYSTEM
 	PRIVATE
 	${LLVM_INCLUDE_DIRS}
 )
