@@ -26,20 +26,23 @@ FCScanner::~FCScanner()
 {
 }
 
-//def aaa(a:int,b:double) a+b*2.0;
-::std::unique_ptr<FCExprAST> FCScanner::analysis(const ::std::string &inputStr) {
+// def aaa(a:int,b:double) a+b*2.0;
+::std::unique_ptr<FCExprAST> FCScanner::analysis(const ::std::string &inputStr)
+{
 	m_inputsBuffer = inputStr;
 	m_idx = m_inputsBuffer.begin();
-	
+
 	getNextToken();
-	
+
 	std::vector<std::unique_ptr<FCExprAST>> statements;
-	
+
 	// 循环解析所有语句，直到遇到文件结束
-	while (m_curTok != static_cast<int>(FCToken::tok_eof)) {
+	while (m_curTok != static_cast<int>(FCToken::tok_eof))
+	{
 		std::unique_ptr<FCExprAST> stmt;
-		
-		switch (m_curTok) {
+
+		switch (m_curTok)
+		{
 		case static_cast<int>(FCToken::tok_def):
 			stmt = parseDefinition();
 			break;
@@ -51,20 +54,24 @@ FCScanner::~FCScanner()
 			stmt = parseSeqExpr();
 			break;
 		}
-		
-		if (stmt) {
+
+		if (stmt)
+		{
 			statements.push_back(std::move(stmt));
-		} else {
+		}
+		else
+		{
 			// 解析失败，跳过当前token继续尝试
 			getNextToken();
 		}
 	}
-	
+
 	// 如果只有一个语句，直接返回它
-	if (statements.size() == 1) {
+	if (statements.size() == 1)
+	{
 		return std::move(statements[0]);
 	}
-	
+
 	// 如果有多个语句，包装成程序节点
 	return std::make_unique<FCProgramAST>(std::move(statements));
 }
@@ -439,7 +446,6 @@ int FCScanner::getTokPrecedence()
 ::std::unique_ptr<FCExprAST> FCScanner::ParseIfExpr()
 {
 	getNextToken(); // eat the if.
-
 
 	pushScopeForFunc(m_currentFunc);
 	popScopeForFunc(m_currentFunc);
