@@ -8,22 +8,11 @@
 #include <cassert>
 #include <unordered_map>
 #include <iostream>
-#include "llvm/IR/LLVMContext.h"
-#include "llvm/IR/Module.h"
-#include "llvm/IR/IRBuilder.h"
-#include "llvm/IR/Value.h"
-#include "llvm/ADT/APFloat.h"
-#include "llvm/ADT/STLExtras.h"
-#include "llvm/IR/BasicBlock.h"
-#include "llvm/IR/Constants.h"
-#include "llvm/IR/DerivedTypes.h"
-#include "llvm/IR/Function.h"
-#include "llvm/IR/IRBuilder.h"
-#include "llvm/IR/LLVMContext.h"
-#include "llvm/IR/Module.h"
-#include "llvm/IR/Type.h"
-#include "llvm/IR/Verifier.h"
-#include "llvm/IR/Instructions.h"
+
+namespace llvm
+{
+	class Value;
+}
 
 
 namespace FCMarks
@@ -251,28 +240,6 @@ namespace FCExprClass
 		llvm::Value *codegen(FCCodegenContext&) override;
 	};
 
-	class FCFunctionRegistry
-	{
-	public:
-		bool registerFunction(FCFunctionAST* function);
-		FCFunctionAST* findFunction(const std::string& name) const;
-		bool index(FCExprAST* root);
-		void clear();
-
-	private:
-		std::unordered_map<std::string, FCFunctionAST*> m_functions;
-	};
-
-	struct FCEvaluationContext
-	{
-		FCFunctionRegistry functions;
-		std::vector<Frame> callStack;
-
-		void pushFrame(const std::string& functionName);
-		void popFrame();
-		Frame& currentFrame();
-	};
-
 	class FCIfExprAST : public FCExprAST {
 		std::unique_ptr<FCExprAST> Cond, Then, Else;
 		FCValue m_exprVal;
@@ -315,13 +282,7 @@ namespace FCExprClass
 	struct FCSeqExprAST : public FCExprAST {
 		std::vector<std::unique_ptr<FCExprAST>> exprs;
 		FCSeqExprAST(std::vector<std::unique_ptr<FCExprAST>> e) : exprs(std::move(e)) {}
-		FCValue evaluate(FCEvaluationContext& context) override {
-			FCValue last;
-			for (auto& e : exprs) {
-				last = e->evaluate(context);
-			}
-			return last;
-		}
+		FCValue evaluate(FCEvaluationContext&) override;
 
 		void info() override {
 			for (auto& i : exprs) {
@@ -363,35 +324,11 @@ namespace FCExprClass
 			}
 		}
 		
-		FCValue evaluate(FCEvaluationContext& context) override {
-			context.functions.index(this);
-			FCValue lastResult;
-			for (auto& stmt : m_statements) {
-				if (dynamic_cast<FCFunctionAST*>(stmt.get()) != nullptr)
-					continue;
-				lastResult = stmt->evaluate(context);
-			}
-			return lastResult;
-		}
+		FCValue evaluate(FCEvaluationContext&) override;
 		
 		const std::vector<std::unique_ptr<FCExprAST>>& getStatements() const {
 			return m_statements;
 		}
 		llvm::Value *codegen(FCCodegenContext&) override;
-	};
-
-	struct FCCodegenContext
-	{
-		llvm::LLVMContext llvmContext;
-		llvm::IRBuilder<> builder;
-		std::unique_ptr<llvm::Module> module;
-		std::map<const VarDecl*, llvm::AllocaInst*> namedValues;
-		std::unordered_map<std::string, FCFunctionAST*> definitions;
-		llvm::Function* currentFunction = nullptr;
-
-		explicit FCCodegenContext(const std::string& moduleName);
-		llvm::Type* getType(const std::string& typeName);
-		llvm::AllocaInst* createEntryBlockAlloca(llvm::Function* function,
-			const std::string& name, llvm::Type* type);
 	};
 }

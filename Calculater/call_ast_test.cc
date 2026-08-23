@@ -1,4 +1,6 @@
 #include "scanner.h"
+#include "evaluator.h"
+#include "codegen.h"
 
 #include <iostream>
 #include "llvm/IR/Verifier.h"
