@@ -73,4 +73,13 @@ target_link_libraries(FunctionCallASTTest
 	FunctionsCodegen
 )
 
+add_executable(FunctionsUnitTest unit_test.cc)
+target_link_libraries(FunctionsUnitTest
+	PRIVATE
+	FunctionsFrontend
+	FunctionsEvaluator
+	FunctionsCodegen
+)
+
 add_test(NAME FunctionCallASTTest COMMAND FunctionCallASTTest)
+add_test(NAME FunctionsUnitTest COMMAND FunctionsUnitTest)

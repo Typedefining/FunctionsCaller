@@ -344,6 +344,22 @@ add(10, 3)
 
 解释执行和 LLVM IR 生成目前都以函数的最后一个表达式作为返回值。LLVM 生成的顶层 `__fc_main` 当前要求最终表达式可以转换为整数。
 
+## 单元测试和覆盖率
+
+构建并运行全部测试：
+
+```powershell
+cmake --build build-debug --config Debug --parallel 16
+ctest --test-dir build-debug -C Debug --output-on-failure
+```
+
+在 Windows + Visual Studio 环境中，可以使用仓库中的脚本收集生产实现文件（`*.cc`）覆盖率。脚本会排除测试驱动和 `main.cc`，并在低于 95% 时返回失败：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\coverage.ps1 `
+    -BuildDir .\build-debug -Configuration Debug
+```
+
 ## C++ API
 
 解析：

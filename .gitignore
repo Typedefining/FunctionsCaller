@@ -11,6 +11,8 @@
 !Calculater
 !Docs
 !ExternalFuncDll
+!tools
+!tools/coverage.ps1
 
 !CMakeLists.txt
 !README
