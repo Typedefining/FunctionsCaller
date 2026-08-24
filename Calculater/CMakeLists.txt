@@ -31,21 +31,21 @@ add_library(FunctionsEvaluator STATIC
 	evaluator.cc
 	runtime.h
 )
-target_link_libraries(FunctionsEvaluator PUBLIC FunctionsCore)
+target_link_libraries(FunctionsEvaluator PRIVATE FunctionsCore)
 target_include_directories(FunctionsEvaluator PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_library(FunctionsSemantic STATIC
 	semantic.h
 	semantic.cc
 )
-target_link_libraries(FunctionsSemantic PUBLIC FunctionsCore)
+target_link_libraries(FunctionsSemantic PRIVATE FunctionsCore)
 target_include_directories(FunctionsSemantic PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_library(FunctionsCodegen STATIC
 	codegen.h
 	codegen.cc
 )
-target_link_libraries(FunctionsCodegen PUBLIC FunctionsCore ${LLVM_LIBS})
+target_link_libraries(FunctionsCodegen PRIVATE FunctionsCore ${LLVM_LIBS})
 target_include_directories(FunctionsCodegen PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories(FunctionsCodegen SYSTEM PUBLIC ${LLVM_INCLUDE_DIRS})
 target_compile_options(FunctionsCodegen PRIVATE ${LLVM_DEFINITIONS_LIST})
@@ -54,15 +54,13 @@ add_library(FunctionsFrontend STATIC
 	scanner.h
 	scanner.cc
 )
-target_link_libraries(FunctionsFrontend PUBLIC FunctionsCore FunctionsSemantic)
+target_link_libraries(FunctionsFrontend PRIVATE FunctionsCore FunctionsSemantic)
 target_include_directories(FunctionsFrontend PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_executable(${PROJECT_NAME} main.cc)
 target_link_libraries(${PROJECT_NAME}
 	PRIVATE
 	FunctionsFrontend
-	FunctionsEvaluator
-	FunctionsCodegen
 )
 
 add_executable(FunctionCallASTTest call_ast_test.cc)
