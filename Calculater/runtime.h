@@ -13,11 +13,16 @@ namespace FCMarks
 		Dangle
 	};
 
+	struct FCStringValue
+	{
+		std::string str;
+	};
+
 	union FCValueUnion
 	{
 		int intVal;
 		double doubleVal;
-		char charVal[2048];
+		FCStringValue* charVal;
 		void* danglingVal;
 	};
 

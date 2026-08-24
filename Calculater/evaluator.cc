@@ -27,9 +27,7 @@ namespace
 	{
 		FCValue value;
 		value.type = FCValueCategory::String;
-		std::memset(value.evaluteVal.charVal, 0, sizeof(value.evaluteVal.charVal));
-		const auto length = std::min(text.size(), sizeof(value.evaluteVal.charVal) - 1);
-		std::memcpy(value.evaluteVal.charVal, text.data(), length);
+		value.evaluteVal.charVal = new FCStringValue{ text };
 		return value;
 	}
 
@@ -253,7 +251,7 @@ FCValue evaluateBinary(const FCBinaryExprAST *expression,
 	}
 
 	if (lhs.type == FCValueCategory::String && rhs.type == FCValueCategory::String && op == '+')
-		return makeStringValue(std::string(lhs.evaluteVal.charVal) + rhs.evaluteVal.charVal);
+		return makeStringValue(lhs.evaluteVal.charVal->str + rhs.evaluteVal.charVal->str);
 
 	return makeDangleValue();
 }

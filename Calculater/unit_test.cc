@@ -57,7 +57,7 @@ bool isFloating(const FCValue& value, double expected)
 bool isString(const FCValue& value, const std::string& expected)
 {
 	return value.type == FCValueCategory::String &&
-		std::string(value.evaluteVal.charVal) == expected;
+		value.evaluteVal.charVal->str == expected;
 }
 
 std::unique_ptr<FCExprAST> integer(int value)
