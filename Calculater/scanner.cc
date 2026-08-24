@@ -111,7 +111,7 @@ int FCScanner::getTok()
 	{
 		m_identifierStr = m_lastChar;
 		while ((m_lastChar = readChar()) != EOF &&
-			isalnum(static_cast<unsigned char>(m_lastChar)))
+			   isalnum(static_cast<unsigned char>(m_lastChar)))
 			m_identifierStr += m_lastChar;
 		if (m_identifierStr == "def")
 			return static_cast<int>(FCToken::tok_def);
@@ -144,7 +144,7 @@ int FCScanner::getTok()
 			if (m_lastChar == '.')
 				m_curDouble = true;
 		} while (m_lastChar != EOF &&
-			(isdigit(static_cast<unsigned char>(m_lastChar)) || m_lastChar == '.'));
+				 (isdigit(static_cast<unsigned char>(m_lastChar)) || m_lastChar == '.'));
 		if (m_curDouble)
 		{
 			// 浮点数支持
@@ -367,7 +367,6 @@ int FCScanner::getTokPrecedence()
 	if (m_curTok != '(')
 		return logErrorP("Expected '(' in prototype");
 
-
 	std::vector<std::tuple<std::string, std::string>> Args;
 	getNextToken();
 	while (m_curTok != ')')
@@ -412,29 +411,27 @@ int FCScanner::getTokPrecedence()
 	}
 	return std::make_unique<FCPrototypeAST>(funName, std::move(ArgNames));
 }
-::std::unique_ptr<FCFunctionAST> FCScanner::parseDefinition()
+
+std::unique_ptr<FCFunctionAST> FCScanner::parseDefinition()
 {
 	getNextToken();
 	auto Proto = parsePrototype();
 	if (!Proto)
 		return nullptr;
 
-	// 将当前函数名设置为 Proto 名
 	m_currentFunc = Proto->m_funcName;
 
-	if (auto E = parseSeqExpr())
+	// 只解析一个表达式作为函数体
+	if (auto E = parseExpression())
 	{
-		// 在函数解析完成后，为该函数的所有 VarDecl 分配连续的 slot（包括形参 & 局部）
 		int slot = 0;
-		auto& decls = m_semanticContext.functionDeclarations(m_currentFunc);
+		auto &decls = m_semanticContext.functionDeclarations(m_currentFunc);
 		for (auto &d : decls)
 		{
 			if (d->slot < 0)
 				d->slot = slot++;
 		}
 		m_semanticContext.popScopeForFunc(m_currentFunc);
-
-		// 重置当前函数名
 		m_currentFunc = "";
 		return std::make_unique<FCFunctionAST>(std::move(Proto), std::move(E), slot);
 	}
@@ -442,12 +439,9 @@ int FCScanner::getTokPrecedence()
 	return nullptr;
 }
 
-::std::unique_ptr<FCExprAST> FCScanner::ParseIfExpr()
+std::unique_ptr<FCExprAST> FCScanner::ParseIfExpr()
 {
 	getNextToken();
-
-	m_semanticContext.pushScopeForFunc(m_currentFunc);
-	m_semanticContext.popScopeForFunc(m_currentFunc);
 
 	auto Cond = parseExpression();
 	if (!Cond)
@@ -457,28 +451,22 @@ int FCScanner::getTokPrecedence()
 		return logError("expected then");
 	getNextToken();
 
-	m_semanticContext.pushScopeForFunc(m_currentFunc);
-	auto Then = parseSeqExpr();
-	m_semanticContext.popScopeForFunc(m_currentFunc);
+	auto Then = parseExpression();
 	if (!Then)
 		return nullptr;
 
 	if (m_curTok != static_cast<int>(FCToken::tok_else))
 		return logError("expected else");
-
 	getNextToken();
 
-	m_semanticContext.pushScopeForFunc(m_currentFunc);
-	auto Else = parseSeqExpr();
-	m_semanticContext.popScopeForFunc(m_currentFunc);
+	auto Else = parseExpression();
 	if (!Else)
 		return nullptr;
 
-	return std::make_unique<FCIfExprAST>(std::move(Cond), std::move(Then),
-										 std::move(Else));
+	return std::make_unique<FCIfExprAST>(std::move(Cond), std::move(Then), std::move(Else));
 }
 
-::std::unique_ptr<FCExprAST> FCScanner::ParseForExpr()
+std::unique_ptr<FCExprAST> FCScanner::ParseForExpr()
 {
 	getNextToken();
 
@@ -488,15 +476,13 @@ int FCScanner::getTokPrecedence()
 	std::string VarName = m_identifierStr;
 	getNextToken();
 
-	// 在解析期引入新作用域并声明循环变量
 	m_semanticContext.pushScopeForFunc(m_currentFunc);
-	// 默认使用 double 类型（或根据你语法读取类型信息）
 	VarDeclPtr decl = std::make_shared<VarDecl>(VarName, "int");
 	m_semanticContext.insertVariableInCurrentScope(m_currentFunc, VarName, decl);
 
 	if (m_curTok != '=')
 		return logError("expected '=' after for variable");
-	getNextToken(); // 吃掉 '='
+	getNextToken();
 
 	auto Start = parseExpression();
 	if (!Start)
@@ -523,13 +509,12 @@ int FCScanner::getTokPrecedence()
 		return logError("expected 'in' after for");
 	getNextToken();
 
-	auto Body = parseSeqExpr();
+	auto Body = parseExpression();
 
 	m_semanticContext.popScopeForFunc(m_currentFunc);
 
-	// 注意：这里返回的 ForExprAST 应该包含 decl 或者 Body 已经通过 VarExpr 绑定了 decl
-	// 下面假设存在一个 FCForExprAST 构造函数接收 decl
-	return std::make_unique<FCForExprAST>(decl, std::move(Start), std::move(End), std::move(Step), std::move(Body));
+	return std::make_unique<FCForExprAST>(decl, std::move(Start), std::move(End),
+										  std::move(Step), std::move(Body));
 }
 
 std::unique_ptr<FCExprAST> FCScanner::ParseVarExpr()
