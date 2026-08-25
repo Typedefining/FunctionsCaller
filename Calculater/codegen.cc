@@ -102,6 +102,13 @@ llvm::Type* inferExprType(const FCExprAST* expression,
 	if (auto* loop = dynamic_cast<const FCForExprAST*>(expression))
 		return inferExprType(loop->getBody(), context, visitingFunctions);
 
+	if (auto* block = dynamic_cast<const FCBlockExprAST*>(expression))
+	{
+		if (block->getExpressions().empty())
+			return integerType(context);
+		return inferExprType(block->getExpressions().back().get(), context, visitingFunctions);
+	}
+
 	if (auto* sequence = dynamic_cast<const FCSeqExprAST*>(expression))
 	{
 		if (sequence->getExpressions().empty())
@@ -259,7 +266,7 @@ llvm::Value* codegenVariable(const FCVariableExprAST* expression,
 	if (expression->decl == nullptr)
 		return logCodegenError("variable declaration is missing");
 
-	if (expression->decl->isGlobal)
+	if (expression->decl->scopeLevel == 0)
 	{
 		auto global = context.globalValues.find(expression->decl.get());
 		if (global == context.globalValues.end())
@@ -287,7 +294,7 @@ llvm::Value* codegenBinary(const FCBinaryExprAST* expression,
 
 		llvm::Value* address = nullptr;
 		llvm::Type* valueType = nullptr;
-		if (variable->decl->isGlobal)
+		if (variable->decl->scopeLevel == 0)
 		{
 			auto global = context.globalValues.find(variable->decl.get());
 			if (global == context.globalValues.end())
@@ -647,7 +654,7 @@ llvm::Value* codegenDeclaration(const FCVarDeclExprAST* expression,
 	if (context.currentFunction == nullptr || expression->decl == nullptr)
 		return logCodegenError("variable declaration is outside a function");
 
-	if (expression->decl->isGlobal)
+	if (expression->decl->scopeLevel == 0)
 	{
 		auto global = context.globalValues.find(expression->decl.get());
 		if (global == context.globalValues.end())
@@ -709,8 +716,14 @@ void declareGlobalsInExpression(const FCExprAST* expression,
 		return;
 	if (auto* declaration = dynamic_cast<const FCVarDeclExprAST*>(expression))
 	{
-		if (declaration->decl != nullptr && declaration->decl->isGlobal)
+		if (declaration->decl != nullptr && declaration->decl->scopeLevel == 0)
 			declareGlobal(declaration->decl.get(), context);
+		return;
+	}
+	if (auto* block = dynamic_cast<const FCBlockExprAST*>(expression))
+	{
+		for (const auto& item : block->getExpressions())
+			declareGlobalsInExpression(item.get(), context);
 		return;
 	}
 	if (auto* sequence = dynamic_cast<const FCSeqExprAST*>(expression))
@@ -864,7 +877,7 @@ llvm::Value* codegenStandaloneTopLevel(const FCExprAST* expression,
 
 llvm::Value* codegenBlock(const FCBlockExprAST* expression, FCCodegenContext& context)
 {
-    auto oldNamedValues = std::move(context.namedValues);
+    auto oldNamedValues = context.namedValues;
     context.namedValues = oldNamedValues;
 
     llvm::Value* lastValue = nullptr;
@@ -908,7 +921,7 @@ llvm::Value* FCExprClass::codegen(FCExprAST* expression,
 	if (auto* declaration = dynamic_cast<FCVarDeclExprAST*>(expression))
 	{
 		if (context.currentFunction == nullptr && declaration->decl != nullptr &&
-			declaration->decl->isGlobal)
+			declaration->decl->scopeLevel == 0)
 			return codegenStandaloneTopLevel(declaration, context);
 		return codegenDeclaration(declaration, context);
 	}

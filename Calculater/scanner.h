@@ -1,5 +1,6 @@
 ﻿#pragma once
 
+#include "token.h"
 #include "semantic.h"
 
 class FCScanner
@@ -49,7 +50,6 @@ private:
 	::std::unique_ptr<FCExprClass::FCExprAST> parseNumberExpr();
 	::std::unique_ptr<FCExprClass::FCExprAST> parseStringExpr();
 	::std::unique_ptr<FCExprClass::FCExprAST> parseParenExpr();
-	::std::unique_ptr<FCExprClass::FCExprAST> parseBraceExpr();
 	::std::unique_ptr<FCExprClass::FCExprAST> parseIdentifierExpr();
 	::std::unique_ptr<FCExprClass::FCExprAST> parsePrimary();
 	::std::unique_ptr<FCExprClass::FCExprAST> parseBinOpRHS(int ExprPrec, std::unique_ptr<FCExprClass::FCExprAST> LHS);

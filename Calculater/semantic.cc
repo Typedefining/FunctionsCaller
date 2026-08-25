@@ -1,122 +1,184 @@
+#include <cassert>
+#include <cstdio>
+
+#include "token.h"
 #include "semantic.h"
 
-#include <cassert>
+namespace FCMarks {
 
-namespace FCMarks
-{
-FCSemanticContext::FCSemanticContext()
-{
-	reset();
+FCSemanticContext::FCSemanticContext() { reset(); }
+
+void FCSemanticContext::reset() {
+  m_binopPrecedence = {{'=', 5},  {'<', 9},  {'+', 10},
+                       {'-', 10}, {'*', 20}, {'/', 20}};
+  m_scopeStack.clear();
+  m_funcDeclList.clear();
+  m_functionSet.clear();
+  m_currentFunctionName.clear();
+
 }
 
-void FCSemanticContext::reset()
-{
-	m_binopPrecedence = {
-		{'=', 5},
-		{'<', 9},
-		{'+', 10},
-		{'-', 10},
-		{'*', 20},
-		{'/', 20}
-	};
-	m_varTableInFunc.clear();
-	m_funcDeclList.clear();
-	m_globalScope.clear();
-	m_globalDeclList.clear();
+int FCSemanticContext::getOperatorPrecedence(char op) const {
+  const auto it = m_binopPrecedence.find(op);
+  return it == m_binopPrecedence.end() ? 0 : it->second;
 }
 
-int FCSemanticContext::getOperatorPrecedence(char op) const
-{
-	const auto it = m_binopPrecedence.find(op);
-	return it == m_binopPrecedence.end() ? 0 : it->second;
+void FCSemanticContext::pushScope() {
+  m_scopeStack.emplace_back(Scope(m_currentFunctionName));
 }
 
-void FCSemanticContext::pushScopeForFunc(const std::string& functionName)
-{
-	m_varTableInFunc[functionName].emplace_back();
+void FCSemanticContext::popScope() {
+  if (m_scopeStack.size() > 1) {
+    m_scopeStack.pop_back();
+  }
 }
 
-void FCSemanticContext::popScopeForFunc(const std::string& functionName)
-{
-	auto& stack = m_varTableInFunc[functionName];
-	if (!stack.empty())
-		stack.pop_back();
+void FCSemanticContext::pushFunctionScope(const std::string &functionName) {
+  m_scopeStack.emplace_back(Scope(functionName));
+  m_currentFunctionName = functionName;
 }
 
-VarDeclPtr FCSemanticContext::lookupVariableDecl(
-	const std::string& functionName, const std::string& name) const
-{
-	if (auto declaration = lookupVariableInCurrentScope(functionName, name))
-		return declaration;
+void FCSemanticContext::popFunctionScope(const std::string &functionName) {
+  if (m_scopeStack.size() > 1 &&
+      m_scopeStack.back().functionName == functionName) {
+    m_scopeStack.pop_back();
+  }
 
-	const auto functionIt = m_varTableInFunc.find(functionName);
-	if (functionIt != m_varTableInFunc.end())
-	{
-		const auto& stack = functionIt->second;
-		for (auto scopeIt = stack.rbegin(); scopeIt != stack.rend(); ++scopeIt)
-		{
-			const auto declarationIt = scopeIt->find(name);
-			if (declarationIt != scopeIt->end())
-				return declarationIt->second;
-		}
-	}
-	return lookupGlobalVariable(name);
+  if (m_currentFunctionName == functionName) {
+    m_currentFunctionName.clear();
+  }
 }
 
-VarDeclPtr FCSemanticContext::lookupVariableInCurrentScope(
-	const std::string& functionName, const std::string& name) const
-{
-	const auto functionIt = m_varTableInFunc.find(functionName);
-	if (functionIt == m_varTableInFunc.end() || functionIt->second.empty())
-		return nullptr;
+VarDeclPtr
+FCSemanticContext::lookupVariableDecl(const std::string &functionName,
+                                      const std::string &name) const {
 
-	const auto& currentScope = functionIt->second.back();
-	const auto declarationIt = currentScope.find(name);
-	return declarationIt == currentScope.end() ? nullptr : declarationIt->second;
+  for (auto it = m_scopeStack.rbegin(); it != m_scopeStack.rend(); ++it) {
+    if (!functionName.empty() && it->functionName != functionName) {
+      continue;
+    }
+
+    auto varIt = it->variables.find(name);
+    if (varIt != it->variables.end()) {
+      return varIt->second;
+    }
+  }
+
+  return nullptr;
+}
+
+VarDeclPtr
+FCSemanticContext::lookupVariableInCurrentScope(const std::string &functionName,
+                                                const std::string &name) const {
+
+  if (m_scopeStack.empty()) {
+    return nullptr;
+  }
+
+  const auto &currentScope = m_scopeStack.back();
+
+  if (!functionName.empty() && currentScope.functionName != functionName) {
+    return nullptr;
+  }
+
+  auto varIt = currentScope.variables.find(name);
+  if (varIt != currentScope.variables.end()) {
+    return varIt->second;
+  }
+
+  return nullptr;
+}
+
+VarDeclPtr
+FCSemanticContext::lookupGlobalVariable(const std::string &name) const {
+  //Global Scope is always the first scope in the stack,
+  //so we can directly look it up in m_scopeStack.begin() 
+
+  auto it = m_scopeStack.begin()->variables.find(name);
+  return it == m_scopeStack.begin()->variables.end() ? nullptr : it->second;
 }
 
 void FCSemanticContext::insertVariableInCurrentScope(
-	const std::string& functionName,
-	const std::string& name, VarDeclPtr declaration)
-{
-	auto& stack = m_varTableInFunc[functionName];
-	assert(!stack.empty() && "must have a scope before insert");
-	stack.back()[name] = declaration;
-	m_funcDeclList[functionName].push_back(std::move(declaration));
+    const std::string &functionName, const std::string &name,
+    VarDeclPtr declaration) {
+
+  assert(declaration != nullptr);
+
+  if (m_scopeStack.empty()) {
+    fprintf(stderr, "Error: no active scope for variable '%s'\n", name.c_str());
+    return;
+  }
+
+  auto &currentScope = m_scopeStack.back();
+
+  if (currentScope.variables.find(name) != currentScope.variables.end()) {
+    fprintf(stderr, "Error: variable '%s' already declared in current scope\n",
+            name.c_str());
+    return;
+  }
+
+  currentScope.variables[name] = declaration;
+
+  if (!functionName.empty()) {
+    m_funcDeclList[functionName].push_back(declaration);
+  }
+
+  declaration->scopeLevel = static_cast<int>(m_scopeStack.size()) - 1;
 }
 
-VarDeclPtr FCSemanticContext::lookupGlobalVariable(const std::string& name) const
-{
-	const auto it = m_globalScope.find(name);
-	return it == m_globalScope.end() ? nullptr : it->second;
+void FCSemanticContext::insertGlobalVariable(const std::string &name,
+                                             VarDeclPtr declaration) {
+  assert(declaration != nullptr);
+
+  if (m_scopeStack.begin()->variables.find(name) != m_scopeStack.begin()->variables.end()) {
+    fprintf(stderr, "Error: global variable '%s' already declared\n",
+            name.c_str());
+    return;
+  }
+
+  declaration->scopeLevel = 0;
+  declaration->slot = static_cast<int>(m_scopeStack[0].variables.size());
+
+  m_scopeStack[0].variables[name] = declaration;
 }
 
-void FCSemanticContext::insertGlobalVariable(
-	const std::string& name, VarDeclPtr declaration)
-{
-	assert(declaration != nullptr && "global declaration must not be null");
-	declaration->isGlobal = true;
-	declaration->slot = static_cast<int>(m_globalDeclList.size());
-	m_globalScope[name] = declaration;
-	m_globalDeclList.push_back(std::move(declaration));
+bool FCSemanticContext::hasFunction(const std::string &functionName) const {
+  return m_functionSet.find(functionName) != m_functionSet.end();
 }
 
-std::vector<VarDeclPtr>& FCSemanticContext::functionDeclarations(
-	const std::string& functionName)
-{
-	return m_funcDeclList[functionName];
+bool FCSemanticContext::registerFunction(const std::string &functionName) {
+  if (hasFunction(functionName)) {
+    fprintf(stderr, "Error: function '%s' already defined\n",
+            functionName.c_str());
+    return false;
+  }
+  m_functionSet.insert(functionName);
+  return true;
 }
 
-const std::vector<VarDeclPtr>& FCSemanticContext::functionDeclarations(
-	const std::string& functionName) const
-{
-	static const std::vector<VarDeclPtr> empty;
-	const auto it = m_funcDeclList.find(functionName);
-	return it == m_funcDeclList.end() ? empty : it->second;
+std::vector<VarDeclPtr> &
+FCSemanticContext::functionDeclarations(const std::string &functionName) {
+  return m_funcDeclList[functionName];
 }
 
-const std::vector<VarDeclPtr>& FCSemanticContext::globalDeclarations() const
-{
-	return m_globalDeclList;
+const std::vector<VarDeclPtr> &
+FCSemanticContext::functionDeclarations(const std::string &functionName) const {
+  static const std::vector<VarDeclPtr> empty;
+  const auto it = m_funcDeclList.find(functionName);
+  return it == m_funcDeclList.end() ? empty : it->second;
 }
+
+void FCSemanticContext::dumpScopes() const {
+  printf("=== Scope Debug Info ===\n");
+  printf("Scope depth: %zu\n", m_scopeStack.size());
+  printf("Active function: %s\n", m_currentFunctionName.c_str());
+
+  for (size_t i = 0; i < m_scopeStack.size(); ++i) {
+    const auto &scope = m_scopeStack[i];
+
+    printf("scope.functionName =  (%s)", scope.functionName.c_str());
+    printf(": %zu variables\n", scope.variables.size());
+  }
 }
+
+} // namespace FCMarks

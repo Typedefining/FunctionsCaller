@@ -45,7 +45,9 @@ FCScanner::FCScanner()
 			getNextToken();
 			continue;
 		default:
+			m_semanticContext.pushScope();
 			stmt = parseSeqExpr();
+			m_semanticContext.popScope();
 			break;
 		}
 
@@ -232,7 +234,7 @@ int FCScanner::getTokPrecedence()
 	case static_cast<int>(FCToken::tok_parenthes_open):
 		return parseParenExpr();
 	case static_cast<int>(FCToken::tok_brace_open):
-		return parseBraceExpr();
+		return parseBlockExpr();
 	case static_cast<int>(FCToken::tok_if):
 		return ParseIfExpr();
 	case static_cast<int>(FCToken::tok_for):
@@ -315,19 +317,6 @@ int FCScanner::getTokPrecedence()
 
 	if (m_curTok != static_cast<int>(FCToken::tok_parenthes_close))
 		return logError("expected ')'");
-	getNextToken();
-	return V;
-}
-
-::std::unique_ptr<FCExprAST> FCScanner::parseBraceExpr()
-{
-	getNextToken();
-	auto V = parseSeqExpr();
-	if (!V)
-		return nullptr;
-
-	if (m_curTok != static_cast<int>(FCToken::tok_brace_close))
-		return logError("expected '}'");
 	getNextToken();
 	return V;
 }
@@ -415,7 +404,7 @@ int FCScanner::getTokPrecedence()
 
 	getNextToken();
 
-	m_semanticContext.pushScopeForFunc(funName);
+	m_semanticContext.pushFunctionScope(funName);
 
 	std::vector<FCVariableExprAST> ArgNames;
 	for (auto &arg : Args)
@@ -444,8 +433,6 @@ std::unique_ptr<FCFunctionAST> FCScanner::parseDefinition()
 		return nullptr;
 	}
 
-	getNextToken();
-
 	auto body = parseBlockExpr();
 	if (!body)
 	{
@@ -461,7 +448,7 @@ std::unique_ptr<FCFunctionAST> FCScanner::parseDefinition()
 			d->slot = slot++;
 	}
 	
-	m_semanticContext.popScopeForFunc(m_currentFunc);
+	m_semanticContext.popFunctionScope(m_currentFunc);
 	m_currentFunc = "";
 	return std::make_unique<FCFunctionAST>(std::move(Proto), std::move(body), slot);
 }
@@ -503,7 +490,7 @@ std::unique_ptr<FCExprAST> FCScanner::ParseForExpr()
 	std::string VarName = m_identifierStr;
 	getNextToken();
 
-	m_semanticContext.pushScopeForFunc(m_currentFunc);
+	m_semanticContext.pushFunctionScope(m_currentFunc);
 	VarDeclPtr decl = std::make_shared<VarDecl>(VarName, "int");
 	m_semanticContext.insertVariableInCurrentScope(m_currentFunc, VarName, decl);
 
@@ -538,7 +525,7 @@ std::unique_ptr<FCExprAST> FCScanner::ParseForExpr()
 
 	auto Body = parseExpression();
 
-	m_semanticContext.popScopeForFunc(m_currentFunc);
+	m_semanticContext.popFunctionScope(m_currentFunc);
 
 	return std::make_unique<FCForExprAST>(decl, std::move(Start), std::move(End),
 										  std::move(Step), std::move(Body));
@@ -609,6 +596,8 @@ std::unique_ptr<FCExprAST> FCScanner::ParseVarExpr()
         return std::make_unique<FCBlockExprAST>(std::move(expressions));
     }
 
+	m_semanticContext.pushScope();
+
     while (true) {
         auto expr = parseExpression();
         if (!expr)
@@ -630,6 +619,8 @@ std::unique_ptr<FCExprAST> FCScanner::ParseVarExpr()
             return logError("expected ';' or '}' in block");
         }
     }
+
+	m_semanticContext.popScope();
 
     return std::make_unique<FCBlockExprAST>(std::move(expressions));
 }
