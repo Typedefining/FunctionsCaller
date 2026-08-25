@@ -103,6 +103,17 @@ namespace
 		return makeDangleValue();
 	}
 
+	FCValue evaluateBlock(const FCBlockExprAST* node, FCEvaluationContext& context)
+	{
+		FCValue result = makeDangleValue();
+		for (const auto& expr : node->getExpressions()) {
+			result = evaluateExpression(expr.get(), context);
+			if (result.type == FCValueCategory::Dangle)
+				return result;
+		}
+		return result;
+	}
+
 	FCValue evaluateSequence(const FCSeqExprAST *node, FCEvaluationContext &context)
 	{
 		FCValue result;
@@ -343,6 +354,10 @@ FCValue evaluateExpression(
 	if (auto *node =
 			dynamic_cast<const FCForExprAST *>(expression))
 		return evaluateFor(node, context);
+
+	if (auto* node = 
+			dynamic_cast<const FCBlockExprAST*>(expression))
+		return evaluateBlock(node, context);
 
 	if (auto *node =
 			dynamic_cast<const FCSeqExprAST *>(expression))

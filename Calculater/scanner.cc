@@ -229,8 +229,10 @@ int FCScanner::getTokPrecedence()
 		return parseNumberExpr();
 	case static_cast<int>(FCToken::tok_string):
 		return parseStringExpr();
-	case '(':
+	case static_cast<int>(FCToken::tok_parenthes_open):
 		return parseParenExpr();
+	case static_cast<int>(FCToken::tok_brace_open):
+		return parseBraceExpr();
 	case static_cast<int>(FCToken::tok_if):
 		return ParseIfExpr();
 	case static_cast<int>(FCToken::tok_for):
@@ -311,11 +313,25 @@ int FCScanner::getTokPrecedence()
 	if (!V)
 		return nullptr;
 
-	if (m_curTok != ')')
+	if (m_curTok != static_cast<int>(FCToken::tok_parenthes_close))
 		return logError("expected ')'");
 	getNextToken();
 	return V;
 }
+
+::std::unique_ptr<FCExprAST> FCScanner::parseBraceExpr()
+{
+	getNextToken();
+	auto V = parseSeqExpr();
+	if (!V)
+		return nullptr;
+
+	if (m_curTok != static_cast<int>(FCToken::tok_brace_close))
+		return logError("expected '}'");
+	getNextToken();
+	return V;
+}
+
 ::std::unique_ptr<FCExprAST> FCScanner::parseIdentifierExpr()
 {
 	std::string IdName = m_identifierStr;
@@ -421,22 +437,33 @@ std::unique_ptr<FCFunctionAST> FCScanner::parseDefinition()
 
 	m_currentFunc = Proto->m_funcName;
 
-	// 只解析一个表达式作为函数体
-	if (auto E = parseExpression())
+	// 将brace内的表达式视为函数体，解析后将函数体与原型绑定
+	if (m_curTok != static_cast<int>(FCToken::tok_brace_open))
 	{
-		int slot = 0;
-		auto &decls = m_semanticContext.functionDeclarations(m_currentFunc);
-		for (auto &d : decls)
-		{
-			if (d->slot < 0)
-				d->slot = slot++;
-		}
-		m_semanticContext.popScopeForFunc(m_currentFunc);
-		m_currentFunc = "";
-		return std::make_unique<FCFunctionAST>(std::move(Proto), std::move(E), slot);
+		logErrorP("expected '{' in function definition");
+		return nullptr;
 	}
 
-	return nullptr;
+	getNextToken();
+
+	auto body = parseBlockExpr();
+	if (!body)
+	{
+		logErrorP("failed to parse function body");
+		return nullptr;
+	}
+
+	int slot = 0;
+	auto &decls = m_semanticContext.functionDeclarations(m_currentFunc);
+	for (auto &d : decls)
+	{
+		if (d->slot < 0)
+			d->slot = slot++;
+	}
+	
+	m_semanticContext.popScopeForFunc(m_currentFunc);
+	m_currentFunc = "";
+	return std::make_unique<FCFunctionAST>(std::move(Proto), std::move(body), slot);
 }
 
 std::unique_ptr<FCExprAST> FCScanner::ParseIfExpr()
@@ -569,6 +596,44 @@ std::unique_ptr<FCExprAST> FCScanner::ParseVarExpr()
 	return std::make_unique<FCVarDeclExprAST>(decl, std::move(init));
 }
 
+::std::unique_ptr<FCExprAST> FCScanner::parseBlockExpr()
+{
+    if (m_curTok != static_cast<int>(FCToken::tok_brace_open))
+        return logError("expected '{' to start block");
+    getNextToken();
+
+    std::vector<std::unique_ptr<FCExprAST>> expressions;
+    // 允许空块
+    if (m_curTok == static_cast<int>(FCToken::tok_brace_close)) {
+        getNextToken();
+        return std::make_unique<FCBlockExprAST>(std::move(expressions));
+    }
+
+    while (true) {
+        auto expr = parseExpression();
+        if (!expr)
+            return nullptr;
+        expressions.push_back(std::move(expr));
+
+        if (m_curTok == ';') {
+            getNextToken();
+            // 分号后可能紧跟 '}'，表示空语句
+            if (m_curTok == static_cast<int>(FCToken::tok_brace_close)) {
+                getNextToken();
+                break;
+            }
+            continue;
+        } else if (m_curTok == static_cast<int>(FCToken::tok_brace_close)) {
+            getNextToken();
+            break;
+        } else {
+            return logError("expected ';' or '}' in block");
+        }
+    }
+
+    return std::make_unique<FCBlockExprAST>(std::move(expressions));
+}
+
 /// 解析表达式序列：expr (','|';' expr)*
 ::std::unique_ptr<FCExprAST> FCScanner::parseSeqExpr()
 {
@@ -585,6 +650,7 @@ std::unique_ptr<FCExprAST> FCScanner::ParseVarExpr()
 		if (m_curTok == static_cast<int>(FCToken::tok_eof) ||
 			m_curTok == static_cast<int>(FCToken::tok_def) ||
 			m_curTok == static_cast<int>(FCToken::tok_else) ||
+			m_curTok == static_cast<int>(FCToken::tok_brace_close) ||
 			m_curTok == static_cast<int>(FCToken::tok_end))
 			break;
 		auto next = parseExpression();

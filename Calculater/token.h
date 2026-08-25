@@ -23,6 +23,14 @@ namespace FCMarks
 		tok_for = 9,
 		tok_in = 10,
 		tok_var = 11,
+		//(
+		tok_parenthes_open = 12,
+		//)
+		tok_parenthes_close = 13,
+		//{
+		tok_brace_open = 14,
+		//}
+		tok_brace_close = 15,
 		tok_end,
 	};
 	enum struct FCTypeDescribe
@@ -227,6 +235,26 @@ namespace FCExprClass
 		
 		const std::vector<std::unique_ptr<FCExprAST>>& getStatements() const {
 			return m_statements;
+		}
+	};
+
+	class FCBlockExprAST : public FCExprAST
+	{
+		std::vector<std::unique_ptr<FCExprAST>> m_expressions;
+
+	public:
+		explicit FCBlockExprAST(std::vector<std::unique_ptr<FCExprAST>> exprs)
+			: m_expressions(std::move(exprs)) {}
+
+		const std::vector<std::unique_ptr<FCExprAST>> &getExpressions() const
+		{
+			return m_expressions;
+		}
+
+		void info() override
+		{
+			std::cout << "FCBlockExprAST with " << m_expressions.size()
+					  << " expressions" << std::endl;
 		}
 	};
 }

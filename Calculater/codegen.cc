@@ -862,6 +862,22 @@ llvm::Value* codegenStandaloneTopLevel(const FCExprAST* expression,
 	return invalid ? nullptr : mainFunction;
 }
 
+llvm::Value* codegenBlock(const FCBlockExprAST* expression, FCCodegenContext& context)
+{
+    auto oldNamedValues = std::move(context.namedValues);
+    context.namedValues = oldNamedValues;
+
+    llvm::Value* lastValue = nullptr;
+    for (const auto& expr : expression->getExpressions()) {
+        lastValue = codegen(expr.get(), context);
+        if (!lastValue)
+            return nullptr;
+    }
+
+    context.namedValues = std::move(oldNamedValues);
+    return lastValue;
+}
+
 llvm::Value* FCExprClass::codegen(FCExprAST* expression,
 	FCCodegenContext& context)
 {
@@ -885,6 +901,8 @@ llvm::Value* FCExprClass::codegen(FCExprAST* expression,
 		return codegenIf(conditional, context);
 	if (auto* loop = dynamic_cast<FCForExprAST*>(expression))
 		return codegenFor(loop, context);
+	if (auto* block = dynamic_cast<FCBlockExprAST*>(expression))
+		return codegenBlock(block, context);
 	if (auto* sequence = dynamic_cast<FCSeqExprAST*>(expression))
 		return codegenSequence(sequence, context);
 	if (auto* declaration = dynamic_cast<FCVarDeclExprAST*>(expression))
