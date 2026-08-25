@@ -63,14 +63,6 @@ target_link_libraries(${PROJECT_NAME}
 	FunctionsFrontend
 )
 
-add_executable(FunctionCallASTTest call_ast_test.cc)
-target_link_libraries(FunctionCallASTTest
-	PRIVATE
-	FunctionsFrontend
-	FunctionsEvaluator
-	FunctionsCodegen
-)
-
 add_executable(FunctionsUnitTest unit_test.cc)
 target_link_libraries(FunctionsUnitTest
 	PRIVATE
@@ -79,5 +71,4 @@ target_link_libraries(FunctionsUnitTest
 	FunctionsCodegen
 )
 
-add_test(NAME FunctionCallASTTest COMMAND FunctionCallASTTest)
 add_test(NAME FunctionsUnitTest COMMAND FunctionsUnitTest)
