@@ -39,12 +39,8 @@ public:
   bool hasFunction(const std::string &functionName) const;
   bool registerFunction(const std::string &functionName);
 
-  std::vector<VarDeclPtr> &
-  functionDeclarations(const std::string &functionName);
-  const std::vector<VarDeclPtr> &
-  functionDeclarations(const std::string &functionName) const;
-
-  const std::unordered_map<std::string, VarDeclPtr>& scopeDeclarations() const { return m_scopeStack.back().variables; }
+  const std::unordered_map<std::string, VarDeclPtr>& currentScopeDeclarations() const;
+  const std::unordered_map<std::string, VarDeclPtr>& currentFunctionDeclarations() const;
 
   void dumpScopes() const;
 
@@ -59,7 +55,6 @@ private:
 
   std::unordered_map<char, int> m_binopPrecedence;
   std::vector<Scope> m_scopeStack;
-  std::unordered_map<std::string, std::vector<VarDeclPtr>> m_funcDeclList;
   std::vector<VarDeclPtr> m_scopeDeclList;
   std::set<std::string> m_functionSet;
   std::string m_currentFunctionName;

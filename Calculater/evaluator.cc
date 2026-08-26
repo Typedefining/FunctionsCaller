@@ -66,7 +66,6 @@ FCValue evaluateFor(const FCForExprAST *node, FCEvaluationContext &context) {
   if (node->getDecl() == nullptr || context.callStack.empty())
     return makeDangleValue();
   const auto start = evaluateExpression(node->getStart(), context);
-  const auto end = evaluateExpression(node->getEnd(), context);
   FCValue step;
   if (node->getStep() == nullptr) {
     step.type = FCValueCategory::Integer;
@@ -76,7 +75,6 @@ FCValue evaluateFor(const FCForExprAST *node, FCEvaluationContext &context) {
   }
 
   if (start.type != FCValueCategory::Integer ||
-      end.type != FCValueCategory::Integer ||
       step.type != FCValueCategory::Integer)
     return makeDangleValue();
 

@@ -299,7 +299,7 @@ FCScanner::parseBinOpRHS(int ExprPrec, std::unique_ptr<FCExprAST> LHS) {
 
 ::std::unique_ptr<FCExprAST> FCScanner::parseIdentifierExpr() {
   std::string IdName = m_identifierStr;
-  getNextToken(); // 拿掉 identifier
+  getNextToken();
 
   // 如果后面不是 '(', 那就是变量引用（静态绑定：在 parse 时查找 VarDecl 并把
   // decl 绑入 AST）
@@ -375,13 +375,12 @@ FCScanner::parseBinOpRHS(int ExprPrec, std::unique_ptr<FCExprAST> LHS) {
 
   getNextToken();
 
-  m_semanticContext.pushFunctionScope(funName);
+
 
   std::vector<FCVariableExprAST> ArgNames;
   for (auto &arg : Args) {
+		//仅记录函数参数个数，函数栈帧size分配在define中进行
     auto decl = std::make_shared<VarDecl>(std::get<0>(arg), std::get<1>(arg));
-    m_semanticContext.insertVariableInCurrentScope(funName, std::get<0>(arg),
-                                                   decl);
     ArgNames.push_back(FCVariableExprAST(decl));
   }
   return std::make_unique<FCPrototypeAST>(funName, std::move(ArgNames));
@@ -395,6 +394,11 @@ std::unique_ptr<FCFunctionAST> FCScanner::parseDefinition() {
 
   m_currentFunc = Proto->m_funcName;
 
+  m_semanticContext.pushFunctionScope(m_currentFunc);
+	for (const auto &arg : Proto->getArgs()) {
+		m_semanticContext.insertVariableInCurrentScope(m_currentFunc, arg.decl->name, arg.decl);
+	}
+
   // 将brace内的表达式视为函数体，解析后将函数体与原型绑定
   if (m_curTok != static_cast<int>(FCToken::tok_brace_open)) {
     logErrorP("expected '{' in function definition");
@@ -407,17 +411,10 @@ std::unique_ptr<FCFunctionAST> FCScanner::parseDefinition() {
     return nullptr;
   }
 
-  int slot = 0;
-  auto &decls = m_semanticContext.functionDeclarations(m_currentFunc);
-  for (auto &d : decls) {
-    if (d->slot < 0)
-      d->slot = slot++;
-  }
-
   m_semanticContext.popFunctionScope(m_currentFunc);
   m_currentFunc = "";
   return std::make_unique<FCFunctionAST>(std::move(Proto), std::move(body),
-                                         slot);
+                                         m_semanticContext.currentFunctionDeclarations().size());
 }
 
 std::unique_ptr<FCExprAST> FCScanner::ParseIfExpr() {
@@ -468,7 +465,7 @@ std::unique_ptr<FCExprAST> FCScanner::ParseForExpr() {
   if (!Start)
     return nullptr;
 
-  if (m_curTok != ',')
+  if (m_curTok != static_cast<int>(FCToken::tok_comma))
     return logError("expected ',' after for start value");
   getNextToken();
 
@@ -477,7 +474,7 @@ std::unique_ptr<FCExprAST> FCScanner::ParseForExpr() {
     return nullptr;
 
   std::unique_ptr<FCExprAST> Step;
-  if (m_curTok == ',') {
+  if (m_curTok == static_cast<int>(FCToken::tok_comma)) {
     getNextToken();
     Step = parseExpression();
     if (!Step)
@@ -562,7 +559,6 @@ std::unique_ptr<FCExprAST> FCScanner::ParseVarExpr() {
 
     if (m_curTok == ';') {
       getNextToken();
-      // 分号后可能紧跟 '}'，表示空语句
       if (m_curTok == static_cast<int>(FCToken::tok_brace_close)) {
         getNextToken();
         break;

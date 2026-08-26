@@ -12,7 +12,6 @@ void FCSemanticContext::reset() {
   m_binopPrecedence = {{'=', 5},  {'<', 9},  {'+', 10},
                        {'-', 10}, {'*', 20}, {'/', 20}};
   m_scopeStack.clear();
-  m_funcDeclList.clear();
   m_functionSet.clear();
   m_currentFunctionName.clear();
 
@@ -54,10 +53,6 @@ FCSemanticContext::lookupVariableDecl(const std::string &functionName,
                                       const std::string &name) const {
 
   for (auto it = m_scopeStack.rbegin(); it != m_scopeStack.rend(); ++it) {
-    if (!functionName.empty() && it->functionName != functionName) {
-      continue;
-    }
-
     auto varIt = it->variables.find(name);
     if (varIt != it->variables.end()) {
       return varIt->second;
@@ -118,12 +113,8 @@ void FCSemanticContext::insertVariableInCurrentScope(
   }
 
   currentScope.variables[name] = declaration;
-
-  if (!functionName.empty()) {
-    m_funcDeclList[functionName].push_back(declaration);
-  }
-
   declaration->scopeLevel = static_cast<int>(m_scopeStack.size()) - 1;
+  declaration->slot = static_cast<int>(currentScope.variables.size());
 }
 
 void FCSemanticContext::insertGlobalVariable(const std::string &name,
@@ -156,16 +147,22 @@ bool FCSemanticContext::registerFunction(const std::string &functionName) {
   return true;
 }
 
-std::vector<VarDeclPtr> &
-FCSemanticContext::functionDeclarations(const std::string &functionName) {
-  return m_funcDeclList[functionName];
+const std::unordered_map<std::string, VarDeclPtr> &
+FCSemanticContext::currentScopeDeclarations() const {
+  return m_scopeStack.back().variables;
 }
 
-const std::vector<VarDeclPtr> &
-FCSemanticContext::functionDeclarations(const std::string &functionName) const {
-  static const std::vector<VarDeclPtr> empty;
-  const auto it = m_funcDeclList.find(functionName);
-  return it == m_funcDeclList.end() ? empty : it->second;
+const std::unordered_map<std::string, VarDeclPtr> &
+FCSemanticContext::currentFunctionDeclarations() const {
+  for (auto it = m_scopeStack.rbegin(); it != m_scopeStack.rend(); ++it) {
+    if (it->functionName == m_currentFunctionName) {
+      return it->variables;
+    }
+  }
+
+  printf("No current function scope found");
+  assert(false);
+  return m_scopeStack.back().variables; // Fallback, should not reach here
 }
 
 void FCSemanticContext::dumpScopes() const {
