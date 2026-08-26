@@ -92,19 +92,14 @@ FCValue evaluateFor(const FCForExprAST *node, FCEvaluationContext &context) {
 
 FCValue evaluateBlock(const FCBlockExprAST *node,
                       FCEvaluationContext &context) {
-  bool hasFrame = !context.callStack.empty();
-  size_t frameIndex = hasFrame ? context.callStack.size() - 1 : 0;
-  size_t oldSize = hasFrame ? context.callStack[frameIndex].locals.size() : 0;
-
   FCValue result = makeDangleValue();
+
   for (const auto &expr : node->getExpressions()) {
     result = evaluateExpression(expr.get(), context);
+    if (result.type == FCValueCategory::Dangle)
+      return result;
   }
 
-  if (hasFrame) {
-    context.callStack[frameIndex].locals.resize(oldSize);
-  }
-  
   return result;
 }
 
