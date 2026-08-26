@@ -55,7 +55,6 @@ private:
 
   std::unordered_map<char, int> m_binopPrecedence;
   std::vector<Scope> m_scopeStack;
-  std::vector<VarDeclPtr> m_scopeDeclList;
   std::set<std::string> m_functionSet;
   std::string m_currentFunctionName;
 };
