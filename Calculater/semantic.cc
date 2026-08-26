@@ -112,9 +112,10 @@ void FCSemanticContext::insertVariableInCurrentScope(
     return;
   }
 
-  currentScope.variables[name] = declaration;
   declaration->scopeLevel = static_cast<int>(m_scopeStack.size()) - 1;
   declaration->slot = static_cast<int>(currentScope.variables.size());
+
+  currentScope.variables[name] = declaration;
 }
 
 void FCSemanticContext::insertGlobalVariable(const std::string &name,

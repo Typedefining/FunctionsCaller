@@ -411,10 +411,11 @@ std::unique_ptr<FCFunctionAST> FCScanner::parseDefinition() {
     return nullptr;
   }
 
-  m_semanticContext.popFunctionScope(m_currentFunc);
-  m_currentFunc = "";
-  return std::make_unique<FCFunctionAST>(std::move(Proto), std::move(body),
+  auto &ret = std::make_unique<FCFunctionAST>(std::move(Proto), std::move(body),
                                          m_semanticContext.currentFunctionDeclarations().size());
+
+	m_semanticContext.popFunctionScope(m_currentFunc);
+	return std::move(ret);
 }
 
 std::unique_ptr<FCExprAST> FCScanner::ParseIfExpr() {
@@ -453,7 +454,7 @@ std::unique_ptr<FCExprAST> FCScanner::ParseForExpr() {
   std::string VarName = m_identifierStr;
   getNextToken();
 
-  m_semanticContext.pushFunctionScope(m_currentFunc);
+  m_semanticContext.pushScope();
   VarDeclPtr decl = std::make_shared<VarDecl>(VarName, "int");
   m_semanticContext.insertVariableInCurrentScope(m_currentFunc, VarName, decl);
 
@@ -487,7 +488,7 @@ std::unique_ptr<FCExprAST> FCScanner::ParseForExpr() {
 
   auto Body = parseExpression();
 
-  m_semanticContext.popFunctionScope(m_currentFunc);
+  m_semanticContext.popScope();
 
   return std::make_unique<FCForExprAST>(decl, std::move(Start), std::move(End),
                                         std::move(Step), std::move(Body));
