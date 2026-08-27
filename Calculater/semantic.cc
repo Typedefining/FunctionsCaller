@@ -157,20 +157,6 @@ FCSemanticContext::currentScopeDeclarations() const {
   return m_scopeStack.back().variables;
 }
 
-const std::unordered_map<std::string, VarDeclPtr> &
-FCSemanticContext::currentFunctionDeclarations() const {
-  for (const auto &scope : m_scopeStack) {
-    if (!scope.functionName.empty() &&
-        scope.functionName == m_currentFunctionName) {
-      return scope.variables;
-    }
-  }
-
-  printf("No current function scope found");
-  assert(false);
-  return m_scopeStack.back().variables; // Fallback, should not reach here
-}
-
 int FCSemanticContext::currentFunctionFrameSize() const {
   return m_frame.frameSize();
 }

@@ -51,7 +51,6 @@ public:
   bool registerFunction(const std::string &functionName);
 
   const std::unordered_map<std::string, VarDeclPtr>& currentScopeDeclarations() const;
-  const std::unordered_map<std::string, VarDeclPtr>& currentFunctionDeclarations() const;
 
   int currentFunctionFrameSize() const;
   int functionFrameSize(const std::string &functionName) const;
