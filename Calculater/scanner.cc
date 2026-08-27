@@ -412,7 +412,7 @@ std::unique_ptr<FCFunctionAST> FCScanner::parseDefinition() {
   }
 
   auto &ret = std::make_unique<FCFunctionAST>(std::move(Proto), std::move(body),
-                                         m_semanticContext.currentFunctionDeclarations().size());
+                                         m_semanticContext.currentFunctionFrameSize());
 
 	m_semanticContext.popFunctionScope(m_currentFunc);
 	return std::move(ret);

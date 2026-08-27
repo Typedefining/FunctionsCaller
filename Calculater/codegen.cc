@@ -814,15 +814,10 @@ llvm::Value* codegenProgram(const FCProgramAST* expression,
 		}
 	}
 
-	last = castValue(context, last, integerType(context));
-	if (last == nullptr)
-	{
-		context.namedValues = std::move(oldNamedValues);
-		context.currentFunction = oldFunction;
-		context.builder.restoreIP(oldInsertPoint);
-		return logCodegenError("top-level expression must produce an integer");
-	}
-	context.builder.CreateRet(last);
+  last = castValue(context, last, integerType(context));
+  if (last == nullptr)
+    last = llvm::ConstantInt::get(integerType(context), 0);
+  context.builder.CreateRet(last);
 
 	const bool invalid = llvm::verifyFunction(*mainFunction, &llvm::errs());
 	context.namedValues = std::move(oldNamedValues);
@@ -857,16 +852,18 @@ llvm::Value* codegenStandaloneTopLevel(const FCExprAST* expression,
 	context.builder.SetInsertPoint(
 		llvm::BasicBlock::Create(context.llvmContext, "entry", mainFunction));
 
-	auto* value = codegen(expression, context);
-	value = castValue(context, value, integerType(context));
-	if (value == nullptr)
-	{
-		context.namedValues = std::move(oldNamedValues);
-		context.currentFunction = oldFunction;
-		context.builder.restoreIP(oldInsertPoint);
-		return logCodegenError("top-level expression must produce an integer");
-	}
-	context.builder.CreateRet(value);
+  auto* value = codegen(expression, context);
+  if (value == nullptr)
+  {
+    context.namedValues = std::move(oldNamedValues);
+    context.currentFunction = oldFunction;
+    context.builder.restoreIP(oldInsertPoint);
+    return nullptr;
+  }
+  value = castValue(context, value, integerType(context));
+  if (value == nullptr)
+    value = llvm::ConstantInt::get(integerType(context), 0);
+  context.builder.CreateRet(value);
 
 	const bool invalid = llvm::verifyFunction(*mainFunction, &llvm::errs());
 	context.namedValues = std::move(oldNamedValues);

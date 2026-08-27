@@ -14,7 +14,8 @@ void FCSemanticContext::reset() {
   m_scopeStack.clear();
   m_functionSet.clear();
   m_currentFunctionName.clear();
-
+  m_frame.reset();
+  m_functionFrameSizes.clear();
 }
 
 int FCSemanticContext::getOperatorPrecedence(char op) const {
@@ -35,6 +36,7 @@ void FCSemanticContext::popScope() {
 void FCSemanticContext::pushFunctionScope(const std::string &functionName) {
   m_scopeStack.emplace_back(Scope(functionName));
   m_currentFunctionName = functionName;
+  m_frame.reset();
 }
 
 void FCSemanticContext::popFunctionScope(const std::string &functionName) {
@@ -44,7 +46,9 @@ void FCSemanticContext::popFunctionScope(const std::string &functionName) {
   }
 
   if (m_currentFunctionName == functionName) {
+    m_functionFrameSizes[functionName] = m_frame.frameSize();
     m_currentFunctionName.clear();
+    m_frame.reset();
   }
 }
 
@@ -113,7 +117,7 @@ void FCSemanticContext::insertVariableInCurrentScope(
   }
 
   declaration->scopeLevel = static_cast<int>(m_scopeStack.size()) - 1;
-  declaration->slot = static_cast<int>(currentScope.variables.size());
+  declaration->slot = m_frame.allocateSlot();
 
   currentScope.variables[name] = declaration;
 }
@@ -155,9 +159,10 @@ FCSemanticContext::currentScopeDeclarations() const {
 
 const std::unordered_map<std::string, VarDeclPtr> &
 FCSemanticContext::currentFunctionDeclarations() const {
-  for (auto it = m_scopeStack.rbegin(); it != m_scopeStack.rend(); ++it) {
-    if (it->functionName == m_currentFunctionName) {
-      return it->variables;
+  for (const auto &scope : m_scopeStack) {
+    if (!scope.functionName.empty() &&
+        scope.functionName == m_currentFunctionName) {
+      return scope.variables;
     }
   }
 
@@ -166,10 +171,20 @@ FCSemanticContext::currentFunctionDeclarations() const {
   return m_scopeStack.back().variables; // Fallback, should not reach here
 }
 
+int FCSemanticContext::currentFunctionFrameSize() const {
+  return m_frame.frameSize();
+}
+
+int FCSemanticContext::functionFrameSize(const std::string &functionName) const {
+  const auto it = m_functionFrameSizes.find(functionName);
+  return it == m_functionFrameSizes.end() ? 0 : it->second;
+}
+
 void FCSemanticContext::dumpScopes() const {
   printf("=== Scope Debug Info ===\n");
   printf("Scope depth: %zu\n", m_scopeStack.size());
   printf("Active function: %s\n", m_currentFunctionName.c_str());
+  printf("Current function frame size: %d\n", m_frame.frameSize());
 
   for (size_t i = 0; i < m_scopeStack.size(); ++i) {
     const auto &scope = m_scopeStack[i];

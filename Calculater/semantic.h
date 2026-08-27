@@ -12,6 +12,17 @@ namespace FCMarks {
 struct VarDecl;
 using VarDeclPtr = std::shared_ptr<VarDecl>;
 
+class FCFunctionFrame {
+public:
+  void reset() { m_nextSlot = 0; }
+
+  int allocateSlot() { return m_nextSlot++; }
+  int frameSize() const { return m_nextSlot; }
+
+private:
+  int m_nextSlot = 0;
+};
+
 class FCSemanticContext {
 public:
   FCSemanticContext();
@@ -42,6 +53,9 @@ public:
   const std::unordered_map<std::string, VarDeclPtr>& currentScopeDeclarations() const;
   const std::unordered_map<std::string, VarDeclPtr>& currentFunctionDeclarations() const;
 
+  int currentFunctionFrameSize() const;
+  int functionFrameSize(const std::string &functionName) const;
+
   void dumpScopes() const;
 
 private:
@@ -57,6 +71,8 @@ private:
   std::vector<Scope> m_scopeStack;
   std::set<std::string> m_functionSet;
   std::string m_currentFunctionName;
+  FCFunctionFrame m_frame;
+  std::unordered_map<std::string, int> m_functionFrameSizes;
 };
 
 } // namespace FCMarks

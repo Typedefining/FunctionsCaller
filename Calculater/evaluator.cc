@@ -83,11 +83,15 @@ FCValue evaluateFor(const FCForExprAST *node, FCEvaluationContext &context) {
   if (slot < 0 || slot >= static_cast<int>(frame.locals.size()))
     return makeDangleValue();
   frame.locals[slot] = start;
+
+  FCValue result = start;
   while (evaluateExpression(node->getEnd(), context).evaluteVal.intVal != 0) {
-    evaluateExpression(node->getBody(), context);
+    result = evaluateExpression(node->getBody(), context);
+    if (result.type == FCValueCategory::Dangle)
+      return result;
     frame.locals[slot].evaluteVal.intVal += step.evaluteVal.intVal;
   }
-  return makeDangleValue();
+  return result;
 }
 
 FCValue evaluateBlock(const FCBlockExprAST *node,
