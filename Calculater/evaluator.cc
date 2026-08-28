@@ -149,14 +149,14 @@ Frame *frameForDeclaration(const VarDecl *declaration,
                            FCEvaluationContext &context) {
   if (declaration == nullptr)
     return nullptr;
-  if (declaration->scopeLevel == 0) {
-    if (declaration->slot < 0)
-      return nullptr;
-    if (declaration->slot >=
-        static_cast<int>(context.globalFrame.locals.size()))
-      context.globalFrame.locals.resize(declaration->slot + 1);
-    return &context.globalFrame;
-  }
+  // if (declaration->scopeLevel == 0) {
+  //   if (declaration->slot < 0)
+  //     return nullptr;
+  //   if (declaration->slot >=
+  //       static_cast<int>(context.globalFrame.locals.size()))
+  //     context.globalFrame.locals.resize(declaration->slot + 1);
+  //   return &context.globalFrame;
+  // }
   if (context.callStack.empty() || declaration->slot < 0)
     return nullptr;
   Frame &frame = context.currentFrame();

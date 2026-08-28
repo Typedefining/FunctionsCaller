@@ -47,7 +47,6 @@ struct VarDecl {
   std::string name;
   std::string typeName;
   int slot = -1;
-  int scopeLevel = 0;
 
   VarDecl(const std::string &n, const std::string &t) : name(n), typeName(t) {}
 };

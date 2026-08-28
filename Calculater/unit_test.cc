@@ -911,27 +911,26 @@ private:
             auto dup = std::make_shared<VarDecl>("g2", "int");
             ctx.insertGlobalVariable("g", dup); // 触发全局重复声明错误分支
 
-            ctx.pushFunctionScope("fn");
+            ctx.pushFunctionScope();
             auto p = std::make_shared<VarDecl>("p", "int");
-            ctx.insertVariableInCurrentScope("fn", "p", p);
+            ctx.insertVariableInCurrentScope("p", p);
 
-            expect(ctx.lookupVariableDecl("fn", "p") == p, "semantic-api - lookup local hit");
-            expect(ctx.lookupVariableDecl("fn", "g") == g, "semantic-api - lookup falls back to global");
-            expect(ctx.lookupVariableDecl("fn", "missing") == nullptr, "semantic-api - lookup miss");
-            expect(ctx.lookupVariableInCurrentScope("fn", "p") == p, "semantic-api - current scope hit");
-            expect(ctx.lookupVariableInCurrentScope("fn", "missing") == nullptr, "semantic-api - current scope miss");
-            expect(ctx.lookupVariableInCurrentScope("other", "p") == nullptr, "semantic-api - current scope fn mismatch");
+            expect(ctx.lookupVariableDecl("p") == p, "semantic-api - lookup local hit");
+            expect(ctx.lookupVariableDecl("g") == g, "semantic-api - lookup falls back to global");
+            expect(ctx.lookupVariableDecl("missing") == nullptr, "semantic-api - lookup miss");
+            expect(ctx.lookupVariableInCurrentScope("p") == p, "semantic-api - current scope hit");
+            expect(ctx.lookupVariableInCurrentScope("missing") == nullptr, "semantic-api - current scope miss");
+            expect(ctx.lookupVariableInCurrentScope("p") == nullptr, "semantic-api - current scope fn mismatch");
 
             auto again = std::make_shared<VarDecl>("p2", "int");
-            ctx.insertVariableInCurrentScope("fn", "p", again); // 触发局部重复声明错误分支
+            ctx.insertVariableInCurrentScope("p", again); // 触发局部重复声明错误分支
 
-            expect(ctx.currentFunctionDeclarations().size() == 1, "semantic-api - currentFunctionDeclarations");
             expect(ctx.currentFunctionFrameSize() == 1, "semantic-api - currentFunctionFrameSize");
             expect(ctx.currentScopeDeclarations().size() == 1, "semantic-api - currentScopeDeclarations");
 
             ctx.dumpScopes();
 
-            ctx.popFunctionScope("fn");
+            ctx.popFunctionScope();
             expect(ctx.functionFrameSize("fn") == 1, "semantic-api - functionFrameSize recorded");
             expect(ctx.functionFrameSize("missing") == 0, "semantic-api - functionFrameSize miss");
 
@@ -941,13 +940,13 @@ private:
         {
             FCSemanticContext ctx;
             auto d = std::make_shared<VarDecl>("x", "int");
-            ctx.insertVariableInCurrentScope("f", "x", d); // 无活动作用域
+            ctx.insertVariableInCurrentScope("x", d); // 无活动作用域
             expect(true, "semantic-api - insert without active scope");
 
             // 空作用域栈上的查询
-            expect(ctx.lookupVariableInCurrentScope("f", "x") == nullptr,
+            expect(ctx.lookupVariableInCurrentScope("x") == nullptr,
                    "semantic-api - lookup current scope on empty stack");
-            expect(ctx.lookupVariableDecl("f", "x") == nullptr,
+            expect(ctx.lookupVariableDecl("x") == nullptr,
                    "semantic-api - lookup decl on empty stack");
         }
     }
@@ -1020,7 +1019,7 @@ private:
 
             // 局部变量但无调用帧
             auto localDecl = std::make_shared<VarDecl>("v", "int");
-            localDecl->scopeLevel = 1;
+            // localDecl->scopeLevel = 1;
             localDecl->slot = 0;
             auto localVar = std::make_unique<FCVariableExprAST>(localDecl);
             expect(evaluate(localVar.get(), ctx).type == FCValueCategory::Dangle,
@@ -1028,7 +1027,7 @@ private:
 
             // 全局变量但槽位非法
             auto negDecl = std::make_shared<VarDecl>("g", "int");
-            negDecl->scopeLevel = 0;
+            // negDecl->scopeLevel = 0;
             negDecl->slot = -1;
             auto negVar = std::make_unique<FCVariableExprAST>(negDecl);
             expect(evaluate(negVar.get(), ctx).type == FCValueCategory::Dangle,
@@ -1036,7 +1035,7 @@ private:
 
             // 局部变量槽位超出帧大小
             auto oobDecl = std::make_shared<VarDecl>("o", "int");
-            oobDecl->scopeLevel = 1;
+            // oobDecl->scopeLevel = 1;
             oobDecl->slot = 100;
             auto oobVar = std::make_unique<FCVariableExprAST>(oobDecl);
             ctx.pushFrame("oob");

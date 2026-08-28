@@ -23,8 +23,7 @@ private:
 
 	// 当前id
 	::std::string m_identifierStr;
-	// 当前激活的函数
-	::std::string m_currentFunc;
+
 	// 记录字符串字面量
 	::std::string m_stringLiteral;
 

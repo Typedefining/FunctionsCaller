@@ -13,7 +13,6 @@ FCScanner::FCScanner() {
   m_numIntgerVal = 0;
   m_numFloatVal = 0.0;
   m_curDouble = false;
-  m_currentFunc = "";
   m_identifierStr = "";
   m_stringLiteral = "";
   m_inputsBuffer = "";
@@ -26,7 +25,6 @@ FCScanner::analysis(const ::std::string &inputStr) {
   m_inputsBuffer = inputStr;
   m_idx = m_inputsBuffer.begin();
 
-	m_semanticContext.pushScope();
   getNextToken();
 
   std::vector<std::unique_ptr<FCExprAST>> statements;
@@ -55,7 +53,6 @@ FCScanner::analysis(const ::std::string &inputStr) {
     }
   }
 
-	m_semanticContext.popScope();
   // 如果只有一个语句，直接返回它
   if (statements.size() == 1) {
     return std::move(statements[0]);
@@ -73,7 +70,6 @@ void FCScanner::resetState() {
   m_numIntgerVal = 0;
   m_numFloatVal = 0.0;
   m_curDouble = false;
-  m_currentFunc = "";
   m_identifierStr = "";
   m_stringLiteral = "";
   m_inputsBuffer = "";
@@ -304,7 +300,7 @@ FCScanner::parseBinOpRHS(int ExprPrec, std::unique_ptr<FCExprAST> LHS) {
   // 如果后面不是 '(', 那就是变量引用（静态绑定：在 parse 时查找 VarDecl 并把
   // decl 绑入 AST）
   if (m_curTok != static_cast<int>(FCToken::tok_parenthes_open)) {
-    auto decl = m_semanticContext.lookupVariableDecl(m_currentFunc, IdName);
+    auto decl = m_semanticContext.lookupVariableDecl(IdName);
     if (!decl)
       return logError("unknown variable");
     return std::make_unique<FCVariableExprAST>(decl);
@@ -388,15 +384,15 @@ FCScanner::parseBinOpRHS(int ExprPrec, std::unique_ptr<FCExprAST> LHS) {
 
 std::unique_ptr<FCFunctionAST> FCScanner::parseDefinition() {
   getNextToken();
+
   auto Proto = parsePrototype();
   if (!Proto)
     return nullptr;
 
-  m_currentFunc = Proto->m_funcName;
+  auto function = m_semanticContext.scopedFunction();
 
-  m_semanticContext.pushFunctionScope(m_currentFunc);
-	for (const auto &arg : Proto->getArgs()) {
-		m_semanticContext.insertVariableInCurrentScope(m_currentFunc, arg.decl->name, arg.decl);
+  for (const auto &arg : Proto->getArgs()) {
+		m_semanticContext.insertVariableInCurrentScope(arg.decl->name, arg.decl);
 	}
 
   // 将brace内的表达式视为函数体，解析后将函数体与原型绑定
@@ -411,14 +407,14 @@ std::unique_ptr<FCFunctionAST> FCScanner::parseDefinition() {
     return nullptr;
   }
 
-  auto &ret = std::make_unique<FCFunctionAST>(std::move(Proto), std::move(body),
-                                         m_semanticContext.currentFunctionFrameSize());
-
-	m_semanticContext.popFunctionScope(m_currentFunc);
-	return std::move(ret);
+  size_t localCount = m_semanticContext.currentFunctionFrameSize();
+	return std::make_unique<FCFunctionAST>(std::move(Proto), std::move(body),
+                                         localCount);
 }
 
 std::unique_ptr<FCExprAST> FCScanner::ParseIfExpr() {
+  auto scopedGuard = m_semanticContext.scopedScope();
+
   getNextToken();
 
   auto Cond = parseExpression();
@@ -446,6 +442,8 @@ std::unique_ptr<FCExprAST> FCScanner::ParseIfExpr() {
 }
 
 std::unique_ptr<FCExprAST> FCScanner::ParseForExpr() {
+  auto scopedGuard = m_semanticContext.scopedScope();
+
   getNextToken();
 
   if (m_curTok != static_cast<int>(FCToken::tok_identifier))
@@ -454,9 +452,8 @@ std::unique_ptr<FCExprAST> FCScanner::ParseForExpr() {
   std::string VarName = m_identifierStr;
   getNextToken();
 
-  m_semanticContext.pushScope();
   VarDeclPtr decl = std::make_shared<VarDecl>(VarName, "int");
-  m_semanticContext.insertVariableInCurrentScope(m_currentFunc, VarName, decl);
+  m_semanticContext.insertVariableInCurrentScope(VarName, decl);
 
   if (m_curTok != '=')
     return logError("expected '=' after for variable");
@@ -487,8 +484,6 @@ std::unique_ptr<FCExprAST> FCScanner::ParseForExpr() {
   getNextToken();
 
   auto Body = parseExpression();
-
-  m_semanticContext.popScope();
 
   return std::make_unique<FCForExprAST>(decl, std::move(Start), std::move(End),
                                         std::move(Step), std::move(Body));
@@ -522,23 +517,25 @@ std::unique_ptr<FCExprAST> FCScanner::ParseVarExpr() {
     return nullptr;
 
   // 顶层声明进入程序全局作用域；函数内声明进入当前函数作用域。
-  if (m_currentFunc.empty()) {
+  if (!m_semanticContext.isInFunctionScope()) {
     if (m_semanticContext.lookupGlobalVariable(varName))
       return logError("global variable redeclaration");
     auto decl = std::make_shared<VarDecl>(varName, typeName);
     m_semanticContext.insertGlobalVariable(varName, decl);
     return std::make_unique<FCVarDeclExprAST>(decl, std::move(init));
   }
-  if (m_semanticContext.lookupVariableInCurrentScope(m_currentFunc, varName)) {
+  if (m_semanticContext.lookupVariableInCurrentScope(varName)) {
     return logError("variable redeclaration");
   }
   auto decl = std::make_shared<VarDecl>(varName, typeName);
-  m_semanticContext.insertVariableInCurrentScope(m_currentFunc, varName, decl);
+  m_semanticContext.insertVariableInCurrentScope(varName, decl);
 
   return std::make_unique<FCVarDeclExprAST>(decl, std::move(init));
 }
 
 ::std::unique_ptr<FCExprAST> FCScanner::parseBlockExpr() {
+  auto scopedGuard = m_semanticContext.scopedScope();
+
   if (m_curTok != static_cast<int>(FCToken::tok_brace_open))
     return logError("expected '{' to start block");
   getNextToken();
@@ -549,8 +546,6 @@ std::unique_ptr<FCExprAST> FCScanner::ParseVarExpr() {
     getNextToken();
     return std::make_unique<FCBlockExprAST>(std::move(expressions));
   }
-
-  m_semanticContext.pushScope();
 
   while (true) {
     auto expr = parseExpression();
@@ -572,8 +567,6 @@ std::unique_ptr<FCExprAST> FCScanner::ParseVarExpr() {
       return logError("expected ';' or '}' in block");
     }
   }
-
-  m_semanticContext.popScope();
 
   return std::make_unique<FCBlockExprAST>(std::move(expressions));
 }
