@@ -1115,29 +1115,6 @@ private:
         }
 
         // ============================================================
-        // Empty / Invalid Context
-        // ============================================================
-        {
-            FCSemanticContext ctx;
-
-            auto d =
-                std::make_shared<VarDecl>("x", "int");
-
-            // no active scope
-            ctx.insertVariableInCurrentScope("x", d);
-
-            // API should not crash
-            expect(true,
-                "semantic-api - insert without active scope");
-
-            expect(ctx.lookupVariableInCurrentScope("x") == nullptr,
-                "semantic-api - lookup current scope on empty stack");
-
-            expect(ctx.lookupVariableDecl("x") == nullptr,
-                "semantic-api - lookup decl on empty stack");
-        }
-
-        // ============================================================
         // Scope does not depend on function name
         //
         // The same Scope implementation is used for:

@@ -406,7 +406,7 @@ std::unique_ptr<FCFunctionAST> FCScanner::parseDefinition() {
     return nullptr;
   }
 
-  size_t localCount = m_semanticContext.currentFunctionFrameSize();
+  int localCount = m_semanticContext.currentFunctionFrameSize();
 	return std::make_unique<FCFunctionAST>(std::move(Proto), std::move(body),
                                          localCount);
 }
