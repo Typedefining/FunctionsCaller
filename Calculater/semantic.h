@@ -56,10 +56,8 @@ public:
   bool isInFunctionScope() const { return m_currentFuncScopeIdx != 0; }
   const FCFunctionFrame& currentFunctionFrame() const { return m_frame; }
   int currentFunctionFrameSize() const;
-  int functionFrameSize(const std::string &functionName) const;
 
   void dumpScopes() const;
-
 public:
     class ScopeGuard {
     public:
@@ -102,7 +100,6 @@ public:
   std::set<std::string> m_functionSet;
   size_t m_currentFuncScopeIdx = 0;
   FCFunctionFrame m_frame;
-  std::unordered_map<std::string, int> m_functionFrameSizes;
 };
 
 } // namespace FCMarks

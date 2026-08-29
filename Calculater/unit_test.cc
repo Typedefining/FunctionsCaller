@@ -336,25 +336,6 @@ private:
                         }
                     }
                 }
-                else if (code.find("def") != std::string::npos)
-                {
-                    size_t defPos = code.find("def");
-                    if (defPos != std::string::npos)
-                    {
-                        size_t nameStart = defPos + 4;
-                        while (nameStart < code.length() && code[nameStart] == ' ')
-                            ++nameStart;
-                        size_t nameEnd = code.find('(', nameStart);
-                        if (nameEnd != std::string::npos)
-                        {
-                            std::string funcName = code.substr(nameStart, nameEnd - nameStart);
-                            auto funcs = semanticCtx.functionFrameSize(funcName);
-                            details = "Found function: " + funcName + " with " +
-                                        std::to_string(funcs) + " variables";
-
-                        }
-                    }
-                }
             }
 
             // 对于预期失败的情况，我们检查是否真的失败了
@@ -994,14 +975,6 @@ private:
                 "semantic-api - currentFunctionFrameSize");
 
             ctx.popFunctionScope();
-
-            // function frame size 在退出函数后保存
-            expect(ctx.functionFrameSize("") == 1,
-                "semantic-api - functionFrameSize recorded");
-
-            expect(ctx.functionFrameSize("missing") == 0,
-                "semantic-api - functionFrameSize miss");
-
         }
 
         // ============================================================

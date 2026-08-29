@@ -7,7 +7,11 @@
 
 namespace FCMarks {
 
-FCSemanticContext::FCSemanticContext() { reset(); }
+FCSemanticContext::FCSemanticContext() {
+  reset();
+  m_scopeStack.emplace_back(); // Global scope
+}
+
 FCSemanticContext::~FCSemanticContext() { m_scopeStack.pop_back(); } // Ensure the global scope is cleaned up
 
 void FCSemanticContext::reset() {
@@ -17,7 +21,6 @@ void FCSemanticContext::reset() {
   m_functionSet.clear();
   m_frame.reset();
 
-  m_scopeStack.emplace_back(); // Global scope
   m_currentFuncScopeIdx = 0; // Reset the current function scope index
 }
 
@@ -157,11 +160,6 @@ FCSemanticContext::currentScopeDeclarations() const {
 
 int FCSemanticContext::currentFunctionFrameSize() const {
   return m_frame.frameSize();
-}
-
-int FCSemanticContext::functionFrameSize(const std::string &functionName) const {
-  const auto it = m_functionFrameSizes.find(functionName);
-  return it == m_functionFrameSizes.end() ? 0 : it->second;
 }
 
 void FCSemanticContext::dumpScopes() const {
