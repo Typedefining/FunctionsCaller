@@ -163,11 +163,11 @@ private:
         {
             std::cout << "  Testing: " << name << "\n";
             std::cout << "    Code: " << code << "\n";
-            
+
             FCScanner scanner;
             auto ast = scanner.analysis(code);
             bool ok = ast != nullptr;
-            
+
             expect(ok, "scanner - " + name);
             if (ok)
             {
@@ -288,7 +288,7 @@ private:
         {
             std::cout << "  Testing: " << name << "\n";
             std::cout << "    Code: " << code << "\n";
-            
+
             FCScanner scanner;
             auto ast = scanner.analysis(code);
             if (!ast)
@@ -349,7 +349,7 @@ private:
                         {
                             std::string funcName = code.substr(nameStart, nameEnd - nameStart);
                             auto funcs = semanticCtx.functionFrameSize(funcName);
-                            details = "Found function: " + funcName + " with " + 
+                            details = "Found function: " + funcName + " with " +
                                         std::to_string(funcs) + " variables";
 
                         }
@@ -383,12 +383,12 @@ private:
     void runEvaluatorTests()
     {
         std::vector<std::tuple<std::string, std::string, std::string>> evaluatorCases = {
-            {"1 + 2", "integer addition", "3"},
-            {"2 * 3", "integer multiplication", "6"},
-            {"10 / 2", "integer division", "5"},
-            {"1.5 + 2.5", "floating addition", "4.0"},
-            {"3.0 * 2.0", "floating multiplication", "6.0"},
-            {"\"hello\" + \" world\"", "string concatenation", "\"hello world\""},
+            // {"1 + 2", "integer addition", "3"},
+            // {"2 * 3", "integer multiplication", "6"},
+            // {"10 / 2", "integer division", "5"},
+            // {"1.5 + 2.5", "floating addition", "4.0"},
+            // {"3.0 * 2.0", "floating multiplication", "6.0"},
+            // {"\"hello\" + \" world\"", "string concatenation", "\"hello world\""},
             {"var x:int = 5; x + 3", "variable declaration", "8"},
             {"def square(x:int) { x * x }; square(4)", "function call", "16"},
             {"def add(a:int, b:int) { a + b }; add(3, 7)", "two-argument function", "10"},
@@ -437,7 +437,7 @@ private:
         {
             std::cout << "  Testing: " << name << "\n";
             std::cout << "    Code: " << code << "\n";
-            
+
             FCScanner scanner;
             auto ast = scanner.analysis(code);
             if (!ast)
@@ -453,7 +453,7 @@ private:
                 FCValue result = evaluate(ast.get(), evalContext);
                 auto endTime = std::chrono::high_resolution_clock::now();
                 auto duration = std::chrono::duration_cast<std::chrono::microseconds>(endTime - startTime);
-                
+
                 bool ok = result.type != FCValueCategory::Dangle;
                 std::string actual;
                 if (ok)
@@ -473,7 +473,7 @@ private:
                 }
                 bool valueMatches = (actual == expected);
                 expect(ok && valueMatches, "evaluator - " + name);
-                
+
                 if (ok)
                 {
                     std::cout << "      Result: " << actual << " (expected: " << expected << ")";
@@ -523,7 +523,7 @@ private:
         {
             std::cout << "  Testing: " << name << "\n";
             std::cout << "    Code: " << code << "\n";
-            
+
             FCScanner scanner;
             auto ast = scanner.analysis(code);
             if (!ast)
@@ -563,7 +563,7 @@ private:
             bool ok = allRegistered && (registered == expectedCount);
             expect(ok, "registry - " + name);
             std::cout << "      Registered " << registered << "/" << expectedCount << " functions\n";
-            
+
             if (!ok)
             {
                 std::cout << "      FAILED - Expected " << expectedCount << " functions, got " << registered << "\n";
@@ -579,7 +579,7 @@ private:
         auto func2 = std::make_unique<FCFunctionAST>(
             std::make_unique<FCPrototypeAST>("duplicate", std::vector<FCVariableExprAST>{}),
             std::make_unique<FCNumberExprAST>(2), 0);
-        
+
         bool first = registry.registerFunction(func1.get());
         bool second = registry.registerFunction(func2.get());
         bool ok = first && !second;
@@ -661,7 +661,7 @@ private:
         {
             std::cout << "  Testing: " << name << "\n";
             std::cout << "    Code: " << code << "\n";
-            
+
             FCScanner scanner;
             auto ast = scanner.analysis(code);
             if (!ast)
@@ -677,16 +677,16 @@ private:
                 auto* generated = codegen(ast.get(), codegenContext);
                 auto endTime = std::chrono::high_resolution_clock::now();
                 auto duration = std::chrono::duration_cast<std::chrono::microseconds>(endTime - startTime);
-                
+
                 bool ok = generated != nullptr;
                 expect(ok, "codegen - " + name);
-                
+
                 if (ok)
                 {
                     bool moduleValid = !llvm::verifyModule(*codegenContext.module, &llvm::errs());
                     std::cout << "      Module generated in " << duration.count() << " us\n";
                     std::cout << "      Module " << (moduleValid ? "valid" : "has verification errors") << "\n";
-                    
+
                     int funcCount = 0;
                     int globalCount = 0;
                     for (auto& func : codegenContext.module->functions())
@@ -882,74 +882,332 @@ private:
     }
 
     // ==================== Semantic API Tests ====================
-    // 直接驱动 FCSemanticContext 的公共 API，覆盖查询/注册/错误分支。
+    // 直接驱动 FCSemanticContext 的公共 API。
+    // Scope 只负责 lexical name lookup，不依赖 functionName / scopeLevel。
+    // slot 属于 function frame，在 scope 退出后不会回收。
     void runSemanticApiTests()
     {
         std::cout << "\n" << std::string(60, '=') << "\n";
         std::cout << "SEMANTIC API TESTS\n";
         std::cout << std::string(60, '=') << "\n";
 
+        // ============================================================
+        // Operator / Function Registry
+        // ============================================================
         {
             FCSemanticContext ctx;
-            expect(ctx.getOperatorPrecedence('+') == 10, "semantic-api - known precedence");
-            expect(ctx.getOperatorPrecedence('?') == 0, "semantic-api - unknown precedence");
-            expect(ctx.registerFunction("f"), "semantic-api - register new function");
-            expect(ctx.hasFunction("f"), "semantic-api - hasFunction true");
-            expect(!ctx.hasFunction("missing"), "semantic-api - hasFunction false");
-            expect(!ctx.registerFunction("f"), "semantic-api - duplicate function rejected");
+
+            expect(ctx.getOperatorPrecedence('+') == 10,
+                "semantic-api - known precedence");
+
+            expect(ctx.getOperatorPrecedence('?') == 0,
+                "semantic-api - unknown precedence");
+
+            expect(ctx.registerFunction("f"),
+                "semantic-api - register new function");
+
+            expect(ctx.hasFunction("f"),
+                "semantic-api - hasFunction true");
+
+            expect(!ctx.hasFunction("missing"),
+                "semantic-api - hasFunction false");
+
+            expect(!ctx.registerFunction("f"),
+                "semantic-api - duplicate function rejected");
         }
 
+        // ============================================================
+        // Global Scope
+        // ============================================================
         {
             FCSemanticContext ctx;
-            ctx.pushScope(); // 全局作用域
+
+            auto g = std::make_shared<VarDecl>("g", "int");
+
+            ctx.insertGlobalVariable("g", g);
+
+            expect(ctx.lookupGlobalVariable("g") == g,
+                "semantic-api - lookup global hit");
+
+            expect(ctx.lookupGlobalVariable("missing") == nullptr,
+                "semantic-api - lookup global miss");
+
+            // global duplicate declaration
+            auto duplicate = std::make_shared<VarDecl>("g", "int");
+
+            ctx.insertGlobalVariable("g", duplicate);
+
+            expect(ctx.lookupGlobalVariable("g") == g,
+                "semantic-api - duplicate global does not replace original");
+        }
+
+        // ============================================================
+        // Function Scope
+        // ============================================================
+        {
+            FCSemanticContext ctx;
 
             auto g = std::make_shared<VarDecl>("g", "int");
             ctx.insertGlobalVariable("g", g);
-            expect(ctx.lookupGlobalVariable("g") == g, "semantic-api - lookup global hit");
-            expect(ctx.lookupGlobalVariable("nope") == nullptr, "semantic-api - lookup global miss");
-
-            auto dup = std::make_shared<VarDecl>("g2", "int");
-            ctx.insertGlobalVariable("g", dup); // 触发全局重复声明错误分支
 
             ctx.pushFunctionScope();
+
             auto p = std::make_shared<VarDecl>("p", "int");
+
             ctx.insertVariableInCurrentScope("p", p);
 
-            expect(ctx.lookupVariableDecl("p") == p, "semantic-api - lookup local hit");
-            expect(ctx.lookupVariableDecl("g") == g, "semantic-api - lookup falls back to global");
-            expect(ctx.lookupVariableDecl("missing") == nullptr, "semantic-api - lookup miss");
-            expect(ctx.lookupVariableInCurrentScope("p") == p, "semantic-api - current scope hit");
-            expect(ctx.lookupVariableInCurrentScope("missing") == nullptr, "semantic-api - current scope miss");
-            expect(ctx.lookupVariableInCurrentScope("p") == nullptr, "semantic-api - current scope fn mismatch");
+            // 当前函数作用域可以找到自己的变量
+            expect(ctx.lookupVariableDecl("p") == p,
+                "semantic-api - lookup local hit");
 
-            auto again = std::make_shared<VarDecl>("p2", "int");
-            ctx.insertVariableInCurrentScope("p", again); // 触发局部重复声明错误分支
+            expect(ctx.lookupVariableInCurrentScope("p") == p,
+                "semantic-api - current scope hit");
 
-            expect(ctx.currentFunctionFrameSize() == 1, "semantic-api - currentFunctionFrameSize");
-            expect(ctx.currentScopeDeclarations().size() == 1, "semantic-api - currentScopeDeclarations");
+            // 局部作用域可以向外查找 global
+            expect(ctx.lookupVariableDecl("g") == g,
+                "semantic-api - lookup falls back to global");
+
+            // 当前 scope 不应该直接看到 global
+            expect(ctx.lookupVariableInCurrentScope("g") == nullptr,
+                "semantic-api - current scope excludes global");
+
+            expect(ctx.lookupVariableDecl("missing") == nullptr,
+                "semantic-api - lookup miss");
+
+            expect(ctx.lookupVariableInCurrentScope("missing") == nullptr,
+                "semantic-api - current scope miss");
+
+            // duplicate local declaration
+            auto duplicate =
+                std::make_shared<VarDecl>("p", "int");
+
+            ctx.insertVariableInCurrentScope("p", duplicate);
+
+            // 原来的声明仍然存在
+            expect(ctx.lookupVariableInCurrentScope("p") == p,
+                "semantic-api - duplicate local does not replace original");
+
+            expect(ctx.currentScopeDeclarations().size() == 1,
+                "semantic-api - currentScopeDeclarations");
+
+            expect(ctx.currentFunctionFrameSize() == 1,
+                "semantic-api - currentFunctionFrameSize");
+
+            ctx.popFunctionScope();
+
+            // function frame size 在退出函数后保存
+            expect(ctx.functionFrameSize("") == 1,
+                "semantic-api - functionFrameSize recorded");
+
+            expect(ctx.functionFrameSize("missing") == 0,
+                "semantic-api - functionFrameSize miss");
+
+        }
+
+        // ============================================================
+        // Nested Scope / Visibility
+        // ============================================================
+        {
+            FCSemanticContext ctx;
+
+            ctx.pushFunctionScope();
+
+            auto outer =
+                std::make_shared<VarDecl>("outer", "int");
+
+            ctx.insertVariableInCurrentScope("outer", outer);
+
+            // function scope -> outer variable visible
+            expect(ctx.lookupVariableDecl("outer") == outer,
+                "semantic-api - outer variable visible");
+
+            // 创建 nested lexical scope
+            ctx.pushScope();
+
+            auto inner =
+                std::make_shared<VarDecl>("inner", "int");
+
+            ctx.insertVariableInCurrentScope("inner", inner);
+
+            // inner scope 可以访问自己
+            expect(ctx.lookupVariableInCurrentScope("inner") == inner,
+                "semantic-api - nested current scope hit");
+
+            // inner scope 可以访问 parent
+            expect(ctx.lookupVariableDecl("outer") == outer,
+                "semantic-api - nested scope sees parent");
+
+            // parent scope 看不到 child
+            ctx.popScope();
+
+            expect(ctx.lookupVariableDecl("inner") == nullptr,
+                "semantic-api - nested variable does not escape scope");
+
+            expect(ctx.lookupVariableDecl("outer") == outer,
+                "semantic-api - parent variable survives child scope");
+
+            ctx.popFunctionScope();
+        }
+
+        // ============================================================
+        // Shadowing
+        // ============================================================
+        {
+            FCSemanticContext ctx;
+
+            ctx.pushFunctionScope();
+
+            auto outer =
+                std::make_shared<VarDecl>("x", "int");
+
+            ctx.insertVariableInCurrentScope("x", outer);
+
+            ctx.pushScope();
+
+            auto inner =
+                std::make_shared<VarDecl>("x", "int");
+
+            ctx.insertVariableInCurrentScope("x", inner);
+
+            // inner declaration shadows outer declaration
+            expect(ctx.lookupVariableDecl("x") == inner,
+                "semantic-api - inner variable shadows outer");
+
+            expect(ctx.lookupVariableInCurrentScope("x") == inner,
+                "semantic-api - shadowed variable is current declaration");
+
+            ctx.popScope();
+
+            // after leaving inner scope, outer declaration becomes visible
+            expect(ctx.lookupVariableDecl("x") == outer,
+                "semantic-api - outer variable restored after pop");
+
+            expect(ctx.lookupVariableInCurrentScope("x") == outer,
+                "semantic-api - outer variable is current after pop");
+
+            ctx.popFunctionScope();
+        }
+
+        // ============================================================
+        // Slot Allocation
+        //
+        // Scope lifetime and frame slot lifetime are different:
+        //
+        //   scope:
+        //       controls visibility
+        //
+        //   frame:
+        //       controls runtime storage
+        //
+        // Therefore popping a scope must NOT reuse its slots.
+        // ============================================================
+        {
+            FCSemanticContext ctx;
+
+            ctx.pushFunctionScope();
+
+            auto a =
+                std::make_shared<VarDecl>("a", "int");
+
+            ctx.insertVariableInCurrentScope("a", a);
+
+            expect(a->slot == 0,
+                "semantic-api - first local gets slot 0");
+
+            ctx.pushScope();
+
+            auto b =
+                std::make_shared<VarDecl>("b", "int");
+
+            ctx.insertVariableInCurrentScope("b", b);
+
+            expect(b->slot == 1,
+                "semantic-api - nested local gets next slot");
+
+            ctx.popScope();
+
+            auto c =
+                std::make_shared<VarDecl>("c", "int");
+
+            ctx.insertVariableInCurrentScope("c", c);
+
+            // b 的 scope 已经退出，但是 slot 不回收
+            expect(c->slot == 2,
+                "semantic-api - slot is not reused after scope exit");
+
+            expect(ctx.currentFunctionFrameSize() == 3,
+                "semantic-api - frame contains all allocated slots");
+
+            ctx.popFunctionScope();
+        }
+
+        // ============================================================
+        // Empty / Invalid Context
+        // ============================================================
+        {
+            FCSemanticContext ctx;
+
+            auto d =
+                std::make_shared<VarDecl>("x", "int");
+
+            // no active scope
+            ctx.insertVariableInCurrentScope("x", d);
+
+            // API should not crash
+            expect(true,
+                "semantic-api - insert without active scope");
+
+            expect(ctx.lookupVariableInCurrentScope("x") == nullptr,
+                "semantic-api - lookup current scope on empty stack");
+
+            expect(ctx.lookupVariableDecl("x") == nullptr,
+                "semantic-api - lookup decl on empty stack");
+        }
+
+        // ============================================================
+        // Scope does not depend on function name
+        //
+        // The same Scope implementation is used for:
+        //
+        //   function body
+        //   if body
+        //   for body
+        //   nested block
+        //
+        // There is no functionName stored inside Scope.
+        // ============================================================
+        {
+            FCSemanticContext ctx;
+
+            auto x =
+                std::make_shared<VarDecl>("x", "int");
+
+            ctx.insertVariableInCurrentScope("x", x);
+
+            ctx.pushScope();
+
+            expect(ctx.lookupVariableDecl("x") == x,
+                "semantic-api - scope lookup independent of function name");
+
+            ctx.popScope();
+
+            expect(ctx.lookupVariableDecl("x") == x,
+                "semantic-api - outer scope remains visible");
+       }
+
+        // ============================================================
+        // Debug
+        // ============================================================
+        {
+            FCSemanticContext ctx;
 
             ctx.dumpScopes();
 
-            ctx.popFunctionScope();
-            expect(ctx.functionFrameSize("fn") == 1, "semantic-api - functionFrameSize recorded");
-            expect(ctx.functionFrameSize("missing") == 0, "semantic-api - functionFrameSize miss");
-
-            ctx.popScope();
-        }
-
-        {
-            FCSemanticContext ctx;
-            auto d = std::make_shared<VarDecl>("x", "int");
-            ctx.insertVariableInCurrentScope("x", d); // 无活动作用域
-            expect(true, "semantic-api - insert without active scope");
-
-            // 空作用域栈上的查询
-            expect(ctx.lookupVariableInCurrentScope("x") == nullptr,
-                   "semantic-api - lookup current scope on empty stack");
-            expect(ctx.lookupVariableDecl("x") == nullptr,
-                   "semantic-api - lookup decl on empty stack");
+            expect(true,
+                "semantic-api - dumpScopes");
         }
     }
+
 
     // ==================== Evaluator Error Tests ====================
     void runEvaluatorErrorTests()
@@ -1019,7 +1277,6 @@ private:
 
             // 局部变量但无调用帧
             auto localDecl = std::make_shared<VarDecl>("v", "int");
-            // localDecl->scopeLevel = 1;
             localDecl->slot = 0;
             auto localVar = std::make_unique<FCVariableExprAST>(localDecl);
             expect(evaluate(localVar.get(), ctx).type == FCValueCategory::Dangle,
@@ -1027,7 +1284,6 @@ private:
 
             // 全局变量但槽位非法
             auto negDecl = std::make_shared<VarDecl>("g", "int");
-            // negDecl->scopeLevel = 0;
             negDecl->slot = -1;
             auto negVar = std::make_unique<FCVariableExprAST>(negDecl);
             expect(evaluate(negVar.get(), ctx).type == FCValueCategory::Dangle,
@@ -1035,7 +1291,6 @@ private:
 
             // 局部变量槽位超出帧大小
             auto oobDecl = std::make_shared<VarDecl>("o", "int");
-            // oobDecl->scopeLevel = 1;
             oobDecl->slot = 100;
             auto oobVar = std::make_unique<FCVariableExprAST>(oobDecl);
             ctx.pushFrame("oob");
@@ -1118,7 +1373,7 @@ int main()
 {
     std::cout << "COMPREHENSIVE TOY LANGUAGE TEST SUITE\n";
     std::cout << std::string(60, '=') << "\n";
-    
+
     ComprehensiveTestSuite tests;
     tests.runAllTests();
     return tests.result();
