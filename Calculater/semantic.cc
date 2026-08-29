@@ -121,6 +121,7 @@ void FCSemanticContext::insertVariableInCurrentScope(const std::string &name, Va
     return;
   }
 
+  declaration->isGlobal = false;
   declaration->slot = m_frame.allocateSlot();
   currentScope.variables[name] = declaration;
 }
@@ -135,6 +136,7 @@ void FCSemanticContext::insertGlobalVariable(const std::string &name,
     return;
   }
 
+  declaration->isGlobal = true;
   declaration->slot = static_cast<int>(m_scopeStack[0].variables.size());
   m_scopeStack[0].variables[name] = declaration;
 }

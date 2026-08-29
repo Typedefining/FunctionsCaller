@@ -18,7 +18,7 @@ FCScanner::FCScanner() {
   m_inputsBuffer = "";
   m_idx = m_identifierStr.begin();
 }
-// def aaa(a:int, b:double) a+b*2.0;
+
 ::std::unique_ptr<FCExprAST>
 FCScanner::analysis(const ::std::string &inputStr) {
   resetState();
@@ -64,7 +64,6 @@ FCScanner::analysis(const ::std::string &inputStr) {
 
 void FCScanner::resetState() {
   // 解析过程出错时，重置扫描器状态
-  m_semanticContext.reset();
   m_curTok = 0;
   m_lastChar = ' ';
   m_numIntgerVal = 0;

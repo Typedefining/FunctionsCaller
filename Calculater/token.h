@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <iostream>
 #include <memory>
@@ -47,6 +47,8 @@ struct VarDecl {
   std::string name;
   std::string typeName;
   int slot = -1;
+
+  bool isGlobal = false;
 
   VarDecl(const std::string &n, const std::string &t) : name(n), typeName(t) {}
 };

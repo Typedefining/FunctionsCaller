@@ -149,14 +149,18 @@ Frame *frameForDeclaration(const VarDecl *declaration,
                            FCEvaluationContext &context) {
   if (declaration == nullptr)
     return nullptr;
-  // if (declaration->scopeLevel == 0) {
-  //   if (declaration->slot < 0)
-  //     return nullptr;
-  //   if (declaration->slot >=
-  //       static_cast<int>(context.globalFrame.locals.size()))
-  //     context.globalFrame.locals.resize(declaration->slot + 1);
-  //   return &context.globalFrame;
-  // }
+
+  // 全局变量：存于全局帧，slot 为全局作用域内顺序编号。
+  if (declaration->isGlobal) {
+    if (declaration->slot < 0)
+      return nullptr;
+    if (declaration->slot >=
+        static_cast<int>(context.globalFrame.locals.size()))
+      context.globalFrame.locals.resize(declaration->slot + 1);
+    return &context.globalFrame;
+  }
+
+  // 局部变量：存于当前函数调用帧，slot 为函数帧内编号。
   if (context.callStack.empty() || declaration->slot < 0)
     return nullptr;
   Frame &frame = context.currentFrame();
