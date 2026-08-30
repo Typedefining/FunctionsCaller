@@ -82,9 +82,8 @@ FCValue evaluateNumber(const FCNumberExprAST *node) {
 }
 
 FCValue evaluateVariable(const FCVariableExprAST *node, FCEvaluationContext &context) {
-  Frame currentFunc;
   VariableSymbol symbol;
-  if (!lookupVarSymbol(node->decl->name, context, &currentFunc, &symbol))
+  if (!lookupVarSymbol(node->decl->name, context, nullptr, &symbol))
   {
     return {};
   }
