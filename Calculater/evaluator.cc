@@ -9,9 +9,40 @@ using namespace FCExprClass;
 using namespace FCMarks;
 
 FCValue evaluateExpression(const FCExprAST *expression,
-                           FCEvaluationContext &context);
-Frame *frameForDeclaration(const VarDecl *declaration,
-                           FCEvaluationContext &context);
+                            FCEvaluationContext &context);
+Frame *frameForStorage(const VariableStorage &storage, FCEvaluationContext &context);
+
+bool lookupVarSymbol(const std::string& name, FCEvaluationContext &context, Frame* currentFrame, VariableSymbol* symbol)
+{
+	Frame* resultFrame = nullptr;
+	VariableSymbol* resultSymbol = nullptr;
+
+  if (!context.callStack.empty())
+  {
+    currentFrame = &context.currentFrame();
+    auto function = context.compiledProgram.functions[currentFrame->funcName];
+    if (function && function->symbols.size() > 0)
+      resultSymbol = function->symbols.lookup(name);
+  }
+  else
+  {
+    currentFrame = &context.globalFrame;
+  }
+
+  if (!resultSymbol)
+  {
+    resultSymbol = context.compiledProgram.allSymbols.lookup(name);
+  }
+
+  if (!resultSymbol)
+  {
+    assert("evaluateVariable can't find symbol");
+    return false;
+  }
+
+  return true;
+}
+
 
 namespace {
 FCValue makeDangleValue() {
@@ -40,13 +71,20 @@ FCValue evaluateNumber(const FCNumberExprAST *node) {
   return result;
 }
 
-FCValue evaluateVariable(const FCVariableExprAST *node,
-                         FCEvaluationContext &context) {
-  Frame *frame = frameForDeclaration(node->decl.get(), context);
+FCValue evaluateVariable(const FCVariableExprAST *node, FCEvaluationContext &context) {
+  Frame currentFunc;
+  VariableSymbol symbol;
+  if (!lookupVarSymbol(node->decl->name, context, &currentFunc, &symbol))
+  {
+    return {};
+  }
+
+  const VariableStorage storage = symbol.storage;
+  Frame *frame = frameForStorage(storage, context);
   if (frame == nullptr)
     return makeDangleValue();
 
-  return frame->locals[node->decl->slot];
+  return frame->locals[storage.slot];
 }
 
 FCValue evaluateIf(const FCIfExprAST *node, FCEvaluationContext &context) {
@@ -79,17 +117,24 @@ FCValue evaluateFor(const FCForExprAST *node, FCEvaluationContext &context) {
     return makeDangleValue();
 
   Frame &frame = context.currentFrame();
-  const int slot = node->getDecl()->slot;
-  if (slot < 0 || slot >= static_cast<int>(frame.locals.size()))
+  Frame currentFunc;
+  VariableSymbol symbol;
+  if (!lookupVarSymbol(node->getDecl()->name, context, &currentFunc, &symbol))
+  {
+    return {};
+  }
+
+  const VariableStorage storage = symbol.storage;
+  if (storage.slot < 0 || storage.slot >= static_cast<int>(frame.locals.size()))
     return makeDangleValue();
-  frame.locals[slot] = start;
+  frame.locals[storage.slot] = start;
 
   FCValue result = start;
   while (evaluateExpression(node->getEnd(), context).evaluteVal.intVal != 0) {
     result = evaluateExpression(node->getBody(), context);
     if (result.type == FCValueCategory::Dangle)
       return result;
-    frame.locals[slot].evaluteVal.intVal += step.evaluteVal.intVal;
+    frame.locals[storage.slot].evaluteVal.intVal += step.evaluteVal.intVal;
   }
   return result;
 }
@@ -120,15 +165,23 @@ FCValue evaluateSequence(const FCSeqExprAST *node,
 
 FCValue evaluateDeclaration(const FCVarDeclExprAST *node,
                             FCEvaluationContext &context) {
+  Frame currentFunc;
+  VariableSymbol symbol;
+  if (!lookupVarSymbol(node->decl->name, context, &currentFunc, &symbol))
+  {
+    return {};
+  }
+
+  const VariableStorage storage = symbol.storage;
   if (node->decl == nullptr || node->initExpr == nullptr)
     return makeDangleValue();
   const auto value = evaluateExpression(node->initExpr.get(), context);
   if (value.type == FCValueCategory::Dangle)
     return value;
-  Frame *frame = frameForDeclaration(node->decl.get(), context);
+  Frame *frame = frameForStorage(storage, context);
   if (frame == nullptr)
     return makeDangleValue();
-  frame->locals[node->decl->slot] = value;
+  frame->locals[storage.slot] = value;
   return value;
 }
 
@@ -144,30 +197,6 @@ FCValue evaluateProgram(const FCProgramAST *node,
   return result;
 }
 } // namespace
-
-Frame *frameForDeclaration(const VarDecl *declaration,
-                           FCEvaluationContext &context) {
-  if (declaration == nullptr)
-    return nullptr;
-
-  // 全局变量：存于全局帧，slot 为全局作用域内顺序编号。
-  if (declaration->isGlobal) {
-    if (declaration->slot < 0)
-      return nullptr;
-    if (declaration->slot >=
-        static_cast<int>(context.globalFrame.locals.size()))
-      context.globalFrame.locals.resize(declaration->slot + 1);
-    return &context.globalFrame;
-  }
-
-  // 局部变量：存于当前函数调用帧，slot 为函数帧内编号。
-  if (context.callStack.empty() || declaration->slot < 0)
-    return nullptr;
-  Frame &frame = context.currentFrame();
-  if (declaration->slot >= static_cast<int>(frame.locals.size()))
-    return nullptr;
-  return &frame;
-}
 
 FCValue evaluateBinary(const FCBinaryExprAST *expression,
                        FCEvaluationContext &context) {
@@ -185,14 +214,16 @@ FCValue evaluateBinary(const FCBinaryExprAST *expression,
     if (value.type == FCValueCategory::Dangle)
       return value;
 
-    Frame *frame = frameForDeclaration(variable->decl.get(), context);
+    auto symbol = context.compiledProgram.allSymbols.lookup(variable->decl->name);
+    const VariableStorage storage = symbol->storage;
+    Frame *frame = frameForStorage(storage, context);
     if (frame == nullptr) {
       std::fprintf(stderr, "LogError: Invalid slot for %s\n",
                    variable->decl->name.c_str());
       return makeDangleValue();
     }
 
-    frame->locals[variable->decl->slot] = value;
+    frame->locals[storage.slot] = value;
     return value;
   }
 
@@ -290,15 +321,28 @@ FCValue evaluateCall(const FCCallExprAST *expression,
   Frame &frame = context.currentFrame();
   for (size_t i = 0; i < argumentValues.size(); ++i) {
     const auto &parameter = prototype->getArgs()[i];
-    if (parameter.decl == nullptr) {
+    if (parameter == nullptr) {
       context.popFrame();
       return makeDangleValue();
     }
 
-    const int slot = parameter.decl->slot;
+    auto func = context.compiledProgram.getFunction(expression->getName());
+    auto symbol = func->symbols.lookup(parameter->name);
+    VariableStorage storage;
+    if (symbol)
+    {
+      storage = symbol->storage;
+    }
+    else
+    {
+      symbol = context.compiledProgram.allSymbols.lookup(parameter->name);
+      storage  = symbol->storage;
+    }
+    const int slot = storage.slot;
+
     if (slot < 0 || slot >= static_cast<int>(frame.locals.size())) {
       std::fprintf(stderr, "Invalid parameter slot in %s\n",
-                   expression->getName().c_str());
+                  expression->getName().c_str());
       context.popFrame();
       return makeDangleValue();
     }
@@ -354,6 +398,34 @@ FCValue evaluateExpression(const FCExprAST *expression,
   }
 
   return makeDangleValue();
+}
+
+Frame *frameForStorage(const VariableStorage &storage, FCEvaluationContext &context) {
+  switch (storage.kind) {
+  case VariableStorage::Kind::Global:
+    if (storage.slot < 0)
+      return nullptr;
+
+    if (storage.slot >= static_cast<int>(context.globalFrame.locals.size())) {
+      context.globalFrame.locals.resize(storage.slot + 1);
+    }
+
+    return &context.globalFrame;
+  case VariableStorage::Kind::Local:
+    if (storage.slot < 0 || context.callStack.empty()) {
+
+      return nullptr;
+    }
+
+    Frame &frame = context.currentFrame();
+    if (storage.slot >= static_cast<int>(frame.locals.size())) {
+      return nullptr;
+    }
+
+    return &frame;
+  }
+
+  return nullptr;
 }
 
 namespace FCExprClass {

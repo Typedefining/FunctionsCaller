@@ -34,7 +34,7 @@ FCVariableExprAST::FCVariableExprAST(VarDeclPtr d) : decl(std::move(d))
 
 void FCVariableExprAST::info()
 {
-	::std::cout << "FCVariableExprAST (decl) Name: " << decl->name << " slot=" << decl->slot << ::std::endl;
+	::std::cout << "FCVariableExprAST (decl) Name: " << decl->name << " typeName=" << decl->typeName << ::std::endl;
 }
 
 FCBinaryExprAST::FCBinaryExprAST(char op,
@@ -75,7 +75,7 @@ const std::vector<std::unique_ptr<FCExprAST>>& FCCallExprAST::getArgs() const
 	return m_args;
 }
 
-FCPrototypeAST::FCPrototypeAST(const std::string& name, std::vector<FCVariableExprAST> args)
+FCPrototypeAST::FCPrototypeAST(const std::string& name, std::vector<VarDeclPtr> args)
 	: m_funcName(name), m_funcArgsVar(std::move(args))
 {
 }
@@ -85,7 +85,7 @@ void FCPrototypeAST::info()
 	::std::cout << " Args: " << ::std::endl;
 	for (auto& i : m_funcArgsVar)
 	{
-		i.info();
+		std::cout << "FCVarDeclExprAST Name: " << i->name << " Type: " << i->typeName << std::endl;
 	}
 }
 

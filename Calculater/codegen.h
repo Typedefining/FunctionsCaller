@@ -30,6 +30,7 @@ namespace FCExprClass
 		std::map<const VarDecl*, llvm::GlobalVariable*> globalValues;
 		std::unordered_map<std::string, FCFunctionAST*> definitions;
 		llvm::Function* currentFunction = nullptr;
+		CompiledProgram compiledProgram;
 
 		explicit FCCodegenContext(const std::string& moduleName);
 		llvm::Type* getType(const std::string& typeName);

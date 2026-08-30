@@ -5,9 +5,6 @@
 
 namespace FCExprClass
 {
-	FCValue evaluate(FCExprAST* expression, struct FCEvaluationContext& context);
-	FCValue evaluate(const FCExprAST* expression, struct FCEvaluationContext& context);
-
 	class FCFunctionRegistry
 	{
 	public:
@@ -25,9 +22,13 @@ namespace FCExprClass
 		FCFunctionRegistry functions;
 		Frame globalFrame{"<global>", {}};
 		std::vector<Frame> callStack;
+		CompiledProgram compiledProgram;
 
 		void pushFrame(const std::string& functionName);
 		void popFrame();
 		Frame& currentFrame();
 	};
+
+	FCValue evaluate(FCExprAST* expression, struct FCEvaluationContext& context);
+	FCValue evaluate(const FCExprAST* expression, struct FCEvaluationContext& context);
 }

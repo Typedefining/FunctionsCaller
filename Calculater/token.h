@@ -7,6 +7,12 @@
 #include <utility>
 #include <vector>
 
+namespace FCExprClass
+{
+  struct FCExprAST;
+  struct FCFunctionAST;
+}
+
 namespace FCMarks {
 enum struct FCToken {
   tok_begin = 0,
@@ -46,12 +52,95 @@ enum struct FCTypeDescribe {
 struct VarDecl {
   std::string name;
   std::string typeName;
-  int slot = -1;
-
-  bool isGlobal = false;
 
   VarDecl(const std::string &n, const std::string &t) : name(n), typeName(t) {}
 };
+
+struct VariableStorage {
+  enum class Kind {
+      Global,
+      Local
+  };
+  Kind kind;
+  int slot = -1;
+};
+
+struct VariableSymbol {
+  using VarDeclPtr = std::shared_ptr<VarDecl>;
+  VarDeclPtr declaration;      // 保留原始 AST 声明
+  VariableStorage storage;     // 存储位置信息
+  int scopeDepth;              // 声明时的作用域深度
+  bool isMutable;              // 是否可变
+  bool isCaptured;             // 是否被闭包捕获
+
+  VariableSymbol()
+    : declaration(nullptr)
+    , storage{VariableStorage::Kind::Local, -1}
+    , scopeDepth(0)
+    , isMutable(false)
+    , isCaptured(false) {}
+
+  VariableSymbol(VarDeclPtr decl, VariableStorage st, int depth)
+    : declaration(std::move(decl))
+    , storage(st)
+    , scopeDepth(depth)
+    , isMutable(false)
+    , isCaptured(false) {}
+};
+
+
+class SymbolTable {
+public:
+  SymbolTable() = default;
+
+  // 添加符号
+  bool addSymbol(const std::string& name, VariableSymbol symbol);
+  // 查找符号
+  const VariableSymbol* lookup(const std::string& name) const;
+  VariableSymbol* lookup(const std::string& name);
+  // 移除符号
+  bool removeSymbol(const std::string& name);
+  // 获取所有符号
+  const std::unordered_map<std::string, VariableSymbol>& getAllSymbols() const;
+  // 清空符号表
+  void clear();
+  // 获取符号数量
+  size_t size() const;
+  // 调试输出
+  void dump() const;
+
+
+private:
+  std::unordered_map<std::string, VariableSymbol> m_symbols;
+};
+
+struct CompiledFunction {
+  using FCFunctionAST = FCExprClass::FCFunctionAST;
+  FCFunctionAST* ast;
+  std::vector<VariableStorage> parameters;
+  SymbolTable symbols;
+  int frameSize;
+  int maxTempSlots;
+
+  CompiledFunction()
+    : ast(nullptr)
+    , frameSize(0)
+    , maxTempSlots(0) {}
+};
+
+struct CompiledProgram {
+  SymbolTable allSymbols;
+  std::unordered_map<std::string, std::shared_ptr<CompiledFunction>> functions;
+  int globalFrameSize;
+
+  CompiledProgram() : globalFrameSize(0) {}
+
+  const CompiledFunction* getFunction(const std::string& name) const {
+      auto it = functions.find(name);
+      return it != functions.end() ? it->second.get() : nullptr;
+  }
+};
+
 } // namespace FCMarks
 
 namespace FCExprClass {
@@ -127,15 +216,15 @@ public:
 
 struct FCPrototypeAST : public FCExprAST {
   std::string m_funcName;
-  std::vector<FCVariableExprAST> m_funcArgsVar;
+  std::vector<VarDeclPtr> m_funcArgsVar;
 
 public:
-  FCPrototypeAST(const std::string &name, std::vector<FCVariableExprAST> args);
+  FCPrototypeAST(const std::string &name, std::vector<VarDeclPtr> args);
   FCTypeDescribe type = FCMarks::FCTypeDescribe::Prototype;
 
   void info() override;
   ::std::string getProtoName() const;
-  const std::vector<FCVariableExprAST> &getArgs() const {
+  const std::vector<VarDeclPtr> &getArgs() const {
     return m_funcArgsVar;
   }
 };
