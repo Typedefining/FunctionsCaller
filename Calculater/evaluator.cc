@@ -19,14 +19,14 @@ bool lookupVarSymbol(const std::string& name, FCEvaluationContext &context, Fram
 
   if (!context.callStack.empty())
   {
-    currentFrame = &context.currentFrame();
-    auto function = context.compiledProgram.functions[currentFrame->funcName];
+    resultFrame = &context.currentFrame();
+    auto function = context.compiledProgram.functions[resultFrame->funcName];
     if (function && function->symbols.size() > 0)
       resultSymbol = function->symbols.lookup(name);
   }
   else
   {
-    currentFrame = &context.globalFrame;
+    resultFrame = &context.globalFrame;
   }
 
   if (!resultSymbol)
@@ -38,6 +38,16 @@ bool lookupVarSymbol(const std::string& name, FCEvaluationContext &context, Fram
   {
     assert("evaluateVariable can't find symbol");
     return false;
+  }
+
+  if (symbol)
+  {
+    *symbol = *resultSymbol;
+  }
+
+  if (currentFrame)
+  {
+    *currentFrame = *resultFrame;
   }
 
   return true;
@@ -116,25 +126,25 @@ FCValue evaluateFor(const FCForExprAST *node, FCEvaluationContext &context) {
       step.type != FCValueCategory::Integer)
     return makeDangleValue();
 
-  Frame &frame = context.currentFrame();
-  Frame currentFunc;
-  VariableSymbol symbol;
-  if (!lookupVarSymbol(node->getDecl()->name, context, &currentFunc, &symbol))
-  {
-    return {};
-  }
+    VariableSymbol symbol;
+    if (!lookupVarSymbol(node->getDecl()->name, context, nullptr, &symbol))
+    {
+      return {};
+    }
 
   const VariableStorage storage = symbol.storage;
-  if (storage.slot < 0 || storage.slot >= static_cast<int>(frame.locals.size()))
+  size_t frameIdx = context.callStack.size() - 1;
+  if (storage.slot < 0 || storage.slot >= static_cast<int>(context.callStack[frameIdx].locals.size()))
     return makeDangleValue();
-  frame.locals[storage.slot] = start;
+
+  context.callStack[frameIdx].locals[storage.slot] = start;
 
   FCValue result = start;
   while (evaluateExpression(node->getEnd(), context).evaluteVal.intVal != 0) {
     result = evaluateExpression(node->getBody(), context);
     if (result.type == FCValueCategory::Dangle)
       return result;
-    frame.locals[storage.slot].evaluteVal.intVal += step.evaluteVal.intVal;
+    context.callStack[frameIdx].locals[storage.slot].evaluteVal.intVal += step.evaluteVal.intVal;
   }
   return result;
 }
