@@ -214,8 +214,14 @@ FCValue evaluateBinary(const FCBinaryExprAST *expression,
     if (value.type == FCValueCategory::Dangle)
       return value;
 
-    auto symbol = context.compiledProgram.allSymbols.lookup(variable->decl->name);
-    const VariableStorage storage = symbol->storage;
+    Frame currentFunc;
+    VariableSymbol symbol;
+    if (!lookupVarSymbol(variable->decl->name, context, &currentFunc, &symbol))
+    {
+      return {};
+    }
+
+    const VariableStorage storage = symbol.storage;
     Frame *frame = frameForStorage(storage, context);
     if (frame == nullptr) {
       std::fprintf(stderr, "LogError: Invalid slot for %s\n",
