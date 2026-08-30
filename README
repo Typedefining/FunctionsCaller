@@ -91,8 +91,6 @@ my_function    # 不支持
 def if then else for in var
 ```
 
-`token.h` 中还存在 `end` 的 token 枚举（`tok_end`），但 lexer 当前没有将 `end` 识别为关键字。
-
 ### 整数和浮点数
 
 ```text
@@ -166,14 +164,7 @@ a = 10
 当前不支持以下运算符：
 
 ```text
->
-<=
->=
-==
-!=
-&&
-||
-!
+> <= >= == != && || !
 ```
 
 当前也不支持一元负号：
@@ -446,7 +437,7 @@ auto ast = scanner.analysis("def add(a:int, b:int) { a + b }; add(2, 3)");
 解释执行：
 
 ```cpp
-FCExprClass::FCEvaluationContext context;
+FCExprClass::FCEvaluationContext context(scanner.semanticContext().getCompiledProgram());
 auto result = FCExprClass::evaluate(ast.get(), context);
 // result.type 为 FCValueCategory::Integer / Floating / String / Dangle
 ```
@@ -454,7 +445,7 @@ auto result = FCExprClass::evaluate(ast.get(), context);
 生成 LLVM IR：
 
 ```cpp
-FCExprClass::FCCodegenContext codegenContext("ExampleModule");
+FCExprClass::FCCodegenContext codegenContext("ExampleModule", scanner.semanticContext().getCompiledProgram());
 auto value = FCExprClass::codegen(ast.get(), codegenContext);
 ```
 
@@ -483,7 +474,7 @@ tools/
 triplets/
 └── x64-windows-debug.cmake   vcpkg debug 构建 triplet
 
-CMakelists.txt        根 CMake 配置（注意文件名中 l 为小写）
+CMakeLists.txt        根 CMake 配置
 vcpkg.json            依赖清单（llvm）
 ```
 
