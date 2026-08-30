@@ -32,7 +32,7 @@ namespace FCExprClass
 		llvm::Function* currentFunction = nullptr;
 		CompiledProgram compiledProgram;
 
-		explicit FCCodegenContext(const std::string& moduleName);
+		explicit FCCodegenContext(const std::string& moduleName, const CompiledProgram& program);
 		llvm::Type* getType(const std::string& typeName);
 		llvm::AllocaInst* createEntryBlockAlloca(llvm::Function* function,
 			const std::string& name, llvm::Type* type);

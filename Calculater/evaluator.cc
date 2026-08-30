@@ -484,6 +484,12 @@ bool FCFunctionRegistry::index(FCExprAST *root) {
   return false;
 }
 
+FCEvaluationContext::FCEvaluationContext(const CompiledProgram& program)
+  : compiledProgram(program)
+{
+
+}
+
 void FCEvaluationContext::pushFrame(const std::string &functionName) {
   Frame frame;
   frame.funcName = functionName;

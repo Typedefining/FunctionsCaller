@@ -24,6 +24,8 @@ namespace FCExprClass
 		std::vector<Frame> callStack;
 		CompiledProgram compiledProgram;
 
+		FCEvaluationContext(const CompiledProgram& program);
+
 		void pushFrame(const std::string& functionName);
 		void popFrame();
 		Frame& currentFrame();
