@@ -126,6 +126,8 @@ private:
     static FCEvaluationContext makeEvalContext(const FCScanner& scanner)
     {
         FCEvaluationContext ctx(scanner.semanticContext().getCompiledProgram());
+        // 挂载语义绑定侧表（AST 节点 -> 符号）
+        ctx.semantic = &scanner.semanticContext();
         return ctx;
     }
 
@@ -134,6 +136,8 @@ private:
     static void attachSemanticOutput(FCCodegenContext& cc, const FCScanner& scanner)
     {
         cc.compiledProgram = scanner.semanticContext().getCompiledProgram();
+        // 挂载语义绑定侧表（AST 节点 -> 符号）
+        cc.semantic = &scanner.semanticContext();
     }
 
     // 把 FCValue 渲染成与期望值比较的字符串（与原有测试一致）。
@@ -988,12 +992,12 @@ private:
             cc.namedValues[locSymbol] = locAlloca;
 
             auto var = std::make_unique<FCVariableExprAST>(decl);
-            var->resolved = locSymbol;
+            cc.semanticBinding().bind(var.get(), cc.compiledProgram.allSymbols.lookupShared("loc"));
             auto* vv = codegen(var.get(), cc);
             expect(vv != nullptr && vv->getType()->isIntegerTy(), "codegen-api - local variable load");
 
             auto assignLHS = std::make_unique<FCVariableExprAST>(decl);
-            assignLHS->resolved = locSymbol;
+            cc.semanticBinding().bind(assignLHS.get(), cc.compiledProgram.allSymbols.lookupShared("loc"));
             auto assign = std::make_unique<FCBinaryExprAST>(
                 '=', std::move(assignLHS), std::make_unique<FCNumberExprAST>(5));
             auto* av = codegen(assign.get(), cc);
@@ -1782,7 +1786,7 @@ private:
             VariableSymbol localSym(localDecl, {VariableStorage::Kind::Local, 0}, 1);
             ctx.compiledProgram.allSymbols.addSymbol("v", localSym);
             auto localVar = std::make_unique<FCVariableExprAST>(localDecl);
-            localVar->resolved = ctx.compiledProgram.allSymbols.lookup("v");
+            ctx.bindNode(localVar.get(), "v");
             expect(evaluate(localVar.get(), ctx).type == FCValueCategory::Dangle,
                    "evaluator-error - local variable without frame");
 
@@ -1791,7 +1795,7 @@ private:
             VariableSymbol negSym(negDecl, {VariableStorage::Kind::Global, -1}, 0);
             ctx.compiledProgram.allSymbols.addSymbol("g", negSym);
             auto negVar = std::make_unique<FCVariableExprAST>(negDecl);
-            negVar->resolved = ctx.compiledProgram.allSymbols.lookup("g");
+            ctx.bindNode(negVar.get(), "g");
             expect(evaluate(negVar.get(), ctx).type == FCValueCategory::Dangle,
                    "evaluator-error - global variable with negative slot");
 
@@ -1800,7 +1804,7 @@ private:
             VariableSymbol oobSym(oobDecl, {VariableStorage::Kind::Local, 100}, 1);
             ctx.compiledProgram.allSymbols.addSymbol("o", oobSym);
             auto oobVar = std::make_unique<FCVariableExprAST>(oobDecl);
-            oobVar->resolved = ctx.compiledProgram.allSymbols.lookup("o");
+            ctx.bindNode(oobVar.get(), "o");
             ctx.pushFrame("oob");
             expect(evaluate(oobVar.get(), ctx).type == FCValueCategory::Dangle,
                    "evaluator-error - local variable slot out of range");
@@ -1811,7 +1815,7 @@ private:
             VariableSymbol bigSym(bigDecl, {VariableStorage::Kind::Global, 5}, 0);
             ctx.compiledProgram.allSymbols.addSymbol("big", bigSym);
             auto bigVar = std::make_unique<FCVariableExprAST>(bigDecl);
-            bigVar->resolved = ctx.compiledProgram.allSymbols.lookup("big");
+            ctx.bindNode(bigVar.get(), "big");
             expect(evaluate(bigVar.get(), ctx).type == FCValueCategory::Dangle,
                    "evaluator-error - uninitialized global slot reads dangle");
             expect(ctx.globalFrame.locals.size() == 6, "evaluator-error - global frame auto-resized");

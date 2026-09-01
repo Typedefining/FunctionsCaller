@@ -303,8 +303,8 @@ FCScanner::parseBinOpRHS(int ExprPrec, std::unique_ptr<FCExprAST> LHS) {
     if (!varSym)
       return logError("unknown variable");
     auto variableExpr = std::make_unique<FCVariableExprAST>(varSym->declaration);
-    // 静态绑定：AST 直接持有符号（含 storage/slot），后端免查表
-    variableExpr->resolved = varSym;
+    // 侧表绑定：AST 节点指针 -> 符号（AST 本身保持纯语法结构）
+    m_semanticContext.bindVariable(variableExpr.get(), varSym);
     return variableExpr;
   }
 
@@ -496,7 +496,7 @@ std::unique_ptr<FCExprAST> FCScanner::ParseForExpr() {
 
   auto forExpr = std::make_unique<FCForExprAST>(decl, std::move(Start), std::move(End),
                                                std::move(Step), std::move(Body));
-  forExpr->resolved = varSymbol;
+  m_semanticContext.bindVariable(forExpr.get(), varSymbol);
   return forExpr;
 }
 
@@ -535,7 +535,7 @@ std::unique_ptr<FCExprAST> FCScanner::ParseVarExpr() {
   }
 
   auto declExpr = std::make_unique<FCVarDeclExprAST>(decl, std::move(init));
-  declExpr->resolved = varSymbol;
+  m_semanticContext.bindVariable(declExpr.get(), varSymbol);
   return declExpr;
 }
 

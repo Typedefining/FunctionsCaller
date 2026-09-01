@@ -26,6 +26,8 @@ void FCSemanticContext::reset() {
   m_globalLayout.reset();
 
   m_persistentSymbolTable->clear();
+  m_binding.clear();
+  m_binding.clear();
   m_compiledProgram = std::make_shared<CompiledProgram>();
   m_currentState = CurrentCompilationState();
 
@@ -266,6 +268,11 @@ VariableSymbol* SymbolTable::lookup(const std::string& name) {
   return it != m_symbols.end() ? it->second.get() : nullptr;
 }
 
+std::shared_ptr<VariableSymbol> SymbolTable::lookupShared(const std::string& name) const {
+  auto it = m_symbols.find(name);
+  return it != m_symbols.end() ? it->second : nullptr;
+}
+
 // 移除符号
 bool SymbolTable::removeSymbol(const std::string& name) {
   return m_symbols.erase(name) > 0;
@@ -284,6 +291,21 @@ void SymbolTable::clear() {
 // 获取符号数量
 size_t SymbolTable::size() const {
   return m_symbols.size();
+}
+
+// ---- SemanticBinding 侧表接口 ----
+bool FCSemanticContext::bindVariable(const void* astNode, const VariableSymbol* symbol) {
+  if (astNode == nullptr || symbol == nullptr)
+    return false;
+  // 从持久符号表反查共享句柄，保证侧表参与符号生命周期
+  auto shared = m_persistentSymbolTable->lookupShared(symbol->declaration->name);
+  if (shared == nullptr)
+    return false;
+  return m_binding.bind(astNode, shared);
+}
+
+const VariableSymbol* FCSemanticContext::boundSymbol(const void* astNode) const {
+  return m_binding.find(astNode);
 }
 
 // 调试输出

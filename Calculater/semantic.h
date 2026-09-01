@@ -31,6 +31,29 @@ struct Scope {
     int depth = 0;
 };
 
+// ---------------------------------------------------------------------------
+// 语义绑定侧表：AST 保持纯语法结构，符号绑定关系由本表按节点指针索引。
+// 生命周期约定：AST 与持有本表的对象（FCSemanticContext）必须同时存活。
+// ---------------------------------------------------------------------------
+struct SemanticBinding {
+    // AST 节点 -> 符号（共享持有，保证侧表本身也参与符号生命周期）
+    std::unordered_map<const void*, std::shared_ptr<VariableSymbol>> variables;
+
+    // 登记：一个 AST 节点对应一个符号（重复登记视为错误返回 false）
+    bool bind(const void* node, std::shared_ptr<VariableSymbol> symbol) {
+        return variables.emplace(node, std::move(symbol)).second;
+    }
+
+    // 查询：返回符号裸指针；未绑定返回 nullptr
+    const VariableSymbol* find(const void* node) const {
+        auto it = variables.find(node);
+        return it != variables.end() ? it->second.get() : nullptr;
+    }
+
+    void clear() { variables.clear(); }
+    size_t size() const { return variables.size(); }
+};
+
 class FrameLayout {
 public:
     int allocateSlot()
@@ -103,6 +126,14 @@ public:
 
   const std::unordered_map<std::string, std::shared_ptr<VariableSymbol>> & currentScopeDeclarations() const;
 
+  // ---- 语义绑定侧表（AST 纯净，绑定关系存于此）----
+  // 将 AST 节点与符号绑定；scanner 解析期调用
+  bool bindVariable(const void* astNode, const VariableSymbol* symbol);
+  // 按 AST 节点查询绑定符号；后端（evaluator/codegen）调用
+  const VariableSymbol* boundSymbol(const void* astNode) const;
+  // 侧表整体（供后端 Context 引用）
+  const SemanticBinding& semanticBinding() const { return m_binding; }
+
   const FrameLayout& currentFrameLayout() const { return m_frameLayout; }
   int currentFrameLayoutSize() const;
   const GlobalLayout& currentGlobalLayout() const { return m_globalLayout; }
@@ -174,6 +205,7 @@ private:
   GlobalLayout m_globalLayout;
 
   std::shared_ptr<SymbolTable> m_persistentSymbolTable = std::make_shared<SymbolTable>();
+  SemanticBinding m_binding;
   std::shared_ptr<CompiledProgram> m_compiledProgram = std::make_shared<CompiledProgram>();
 };
 

@@ -101,6 +101,8 @@ public:
   // 查找符号
   const VariableSymbol* lookup(const std::string& name) const;
   VariableSymbol* lookup(const std::string& name);
+  // 查找符号（共享句柄版本：供侧表绑定延长符号生命周期）
+  std::shared_ptr<VariableSymbol> lookupShared(const std::string& name) const;
   // 移除符号
   bool removeSymbol(const std::string& name);
   // 获取所有符号（符号对象为共享持有，拷贝 SymbolTable 不复制符号对象）
@@ -180,9 +182,6 @@ public:
 /// FCVariableExprAST - Expression struct for referencing a variable, like "a".
 struct FCVariableExprAST : public FCExprAST {
   VarDeclPtr decl;
-  // 语义期绑定：指向唯一的 VariableSymbol（由 FCSemanticContext 共享持有）
-  // 后端求值/生成直接读取 storage/slot，不再按名字查表
-  const FCMarks::VariableSymbol* resolved = nullptr;
 
 public:
   FCVariableExprAST(VarDeclPtr v);
@@ -280,9 +279,6 @@ public:
 
   void info() override;
   const VarDeclPtr &getDecl() const { return decl; }
-  // 语义期绑定：循环变量对应的 VariableSymbol
-  const FCMarks::VariableSymbol* resolved = nullptr;
-  const FCMarks::VariableSymbol* getResolved() const { return resolved; }
   const FCExprAST *getStart() const { return Start.get(); }
   const FCExprAST *getEnd() const { return End.get(); }
   const FCExprAST *getStep() const { return Step.get(); }
@@ -308,8 +304,6 @@ struct FCVarDeclExprAST : public FCExprAST {
 public:
   VarDeclPtr decl;
   std::unique_ptr<FCExprAST> initExpr; // 初始化表达式
-  // 语义期绑定：声明对应的 VariableSymbol
-  const FCMarks::VariableSymbol* resolved = nullptr;
   FCVarDeclExprAST(VarDeclPtr d, std::unique_ptr<FCExprAST> init)
       : decl(std::move(d)), initExpr(std::move(init)) {}
   void info() override;

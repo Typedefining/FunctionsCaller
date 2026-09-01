@@ -11,6 +11,7 @@
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Instructions.h"
+#include "semantic.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
@@ -32,6 +33,19 @@ namespace FCExprClass
 		std::unordered_map<std::string, FCFunctionAST*> definitions;
 		llvm::Function* currentFunction = nullptr;
 		CompiledProgram compiledProgram;
+		// 语义绑定侧表：正常流程引用 scanner 的 FCSemanticContext；手工场景用本地表
+		const FCSemanticContext* semantic = nullptr;
+		FCMarks::SemanticBinding localBinding;
+
+		const FCMarks::VariableSymbol* boundSymbol(const void* astNode) const
+		{
+			if (semantic != nullptr)
+				return semantic->boundSymbol(astNode);
+			return localBinding.find(astNode);
+		}
+
+		// 本地侧表访问（手工绑定场景）
+		FCMarks::SemanticBinding& semanticBinding() { return localBinding; }
 
 		explicit FCCodegenContext(const std::string& moduleName, const CompiledProgram& program);
 		llvm::Type* getType(const std::string& typeName);
