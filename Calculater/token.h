@@ -93,15 +93,18 @@ class SymbolTable {
 public:
   SymbolTable() = default;
 
-  // 添加符号
+  // 添加符号（值版本：内部包装为共享持有后插入）
   bool addSymbol(const std::string& name, VariableSymbol symbol);
+  // 添加符号（共享版本：与作用域/持久表共享同一 Symbol 对象）
+  // 插入或覆盖：同名后声明覆盖先声明（内层遮蔽语义）
+  bool addSymbol(const std::string& name, std::shared_ptr<VariableSymbol> symbol);
   // 查找符号
   const VariableSymbol* lookup(const std::string& name) const;
   VariableSymbol* lookup(const std::string& name);
   // 移除符号
   bool removeSymbol(const std::string& name);
-  // 获取所有符号
-  const std::unordered_map<std::string, VariableSymbol>& getAllSymbols() const;
+  // 获取所有符号（符号对象为共享持有，拷贝 SymbolTable 不复制符号对象）
+  const std::unordered_map<std::string, std::shared_ptr<VariableSymbol>>& getAllSymbols() const;
   // 清空符号表
   void clear();
   // 获取符号数量
@@ -109,9 +112,8 @@ public:
   // 调试输出
   void dump() const;
 
-
 private:
-  std::unordered_map<std::string, VariableSymbol> m_symbols;
+  std::unordered_map<std::string, std::shared_ptr<VariableSymbol>> m_symbols;
 };
 
 struct CompiledFunction {
@@ -178,6 +180,9 @@ public:
 /// FCVariableExprAST - Expression struct for referencing a variable, like "a".
 struct FCVariableExprAST : public FCExprAST {
   VarDeclPtr decl;
+  // 语义期绑定：指向唯一的 VariableSymbol（由 FCSemanticContext 共享持有）
+  // 后端求值/生成直接读取 storage/slot，不再按名字查表
+  const FCMarks::VariableSymbol* resolved = nullptr;
 
 public:
   FCVariableExprAST(VarDeclPtr v);
@@ -275,6 +280,9 @@ public:
 
   void info() override;
   const VarDeclPtr &getDecl() const { return decl; }
+  // 语义期绑定：循环变量对应的 VariableSymbol
+  const FCMarks::VariableSymbol* resolved = nullptr;
+  const FCMarks::VariableSymbol* getResolved() const { return resolved; }
   const FCExprAST *getStart() const { return Start.get(); }
   const FCExprAST *getEnd() const { return End.get(); }
   const FCExprAST *getStep() const { return Step.get(); }
@@ -300,6 +308,8 @@ struct FCVarDeclExprAST : public FCExprAST {
 public:
   VarDeclPtr decl;
   std::unique_ptr<FCExprAST> initExpr; // 初始化表达式
+  // 语义期绑定：声明对应的 VariableSymbol
+  const FCMarks::VariableSymbol* resolved = nullptr;
   FCVarDeclExprAST(VarDeclPtr d, std::unique_ptr<FCExprAST> init)
       : decl(std::move(d)), initExpr(std::move(init)) {}
   void info() override;

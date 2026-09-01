@@ -82,8 +82,9 @@ FCSemanticContext::lookupVariable(const std::string &name) const {
 
     auto found = it->variables.find(name);
 
+    // 返回共享持有符号的裸指针：作用域弹出后符号仍由持久表/编译产物持有
     if (found != it->variables.end())
-      return &found->second;
+      return found->second.get();
   }
 
   return nullptr;
@@ -101,7 +102,7 @@ FCSemanticContext::lookupVariableInCurrentScope(const std::string &name) const {
   if (it == scope.variables.end())
     return nullptr;
 
-  return &it->second;
+  return it->second.get();
 }
 
 const VariableSymbol *
@@ -116,7 +117,7 @@ FCSemanticContext::lookupGlobalVariable(const std::string &name) const {
   if (it == globalScope.variables.end())
     return nullptr;
 
-  return &it->second;
+  return it->second.get();
 }
 
 VariableSymbol* FCSemanticContext::declareVariable(VarDeclPtr declaration) {
@@ -140,25 +141,26 @@ VariableSymbol* FCSemanticContext::declareVariable(VarDeclPtr declaration) {
 
 
   const std::string name = declaration->name;
-  auto [it, inserted] = scope.variables.emplace(
-      name, VariableSymbol{std::move(declaration), storage, scope.depth});
-
-  if (!inserted)
-    return nullptr;
+  // 符号对象共享持有：作用域、持久符号表、编译产物引用同一对象，
+  // AST 节点的 resolved 指针在其任一持有者存活期间均有效
+  auto symbol = std::make_shared<VariableSymbol>(
+      std::move(declaration), storage, scope.depth);
+  scope.variables.emplace(name, symbol);
 
 
   // 添加到持久化符号表
-  m_persistentSymbolTable->addSymbol(name, it->second);
+  // 持久表覆盖式登记：内层同名声明更新持久视图，与作用域解析一致
+  m_persistentSymbolTable->addSymbol(name, symbol);
 
 
   // 根据作用域添加到相应的编译结果
   if (m_currentState.isActive && m_currentState.currentFunction) {
-    m_currentState.currentFunction->symbols.addSymbol(name, it->second);
+    m_currentState.currentFunction->symbols.addSymbol(name, symbol);
   } else if (isGlobalScope()) {
-    m_compiledProgram->allSymbols.addSymbol(name, it->second);
+    m_compiledProgram->allSymbols.addSymbol(name, symbol);
   }
 
-  return &it->second;
+  return symbol.get();
 }
 
 bool FCSemanticContext::hasFunction(const std::string &functionName) const {
@@ -191,7 +193,7 @@ bool FCSemanticContext::registerFunction(const std::string &functionName, const 
   return true;
 }
 
-const std::unordered_map<std::string, VariableSymbol> &
+const std::unordered_map<std::string, std::shared_ptr<VariableSymbol>> &
 FCSemanticContext::currentScopeDeclarations() const {
   return m_scopeStack.back().variables;
 }
@@ -222,7 +224,7 @@ void FCSemanticContext::dumpScopes() const {
 
     printf(": %zu variables\n", scope.variables.size());
     for (const auto &pair : scope.variables) {
-      const auto &symbol = pair.second;
+      const auto &symbol = *pair.second;
 
       if (!symbol.declaration)
         continue;
@@ -240,24 +242,28 @@ void FCSemanticContext::dumpScopes() const {
 }
 
 
-  // 添加符号
+  // 添加符号（值版本：包装为共享持有后插入）
 bool SymbolTable::addSymbol(const std::string& name, VariableSymbol symbol) {
-  if (m_symbols.find(name) != m_symbols.end()) {
-    return false;  // 符号已存在
-  }
-  m_symbols.emplace(name, std::move(symbol));
-  return true;
+  return addSymbol(name, std::make_shared<VariableSymbol>(std::move(symbol)));
+}
+
+// 添加符号（共享版本：插入或覆盖）
+// 覆盖语义：同名后声明覆盖先声明，与作用域栈的内层遮蔽解析结果一致
+bool SymbolTable::addSymbol(const std::string& name, std::shared_ptr<VariableSymbol> symbol) {
+  bool inserted = m_symbols.find(name) == m_symbols.end();
+  m_symbols.insert_or_assign(name, std::move(symbol));
+  return inserted;
 }
 
 // 查找符号
 const VariableSymbol* SymbolTable::lookup(const std::string& name) const {
   auto it = m_symbols.find(name);
-  return it != m_symbols.end() ? &it->second : nullptr;
+  return it != m_symbols.end() ? it->second.get() : nullptr;
 }
 
 VariableSymbol* SymbolTable::lookup(const std::string& name) {
   auto it = m_symbols.find(name);
-  return it != m_symbols.end() ? &it->second : nullptr;
+  return it != m_symbols.end() ? it->second.get() : nullptr;
 }
 
 // 移除符号
@@ -266,7 +272,7 @@ bool SymbolTable::removeSymbol(const std::string& name) {
 }
 
 // 获取所有符号
-const std::unordered_map<std::string, VariableSymbol>& SymbolTable::getAllSymbols() const {
+const std::unordered_map<std::string, std::shared_ptr<VariableSymbol>>& SymbolTable::getAllSymbols() const {
   return m_symbols;
 }
 
@@ -285,14 +291,14 @@ void SymbolTable::dump() const {
   printf("Symbol Table (%zu symbols):\n", m_symbols.size());
   for (const auto& [name, symbol] : m_symbols) {
     const char* kind =
-      symbol.storage.kind == VariableStorage::Kind::Global ? "Global" : "Local";
+      symbol->storage.kind == VariableStorage::Kind::Global ? "Global" : "Local";
 
     printf("  %s: slot=%d, kind=%s, depth=%d, mutable=%s\n",
       name.c_str(),
-      symbol.storage.slot,
+      symbol->storage.slot,
       kind,
-      symbol.scopeDepth,
-      symbol.isMutable ? "yes" : "no");
+      symbol->scopeDepth,
+      symbol->isMutable ? "yes" : "no");
   }
 }
 

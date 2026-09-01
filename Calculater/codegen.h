@@ -26,8 +26,9 @@ namespace FCExprClass
 		llvm::LLVMContext llvmContext;
 		llvm::IRBuilder<> builder;
 		std::unique_ptr<llvm::Module> module;
-		std::map<const VarDecl*, llvm::AllocaInst*> namedValues;
-		std::map<const VarDecl*, llvm::GlobalVariable*> globalValues;
+		// 符号地址表：key 为语义期绑定的 VariableSymbol（共享持有，指针稳定）
+		std::map<const VariableSymbol*, llvm::AllocaInst*> namedValues;
+		std::map<const VariableSymbol*, llvm::GlobalVariable*> globalValues;
 		std::unordered_map<std::string, FCFunctionAST*> definitions;
 		llvm::Function* currentFunction = nullptr;
 		CompiledProgram compiledProgram;

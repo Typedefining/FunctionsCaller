@@ -12,47 +12,8 @@ FCValue evaluateExpression(const FCExprAST *expression,
                             FCEvaluationContext &context);
 Frame *frameForStorage(const VariableStorage &storage, FCEvaluationContext &context);
 
-bool lookupVarSymbol(const std::string& name, FCEvaluationContext &context, Frame* currentFrame, VariableSymbol* symbol)
-{
-	Frame* resultFrame = nullptr;
-	VariableSymbol* resultSymbol = nullptr;
-
-  if (!context.callStack.empty())
-  {
-    resultFrame = &context.currentFrame();
-    auto function = context.compiledProgram.functions[resultFrame->funcName];
-    if (function && function->symbols.size() > 0)
-      resultSymbol = function->symbols.lookup(name);
-  }
-  else
-  {
-    resultFrame = &context.globalFrame;
-  }
-
-  if (!resultSymbol)
-  {
-    resultSymbol = context.compiledProgram.allSymbols.lookup(name);
-  }
-
-  if (!resultSymbol)
-  {
-    assert("evaluateVariable can't find symbol");
-    return false;
-  }
-
-  if (symbol)
-  {
-    *symbol = *resultSymbol;
-  }
-
-  if (currentFrame)
-  {
-    *currentFrame = *resultFrame;
-  }
-
-  return true;
-}
-
+// 变量符号已在解析期静态绑定到 AST 节点（resolved 字段），
+// 运行期直接读取 storage/slot，不再按名字查符号表
 
 namespace {
 FCValue makeDangleValue() {
@@ -82,13 +43,10 @@ FCValue evaluateNumber(const FCNumberExprAST *node) {
 }
 
 FCValue evaluateVariable(const FCVariableExprAST *node, FCEvaluationContext &context) {
-  VariableSymbol symbol;
-  if (!lookupVarSymbol(node->decl->name, context, nullptr, &symbol))
-  {
-    return {};
-  }
+  if (node->resolved == nullptr)
+    return makeDangleValue();
 
-  const VariableStorage storage = symbol.storage;
+  const VariableStorage &storage = node->resolved->storage;
   Frame *frame = frameForStorage(storage, context);
   if (frame == nullptr)
     return makeDangleValue();
@@ -110,7 +68,7 @@ FCValue evaluateIf(const FCIfExprAST *node, FCEvaluationContext &context) {
 }
 
 FCValue evaluateFor(const FCForExprAST *node, FCEvaluationContext &context) {
-  if (node->getDecl() == nullptr || context.callStack.empty())
+  if (node->getDecl() == nullptr || node->resolved == nullptr || context.callStack.empty())
     return makeDangleValue();
   const auto start = evaluateExpression(node->getStart(), context);
   FCValue step;
@@ -125,13 +83,7 @@ FCValue evaluateFor(const FCForExprAST *node, FCEvaluationContext &context) {
       step.type != FCValueCategory::Integer)
     return makeDangleValue();
 
-    VariableSymbol symbol;
-    if (!lookupVarSymbol(node->getDecl()->name, context, nullptr, &symbol))
-    {
-      return {};
-    }
-
-  const VariableStorage storage = symbol.storage;
+  const VariableStorage &storage = node->resolved->storage;
   size_t frameIdx = context.callStack.size() - 1;
   if (storage.slot < 0 || storage.slot >= static_cast<int>(context.callStack[frameIdx].locals.size()))
     return makeDangleValue();
@@ -174,16 +126,10 @@ FCValue evaluateSequence(const FCSeqExprAST *node,
 
 FCValue evaluateDeclaration(const FCVarDeclExprAST *node,
                             FCEvaluationContext &context) {
-  Frame currentFunc;
-  VariableSymbol symbol;
-  if (!lookupVarSymbol(node->decl->name, context, &currentFunc, &symbol))
-  {
-    return {};
-  }
-
-  const VariableStorage storage = symbol.storage;
-  if (node->decl == nullptr || node->initExpr == nullptr)
+  if (node->resolved == nullptr || node->decl == nullptr || node->initExpr == nullptr)
     return makeDangleValue();
+
+  const VariableStorage &storage = node->resolved->storage;
   const auto value = evaluateExpression(node->initExpr.get(), context);
   if (value.type == FCValueCategory::Dangle)
     return value;
@@ -223,14 +169,13 @@ FCValue evaluateBinary(const FCBinaryExprAST *expression,
     if (value.type == FCValueCategory::Dangle)
       return value;
 
-    Frame currentFunc;
-    VariableSymbol symbol;
-    if (!lookupVarSymbol(variable->decl->name, context, &currentFunc, &symbol))
+    if (variable->resolved == nullptr)
     {
-      return {};
+      std::fprintf(stderr, "LogError: LHS of assignment is not bound to a symbol\n");
+      return makeDangleValue();
     }
 
-    const VariableStorage storage = symbol.storage;
+    const VariableStorage &storage = variable->resolved->storage;
     Frame *frame = frameForStorage(storage, context);
     if (frame == nullptr) {
       std::fprintf(stderr, "LogError: Invalid slot for %s\n",

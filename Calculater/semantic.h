@@ -25,7 +25,9 @@ using VarDeclPtr = std::shared_ptr<VarDecl>;
 
 
 struct Scope {
-    std::unordered_map<std::string, VariableSymbol> variables;
+    // 共享持有：同一 Symbol 对象同时被作用域与持久符号表引用，
+    // 作用域弹出后符号仍存活（CompiledProgram/持久表持有）
+    std::unordered_map<std::string, std::shared_ptr<VariableSymbol>> variables;
     int depth = 0;
 };
 
@@ -99,7 +101,7 @@ public:
   const CompiledProgram& getCompiledProgram() const;
   const CompiledFunction* getCompiledFunction(const std::string& name) const;
 
-  const std::unordered_map<std::string, VariableSymbol> & currentScopeDeclarations() const;
+  const std::unordered_map<std::string, std::shared_ptr<VariableSymbol>> & currentScopeDeclarations() const;
 
   const FrameLayout& currentFrameLayout() const { return m_frameLayout; }
   int currentFrameLayoutSize() const;

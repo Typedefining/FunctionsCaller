@@ -477,6 +477,9 @@ private:
             {"def fsub(a:double, b:double) { a - b }; fsub(5.5, 2.0)", "float function subtraction", "3.5"},
             {"def fdiv(a:double, b:double) { a / b }; fdiv(7.5, 2.5)", "float function division", "3.0"},
             {"var x:int = 10; def f() { var x:int = 2; x }; f()", "local shadows global", "2"},
+            // 块级遮蔽：同函数内层块重新声明同名变量，内层声明必须覆盖外层符号
+            {"def f() { var x:int = 1; { var x:int = 2; x } }; f()", "block shadowing inner wins", "2"},
+            {"def f() { var x:int = 1; { var x:int = 2; }; x }; f()", "block shadowing outer restored", "1"},
             {"def nested2() { var x:int = 1; var y:int = 2; x + y }; nested2()", "multiple locals", "3"},
             {"def nf(n:int) { var s:int = 0; for i = 0, i < n, 1 in for j = 0, j < n, 1 in s = s + i; s }; nf(3)", "nested for loop", "9"},
             {"def accum(n:int) { var r:int = 1; for i = 1, i < n, 1 in r = r * 2; r }; accum(5)", "loop accumulation multiply", "16"},
@@ -980,15 +983,19 @@ private:
             auto decl = std::make_shared<VarDecl>("loc", "int");
             VariableSymbol sym(decl, {VariableStorage::Kind::Local, 0}, 1);
             cc.compiledProgram.allSymbols.addSymbol("loc", sym);
+            auto* locSymbol = cc.compiledProgram.allSymbols.lookup("loc");
             auto* locAlloca = cc.createEntryBlockAlloca(fn, "loc", cc.getType("int"));
-            cc.namedValues[decl.get()] = locAlloca;
+            cc.namedValues[locSymbol] = locAlloca;
 
             auto var = std::make_unique<FCVariableExprAST>(decl);
+            var->resolved = locSymbol;
             auto* vv = codegen(var.get(), cc);
             expect(vv != nullptr && vv->getType()->isIntegerTy(), "codegen-api - local variable load");
 
+            auto assignLHS = std::make_unique<FCVariableExprAST>(decl);
+            assignLHS->resolved = locSymbol;
             auto assign = std::make_unique<FCBinaryExprAST>(
-                '=', std::make_unique<FCVariableExprAST>(decl), std::make_unique<FCNumberExprAST>(5));
+                '=', std::move(assignLHS), std::make_unique<FCNumberExprAST>(5));
             auto* av = codegen(assign.get(), cc);
             expect(av != nullptr, "codegen-api - local assignment");
 
@@ -1775,6 +1782,7 @@ private:
             VariableSymbol localSym(localDecl, {VariableStorage::Kind::Local, 0}, 1);
             ctx.compiledProgram.allSymbols.addSymbol("v", localSym);
             auto localVar = std::make_unique<FCVariableExprAST>(localDecl);
+            localVar->resolved = ctx.compiledProgram.allSymbols.lookup("v");
             expect(evaluate(localVar.get(), ctx).type == FCValueCategory::Dangle,
                    "evaluator-error - local variable without frame");
 
@@ -1783,6 +1791,7 @@ private:
             VariableSymbol negSym(negDecl, {VariableStorage::Kind::Global, -1}, 0);
             ctx.compiledProgram.allSymbols.addSymbol("g", negSym);
             auto negVar = std::make_unique<FCVariableExprAST>(negDecl);
+            negVar->resolved = ctx.compiledProgram.allSymbols.lookup("g");
             expect(evaluate(negVar.get(), ctx).type == FCValueCategory::Dangle,
                    "evaluator-error - global variable with negative slot");
 
@@ -1791,6 +1800,7 @@ private:
             VariableSymbol oobSym(oobDecl, {VariableStorage::Kind::Local, 100}, 1);
             ctx.compiledProgram.allSymbols.addSymbol("o", oobSym);
             auto oobVar = std::make_unique<FCVariableExprAST>(oobDecl);
+            oobVar->resolved = ctx.compiledProgram.allSymbols.lookup("o");
             ctx.pushFrame("oob");
             expect(evaluate(oobVar.get(), ctx).type == FCValueCategory::Dangle,
                    "evaluator-error - local variable slot out of range");
@@ -1801,6 +1811,7 @@ private:
             VariableSymbol bigSym(bigDecl, {VariableStorage::Kind::Global, 5}, 0);
             ctx.compiledProgram.allSymbols.addSymbol("big", bigSym);
             auto bigVar = std::make_unique<FCVariableExprAST>(bigDecl);
+            bigVar->resolved = ctx.compiledProgram.allSymbols.lookup("big");
             expect(evaluate(bigVar.get(), ctx).type == FCValueCategory::Dangle,
                    "evaluator-error - uninitialized global slot reads dangle");
             expect(ctx.globalFrame.locals.size() == 6, "evaluator-error - global frame auto-resized");

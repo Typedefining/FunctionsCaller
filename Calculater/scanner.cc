@@ -302,7 +302,10 @@ FCScanner::parseBinOpRHS(int ExprPrec, std::unique_ptr<FCExprAST> LHS) {
     auto varSym = m_semanticContext.lookupVariable(IdName);
     if (!varSym)
       return logError("unknown variable");
-    return std::make_unique<FCVariableExprAST>(varSym->declaration);
+    auto variableExpr = std::make_unique<FCVariableExprAST>(varSym->declaration);
+    // 静态绑定：AST 直接持有符号（含 storage/slot），后端免查表
+    variableExpr->resolved = varSym;
+    return variableExpr;
   }
 
   // 函数调用分支
@@ -491,8 +494,10 @@ std::unique_ptr<FCExprAST> FCScanner::ParseForExpr() {
 
   auto Body = parseExpression();
 
-  return std::make_unique<FCForExprAST>(decl, std::move(Start), std::move(End),
-                                        std::move(Step), std::move(Body));
+  auto forExpr = std::make_unique<FCForExprAST>(decl, std::move(Start), std::move(End),
+                                               std::move(Step), std::move(Body));
+  forExpr->resolved = varSymbol;
+  return forExpr;
 }
 
 std::unique_ptr<FCExprAST> FCScanner::ParseVarExpr() {
@@ -529,7 +534,9 @@ std::unique_ptr<FCExprAST> FCScanner::ParseVarExpr() {
     return nullptr;
   }
 
-  return std::make_unique<FCVarDeclExprAST>(decl, std::move(init));
+  auto declExpr = std::make_unique<FCVarDeclExprAST>(decl, std::move(init));
+  declExpr->resolved = varSymbol;
+  return declExpr;
 }
 
 ::std::unique_ptr<FCExprAST> FCScanner::parseBlockExpr() {
