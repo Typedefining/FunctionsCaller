@@ -25,7 +25,6 @@ void FCSemanticContext::reset() {
   m_frameLayout.reset();
   m_globalLayout.reset();
 
-  m_binding.clear();
   m_compiledProgram = std::make_shared<CompiledProgram>();
   m_currentState = CurrentCompilationState();
 
@@ -38,8 +37,8 @@ int FCSemanticContext::getOperatorPrecedence(char op) const {
 }
 
 void FCSemanticContext::pushScope() {
-  m_scopeStack.emplace_back(
-      Scope{.variables = {}, .depth = static_cast<int>(m_scopeStack.size() + 1)});
+  m_scopeStack.emplace_back(Scope{
+      .variables = {}, .depth = static_cast<int>(m_scopeStack.size() + 1)});
 }
 
 void FCSemanticContext::popScope() {
@@ -76,7 +75,8 @@ bool FCSemanticContext::isGlobalScope() const {
   return !m_currentState.isActive && m_scopeStack.size() == 1;
 }
 
-std::shared_ptr<VariableSymbol> FCSemanticContext::lookupVariableShared(const std::string &name) const {
+std::shared_ptr<VariableSymbol>
+FCSemanticContext::lookupVariableShared(const std::string &name) const {
   for (auto it = m_scopeStack.rbegin(); it != m_scopeStack.rend(); ++it) {
     auto found = it->variables.find(name);
     if (found != it->variables.end())
@@ -115,7 +115,8 @@ FCSemanticContext::lookupGlobalVariable(const std::string &name) const {
   return it->second;
 }
 
-std::shared_ptr<VariableSymbol> FCSemanticContext::declareVariable(VarDeclPtr declaration) {
+std::shared_ptr<VariableSymbol>
+FCSemanticContext::declareVariable(VarDeclPtr declaration) {
   assert(declaration != nullptr);
   assert(!m_scopeStack.empty());
 
@@ -134,10 +135,9 @@ std::shared_ptr<VariableSymbol> FCSemanticContext::declareVariable(VarDeclPtr de
     storage = {VariableStorage::Kind::Local, m_frameLayout.allocateSlot()};
   }
 
-
   const std::string name = declaration->name;
-  auto symbol = std::make_shared<VariableSymbol>(
-      std::move(declaration), storage, scope.depth);
+  auto symbol = std::make_shared<VariableSymbol>(std::move(declaration),
+                                                 storage, scope.depth);
   scope.variables.emplace(name, symbol);
 
   if (m_currentState.isActive && m_currentState.currentFunction) {
@@ -153,7 +153,8 @@ bool FCSemanticContext::hasFunction(const std::string &functionName) const {
   return m_functionSet.find(functionName) != m_functionSet.end();
 }
 
-bool FCSemanticContext::registerFunction(const std::string &functionName, const FCFunctionAST* function) {
+bool FCSemanticContext::registerFunction(const std::string &functionName,
+                                         const FCFunctionAST *function) {
   if (hasFunction(functionName)) {
     fprintf(stderr, "Error: function '%s' already defined\n",
             functionName.c_str());
@@ -161,12 +162,14 @@ bool FCSemanticContext::registerFunction(const std::string &functionName, const 
   }
 
   auto compiledFunc = std::make_shared<CompiledFunction>();
-  compiledFunc->ast = const_cast<FCFunctionAST*>(function);
+  compiledFunc->ast = const_cast<FCFunctionAST *>(function);
 
   if (m_currentState.isActive && m_currentState.currentFunction) {
     compiledFunc->symbols = std::move(m_currentState.currentFunction->symbols);
     compiledFunc->frameSize = m_frameLayout.frameSize();
-    compiledFunc->maxTempSlots = m_frameLayout.frameSize(); // Assuming maxTempSlots is the same as frame size for now
+    compiledFunc->maxTempSlots =
+        m_frameLayout.frameSize(); // Assuming maxTempSlots is the same as frame
+                                   // size for now
   }
 
   m_compiledProgram->functions[functionName] = std::move(compiledFunc);
@@ -188,13 +191,13 @@ int FCSemanticContext::currentFrameLayoutSize() const {
   return m_frameLayout.frameSize();
 }
 
-const CompiledProgram& FCSemanticContext::getCompiledProgram() const {
-    return *m_compiledProgram;
+const CompiledProgram &FCSemanticContext::getCompiledProgram() const {
+  return *m_compiledProgram;
 }
 
-const CompiledFunction*
-FCSemanticContext::getCompiledFunction(const std::string& name) const {
-    return m_compiledProgram->getFunction(name);
+const CompiledFunction *
+FCSemanticContext::getCompiledFunction(const std::string &name) const {
+  return m_compiledProgram->getFunction(name);
 }
 
 void FCSemanticContext::dumpScopes() const {
@@ -225,62 +228,60 @@ void FCSemanticContext::dumpScopes() const {
   }
 }
 
-bool SymbolTable::addSymbol(const std::string& name, std::shared_ptr<VariableSymbol> symbol) {
+bool SymbolTable::addSymbol(const std::string &name,
+                            std::shared_ptr<VariableSymbol> symbol) {
   bool inserted = m_symbols.find(name) == m_symbols.end();
-  if (!inserted)
-  {
-    //不允许重定义同名符号
+  if (!inserted) {
+    // 不允许重定义同名符号
     return false;
   }
   m_symbols.insert_or_assign(name, std::move(symbol));
   return inserted;
 }
 
-std::shared_ptr<VariableSymbol> SymbolTable::lookupShared(const std::string& name) const {
+std::shared_ptr<VariableSymbol>
+SymbolTable::lookupShared(const std::string &name) const {
   auto it = m_symbols.find(name);
   return it != m_symbols.end() ? it->second : nullptr;
 }
 
-bool SymbolTable::removeSymbol(const std::string& name) {
+bool SymbolTable::removeSymbol(const std::string &name) {
   return m_symbols.erase(name) > 0;
 }
 
-const std::unordered_map<std::string, std::shared_ptr<VariableSymbol>>& SymbolTable::getAllSymbols() const {
+const std::unordered_map<std::string, std::shared_ptr<VariableSymbol>> &
+SymbolTable::getAllSymbols() const {
   return m_symbols;
 }
 
-void SymbolTable::clear() {
-  m_symbols.clear();
-}
+void SymbolTable::clear() { m_symbols.clear(); }
 
-size_t SymbolTable::size() const {
-  return m_symbols.size();
-}
+size_t SymbolTable::size() const { return m_symbols.size(); }
 
-bool FCSemanticContext::bindVariable(const void* astNode, std::shared_ptr<VariableSymbol> symbol) {
+bool FCSemanticContext::bindVariable(const void *astNode,
+                                     std::shared_ptr<VariableSymbol> symbol) {
   if (astNode == nullptr || symbol == nullptr)
     return false;
 
-  return m_binding.bind(astNode, std::move(symbol));
+  return m_compiledProgram->m_binding->bind(astNode, std::move(symbol));
 }
 
-std::shared_ptr<VariableSymbol> FCSemanticContext::boundSymbol(const void* astNode) const {
-  return m_binding.find(astNode);
+std::shared_ptr<VariableSymbol>
+FCSemanticContext::boundSymbol(const void *astNode) const {
+  return m_compiledProgram->m_binding->find(astNode);
 }
 
 // 调试输出
 void SymbolTable::dump() const {
   printf("Symbol Table (%zu symbols):\n", m_symbols.size());
-  for (const auto& [name, symbol] : m_symbols) {
-    const char* kind =
-      symbol->storage.kind == VariableStorage::Kind::Global ? "Global" : "Local";
+  for (const auto &[name, symbol] : m_symbols) {
+    const char *kind = symbol->storage.kind == VariableStorage::Kind::Global
+                           ? "Global"
+                           : "Local";
 
-    printf("  %s: slot=%d, kind=%s, depth=%d, mutable=%s\n",
-      name.c_str(),
-      symbol->storage.slot,
-      kind,
-      symbol->scopeDepth,
-      symbol->isMutable ? "yes" : "no");
+    printf("  %s: slot=%d, kind=%s, depth=%d, mutable=%s\n", name.c_str(),
+           symbol->storage.slot, kind, symbol->scopeDepth,
+           symbol->isMutable ? "yes" : "no");
   }
 }
 

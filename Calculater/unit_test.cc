@@ -127,7 +127,6 @@ private:
     {
         FCEvaluationContext ctx(scanner.semanticContext().getCompiledProgram());
         // 挂载语义绑定侧表（AST 节点 -> 符号）
-        ctx.semantic = &scanner.semanticContext();
         return ctx;
     }
 
@@ -1898,7 +1897,6 @@ private:
             FCScanner s2;
             auto ast2 = s2.analysis("def g1(x:int) { x * 2 }; g1(21)");
             ctx.compiledProgram = s2.semanticContext().getCompiledProgram();
-            ctx.semantic = &s2.semanticContext();
             FCValue r2 = evaluate(ast2.get(), ctx);
             expect(r2.type == FCValueCategory::Integer && r2.evaluteVal.intVal == 42,
                    "stress - context reuse program 2");
@@ -1956,7 +1954,6 @@ static void run(const char* src) {
   auto ast = scanner.analysis(src);
   if (ast == nullptr) { std::printf("parse failed\n"); return; }
   FCEvaluationContext ctx(scanner.semanticContext().getCompiledProgram());
-  ctx.semantic = &scanner.semanticContext();
   // 打印函数符号表槽位绑定
   for (const auto& [name, sym] : scanner.semanticContext().getCompiledProgram().functions) {
     if (sym && sym->ast) {

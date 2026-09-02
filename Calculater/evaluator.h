@@ -3,7 +3,6 @@
 #include "token.h"
 #include "runtime.h"
 #include "semantic.h"
-#include "semantic.h"
 
 namespace FCExprClass
 {
@@ -25,13 +24,12 @@ namespace FCExprClass
 		Frame globalFrame{"<global>", {}};
 		std::vector<Frame> callStack;
 		CompiledProgram compiledProgram;
-		const FCSemanticContext* semantic = nullptr;
 		FCMarks::SemanticBinding localBinding;
 
 		std::shared_ptr<VariableSymbol> boundSymbol(const void* astNode) const
 		{
-			if (semantic != nullptr)
-				return semantic->boundSymbol(astNode);
+			if (compiledProgram.m_binding->size() != 0)
+				return compiledProgram.m_binding->find(astNode);
 			return localBinding.find(astNode);
 		}
 

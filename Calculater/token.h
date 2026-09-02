@@ -121,8 +121,25 @@ struct CompiledFunction {
     , maxTempSlots(0) {}
 };
 
+struct SemanticBinding {
+    std::unordered_map<const void*, std::shared_ptr<VariableSymbol>> variables;
+
+    bool bind(const void* node, std::shared_ptr<VariableSymbol> symbol) {
+        return variables.emplace(node, std::move(symbol)).second;
+    }
+
+    std::shared_ptr<VariableSymbol> find(const void* node) const {
+        auto it = variables.find(node);
+        return it != variables.end() ? it->second : nullptr;
+    }
+
+    void clear() { variables.clear(); }
+    size_t size() const { return variables.size(); }
+};
+
 struct CompiledProgram {
   SymbolTable allSymbols;
+  std::shared_ptr<SemanticBinding> m_binding = std::make_shared<SemanticBinding>();
   std::unordered_map<std::string, std::shared_ptr<CompiledFunction>> functions;
   int globalFrameSize;
 

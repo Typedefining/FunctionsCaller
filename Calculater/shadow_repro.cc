@@ -13,7 +13,6 @@ static void run(const char* src) {
   auto ast = scanner.analysis(src);
   if (ast == nullptr) { std::printf("parse failed\n"); return; }
   FCEvaluationContext ctx(scanner.semanticContext().getCompiledProgram());
-  ctx.semantic = &scanner.semanticContext();
   // 打印函数符号表槽位绑定
   for (const auto& [name, sym] : scanner.semanticContext().getCompiledProgram().functions) {
     if (sym && sym->ast) {

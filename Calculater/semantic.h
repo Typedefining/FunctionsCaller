@@ -28,21 +28,7 @@ struct Scope {
     int depth = 0;
 };
 
-struct SemanticBinding {
-    std::unordered_map<const void*, std::shared_ptr<VariableSymbol>> variables;
-
-    bool bind(const void* node, std::shared_ptr<VariableSymbol> symbol) {
-        return variables.emplace(node, std::move(symbol)).second;
-    }
-
-    std::shared_ptr<VariableSymbol> find(const void* node) const {
-        auto it = variables.find(node);
-        return it != variables.end() ? it->second : nullptr;
-    }
-
-    void clear() { variables.clear(); }
-    size_t size() const { return variables.size(); }
-};
+struct SemanticBinding;
 
 class FrameLayout {
 public:
@@ -119,7 +105,7 @@ public:
   bool bindVariable(const void* astNode, std::shared_ptr<VariableSymbol> symbol);
   // 按 AST 节点查询绑定符号；后端（evaluator/codegen）调用
   std::shared_ptr<VariableSymbol> boundSymbol(const void* astNode) const;
-  const SemanticBinding& semanticBinding() const { return m_binding; }
+  const SemanticBinding& semanticBinding() const;
 
   const FrameLayout& currentFrameLayout() const { return m_frameLayout; }
   int currentFrameLayoutSize() const;
@@ -191,7 +177,6 @@ private:
   FrameLayout m_frameLayout;
   GlobalLayout m_globalLayout;
 
-  SemanticBinding m_binding;
   std::shared_ptr<CompiledProgram> m_compiledProgram = std::make_shared<CompiledProgram>();
 };
 
