@@ -27,17 +27,15 @@ namespace FCExprClass
 		llvm::LLVMContext llvmContext;
 		llvm::IRBuilder<> builder;
 		std::unique_ptr<llvm::Module> module;
-		// 符号地址表：key 为语义期绑定的 VariableSymbol（共享持有，指针稳定）
-		std::map<const VariableSymbol*, llvm::AllocaInst*> namedValues;
-		std::map<const VariableSymbol*, llvm::GlobalVariable*> globalValues;
+		std::map<std::shared_ptr<VariableSymbol>, llvm::AllocaInst*> namedValues;
+		std::map<std::shared_ptr<VariableSymbol>, llvm::GlobalVariable*> globalValues;
 		std::unordered_map<std::string, FCFunctionAST*> definitions;
 		llvm::Function* currentFunction = nullptr;
 		CompiledProgram compiledProgram;
-		// 语义绑定侧表：正常流程引用 scanner 的 FCSemanticContext；手工场景用本地表
 		const FCSemanticContext* semantic = nullptr;
 		FCMarks::SemanticBinding localBinding;
 
-		const FCMarks::VariableSymbol* boundSymbol(const void* astNode) const
+		std::shared_ptr<VariableSymbol> boundSymbol(const void* astNode) const
 		{
 			if (semantic != nullptr)
 				return semantic->boundSymbol(astNode);

@@ -12,9 +12,6 @@ FCValue evaluateExpression(const FCExprAST *expression,
                             FCEvaluationContext &context);
 Frame *frameForStorage(const VariableStorage &storage, FCEvaluationContext &context);
 
-// 变量符号在解析期登记到语义绑定侧表（AST 节点指针 -> VariableSymbol），
-// 运行期按节点查侧表读 storage/slot，不再按名字查符号表
-
 namespace {
 FCValue makeDangleValue() {
   FCValue value;
@@ -43,7 +40,7 @@ FCValue evaluateNumber(const FCNumberExprAST *node) {
 }
 
 FCValue evaluateVariable(const FCVariableExprAST *node, FCEvaluationContext &context) {
-  const VariableSymbol* symbol = context.boundSymbol(node);
+  std::shared_ptr<VariableSymbol> symbol = context.boundSymbol(node);
   if (symbol == nullptr)
     return makeDangleValue();
 
@@ -69,7 +66,7 @@ FCValue evaluateIf(const FCIfExprAST *node, FCEvaluationContext &context) {
 }
 
 FCValue evaluateFor(const FCForExprAST *node, FCEvaluationContext &context) {
-  const VariableSymbol* forSymbol = context.boundSymbol(node);
+  std::shared_ptr<VariableSymbol> forSymbol = context.boundSymbol(node);
   if (node->getDecl() == nullptr || forSymbol == nullptr || context.callStack.empty())
     return makeDangleValue();
   const auto start = evaluateExpression(node->getStart(), context);
@@ -128,7 +125,7 @@ FCValue evaluateSequence(const FCSeqExprAST *node,
 
 FCValue evaluateDeclaration(const FCVarDeclExprAST *node,
                             FCEvaluationContext &context) {
-  const VariableSymbol* symbol = context.boundSymbol(node);
+  std::shared_ptr<VariableSymbol> symbol = context.boundSymbol(node);
   if (symbol == nullptr || node->decl == nullptr || node->initExpr == nullptr)
     return makeDangleValue();
 
@@ -172,7 +169,7 @@ FCValue evaluateBinary(const FCBinaryExprAST *expression,
     if (value.type == FCValueCategory::Dangle)
       return value;
 
-    const VariableSymbol* lhsSymbol = context.boundSymbol(variable);
+    std::shared_ptr<VariableSymbol> lhsSymbol = context.boundSymbol(variable);
     if (lhsSymbol == nullptr)
     {
       std::fprintf(stderr, "LogError: LHS of assignment is not bound to a symbol\n");
@@ -291,7 +288,7 @@ FCValue evaluateCall(const FCCallExprAST *expression,
     }
 
     auto func = context.compiledProgram.getFunction(expression->getName());
-    auto symbol = func->symbols.lookup(parameter->name);
+    auto symbol = func->symbols.lookupShared(parameter->name);
     VariableStorage storage;
     if (symbol)
     {
@@ -299,7 +296,7 @@ FCValue evaluateCall(const FCCallExprAST *expression,
     }
     else
     {
-      symbol = context.compiledProgram.allSymbols.lookup(parameter->name);
+      symbol = context.compiledProgram.allSymbols.lookupShared(parameter->name);
       storage  = symbol->storage;
     }
     const int slot = storage.slot;

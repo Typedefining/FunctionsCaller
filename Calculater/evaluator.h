@@ -25,20 +25,16 @@ namespace FCExprClass
 		Frame globalFrame{"<global>", {}};
 		std::vector<Frame> callStack;
 		CompiledProgram compiledProgram;
-		// 语义绑定侧表：正常流程引用 scanner 的 FCSemanticContext（不拷贝）；
-		// 手工构造场景（无 scanner）落到本地表。生命周期约定：AST 与绑定源同时存活。
 		const FCSemanticContext* semantic = nullptr;
 		FCMarks::SemanticBinding localBinding;
 
-		// 绑定符号查询：优先语义上下文侧表，其次本地表；均未绑定返回 nullptr
-		const FCMarks::VariableSymbol* boundSymbol(const void* astNode) const
+		std::shared_ptr<VariableSymbol> boundSymbol(const void* astNode) const
 		{
 			if (semantic != nullptr)
 				return semantic->boundSymbol(astNode);
 			return localBinding.find(astNode);
 		}
 
-		// 手工绑定（测试/嵌入场景）：node 绑定到 program 中已登记的符号
 		bool bindNode(const void* astNode, const std::string& name)
 		{
 			auto shared = compiledProgram.allSymbols.lookupShared(name);

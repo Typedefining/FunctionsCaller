@@ -93,25 +93,14 @@ class SymbolTable {
 public:
   SymbolTable() = default;
 
-  // 添加符号（值版本：内部包装为共享持有后插入）
-  bool addSymbol(const std::string& name, VariableSymbol symbol);
-  // 添加符号（共享版本：与作用域/持久表共享同一 Symbol 对象）
-  // 插入或覆盖：同名后声明覆盖先声明（内层遮蔽语义）
   bool addSymbol(const std::string& name, std::shared_ptr<VariableSymbol> symbol);
-  // 查找符号
-  const VariableSymbol* lookup(const std::string& name) const;
-  VariableSymbol* lookup(const std::string& name);
-  // 查找符号（共享句柄版本：供侧表绑定延长符号生命周期）
+
   std::shared_ptr<VariableSymbol> lookupShared(const std::string& name) const;
-  // 移除符号
   bool removeSymbol(const std::string& name);
-  // 获取所有符号（符号对象为共享持有，拷贝 SymbolTable 不复制符号对象）
+
   const std::unordered_map<std::string, std::shared_ptr<VariableSymbol>>& getAllSymbols() const;
-  // 清空符号表
   void clear();
-  // 获取符号数量
   size_t size() const;
-  // 调试输出
   void dump() const;
 
 private:

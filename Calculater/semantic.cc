@@ -76,20 +76,6 @@ bool FCSemanticContext::isGlobalScope() const {
   return !m_currentState.isActive && m_scopeStack.size() == 1;
 }
 
-const VariableSymbol *
-FCSemanticContext::lookupVariable(const std::string &name) const {
-  for (auto it = m_scopeStack.rbegin(); it != m_scopeStack.rend(); ++it) {
-
-    auto found = it->variables.find(name);
-
-    // 返回共享持有符号的裸指针：作用域弹出后符号仍由持久表/编译产物持有
-    if (found != it->variables.end())
-      return found->second.get();
-  }
-
-  return nullptr;
-}
-
 std::shared_ptr<VariableSymbol> FCSemanticContext::lookupVariableShared(const std::string &name) const {
   for (auto it = m_scopeStack.rbegin(); it != m_scopeStack.rend(); ++it) {
     auto found = it->variables.find(name);
@@ -99,7 +85,7 @@ std::shared_ptr<VariableSymbol> FCSemanticContext::lookupVariableShared(const st
   return nullptr;
 }
 
-const VariableSymbol *
+std::shared_ptr<VariableSymbol>
 FCSemanticContext::lookupVariableInCurrentScope(const std::string &name) const {
   if (m_scopeStack.empty())
     return nullptr;
@@ -111,10 +97,10 @@ FCSemanticContext::lookupVariableInCurrentScope(const std::string &name) const {
   if (it == scope.variables.end())
     return nullptr;
 
-  return it->second.get();
+  return it->second;
 }
 
-const VariableSymbol *
+std::shared_ptr<VariableSymbol>
 FCSemanticContext::lookupGlobalVariable(const std::string &name) const {
   if (m_scopeStack.empty())
     return nullptr;
@@ -126,7 +112,7 @@ FCSemanticContext::lookupGlobalVariable(const std::string &name) const {
   if (it == globalScope.variables.end())
     return nullptr;
 
-  return it->second.get();
+  return it->second;
 }
 
 std::shared_ptr<VariableSymbol> FCSemanticContext::declareVariable(VarDeclPtr declaration) {
@@ -150,13 +136,10 @@ std::shared_ptr<VariableSymbol> FCSemanticContext::declareVariable(VarDeclPtr de
 
 
   const std::string name = declaration->name;
-  // 符号对象共享持有：作用域、持久符号表、编译产物引用同一对象，
-  // AST 节点的 resolved 指针在其任一持有者存活期间均有效
   auto symbol = std::make_shared<VariableSymbol>(
       std::move(declaration), storage, scope.depth);
   scope.variables.emplace(name, symbol);
 
-  // 根据作用域添加到相应的编译结果
   if (m_currentState.isActive && m_currentState.currentFunction) {
     m_currentState.currentFunction->symbols.addSymbol(name, symbol);
   } else if (isGlobalScope()) {
@@ -205,8 +188,6 @@ int FCSemanticContext::currentFrameLayoutSize() const {
   return m_frameLayout.frameSize();
 }
 
-
-
 const CompiledProgram& FCSemanticContext::getCompiledProgram() const {
     return *m_compiledProgram;
 }
@@ -244,29 +225,15 @@ void FCSemanticContext::dumpScopes() const {
   }
 }
 
-
-  // 添加符号（值版本：包装为共享持有后插入）
-bool SymbolTable::addSymbol(const std::string& name, VariableSymbol symbol) {
-  return addSymbol(name, std::make_shared<VariableSymbol>(std::move(symbol)));
-}
-
-// 添加符号（共享版本：插入或覆盖）
-// 覆盖语义：同名后声明覆盖先声明，与作用域栈的内层遮蔽解析结果一致
 bool SymbolTable::addSymbol(const std::string& name, std::shared_ptr<VariableSymbol> symbol) {
   bool inserted = m_symbols.find(name) == m_symbols.end();
+  if (!inserted)
+  {
+    //不允许重定义同名符号
+    return false;
+  }
   m_symbols.insert_or_assign(name, std::move(symbol));
   return inserted;
-}
-
-// 查找符号
-const VariableSymbol* SymbolTable::lookup(const std::string& name) const {
-  auto it = m_symbols.find(name);
-  return it != m_symbols.end() ? it->second.get() : nullptr;
-}
-
-VariableSymbol* SymbolTable::lookup(const std::string& name) {
-  auto it = m_symbols.find(name);
-  return it != m_symbols.end() ? it->second.get() : nullptr;
 }
 
 std::shared_ptr<VariableSymbol> SymbolTable::lookupShared(const std::string& name) const {
@@ -274,37 +241,30 @@ std::shared_ptr<VariableSymbol> SymbolTable::lookupShared(const std::string& nam
   return it != m_symbols.end() ? it->second : nullptr;
 }
 
-// 移除符号
 bool SymbolTable::removeSymbol(const std::string& name) {
   return m_symbols.erase(name) > 0;
 }
 
-// 获取所有符号
 const std::unordered_map<std::string, std::shared_ptr<VariableSymbol>>& SymbolTable::getAllSymbols() const {
   return m_symbols;
 }
 
-// 清空符号表
 void SymbolTable::clear() {
   m_symbols.clear();
 }
 
-// 获取符号数量
 size_t SymbolTable::size() const {
   return m_symbols.size();
 }
 
-// ---- SemanticBinding 侧表接口 ----
 bool FCSemanticContext::bindVariable(const void* astNode, std::shared_ptr<VariableSymbol> symbol) {
   if (astNode == nullptr || symbol == nullptr)
     return false;
-  // 直接绑定传入的共享句柄（解析时刻的作用域解析结果）。
-  // 严禁按名字反查持久表：同名内层声明会覆盖持久视图，
-  // 块结束后解析的外层引用会被误绑到内层符号
+
   return m_binding.bind(astNode, std::move(symbol));
 }
 
-const VariableSymbol* FCSemanticContext::boundSymbol(const void* astNode) const {
+std::shared_ptr<VariableSymbol> FCSemanticContext::boundSymbol(const void* astNode) const {
   return m_binding.find(astNode);
 }
 

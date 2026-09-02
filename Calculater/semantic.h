@@ -23,31 +23,21 @@ struct CompiledProgram;
 struct SymbolTable;
 using VarDeclPtr = std::shared_ptr<VarDecl>;
 
-
 struct Scope {
-    // 共享持有：同一 Symbol 对象同时被作用域与持久符号表引用，
-    // 作用域弹出后符号仍存活（CompiledProgram/持久表持有）
     std::unordered_map<std::string, std::shared_ptr<VariableSymbol>> variables;
     int depth = 0;
 };
 
-// ---------------------------------------------------------------------------
-// 语义绑定侧表：AST 保持纯语法结构，符号绑定关系由本表按节点指针索引。
-// 生命周期约定：AST 与持有本表的对象（FCSemanticContext）必须同时存活。
-// ---------------------------------------------------------------------------
 struct SemanticBinding {
-    // AST 节点 -> 符号（共享持有，保证侧表本身也参与符号生命周期）
     std::unordered_map<const void*, std::shared_ptr<VariableSymbol>> variables;
 
-    // 登记：一个 AST 节点对应一个符号（重复登记视为错误返回 false）
     bool bind(const void* node, std::shared_ptr<VariableSymbol> symbol) {
         return variables.emplace(node, std::move(symbol)).second;
     }
 
-    // 查询：返回符号裸指针；未绑定返回 nullptr
-    const VariableSymbol* find(const void* node) const {
+    std::shared_ptr<VariableSymbol> find(const void* node) const {
         auto it = variables.find(node);
-        return it != variables.end() ? it->second.get() : nullptr;
+        return it != variables.end() ? it->second : nullptr;
     }
 
     void clear() { variables.clear(); }
@@ -110,11 +100,9 @@ public:
   void pushFunctionScope();
   void popFunctionScope();
 
-  const VariableSymbol* lookupVariable(const std::string &name) const;
-  // 按名字查符号（共享句柄版本：侧表绑定用，保证绑定解析时刻的对象）
   std::shared_ptr<VariableSymbol> lookupVariableShared(const std::string &name) const;
-  const VariableSymbol* lookupVariableInCurrentScope(const std::string &name) const;
-  const VariableSymbol* lookupGlobalVariable(const std::string &name) const;
+  std::shared_ptr<VariableSymbol> lookupVariableInCurrentScope(const std::string &name) const;
+  std::shared_ptr<VariableSymbol> lookupGlobalVariable(const std::string &name) const;
 
   std::shared_ptr<VariableSymbol> declareVariable(VarDeclPtr declaration);
 
@@ -128,15 +116,9 @@ public:
 
   const std::unordered_map<std::string, std::shared_ptr<VariableSymbol>> & currentScopeDeclarations() const;
 
-  // ---- 语义绑定侧表（AST 纯净，绑定关系存于此）----
-  // 将 AST 节点与符号绑定；scanner 解析期调用。
-  // 注意：必须直接绑定解析时刻的符号对象（共享句柄），
-  // 不得按名字反查持久表——同名内层声明会覆盖持久表视图，
-  // 导致块结束后的外层引用误绑到内层符号（块级遮蔽 bug）
   bool bindVariable(const void* astNode, std::shared_ptr<VariableSymbol> symbol);
   // 按 AST 节点查询绑定符号；后端（evaluator/codegen）调用
-  const VariableSymbol* boundSymbol(const void* astNode) const;
-  // 侧表整体（供后端 Context 引用）
+  std::shared_ptr<VariableSymbol> boundSymbol(const void* astNode) const;
   const SemanticBinding& semanticBinding() const { return m_binding; }
 
   const FrameLayout& currentFrameLayout() const { return m_frameLayout; }
