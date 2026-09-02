@@ -25,8 +25,6 @@ void FCSemanticContext::reset() {
   m_frameLayout.reset();
   m_globalLayout.reset();
 
-  m_persistentSymbolTable->clear();
-  m_binding.clear();
   m_binding.clear();
   m_compiledProgram = std::make_shared<CompiledProgram>();
   m_currentState = CurrentCompilationState();
@@ -92,6 +90,15 @@ FCSemanticContext::lookupVariable(const std::string &name) const {
   return nullptr;
 }
 
+std::shared_ptr<VariableSymbol> FCSemanticContext::lookupVariableShared(const std::string &name) const {
+  for (auto it = m_scopeStack.rbegin(); it != m_scopeStack.rend(); ++it) {
+    auto found = it->variables.find(name);
+    if (found != it->variables.end())
+      return found->second;
+  }
+  return nullptr;
+}
+
 const VariableSymbol *
 FCSemanticContext::lookupVariableInCurrentScope(const std::string &name) const {
   if (m_scopeStack.empty())
@@ -122,7 +129,7 @@ FCSemanticContext::lookupGlobalVariable(const std::string &name) const {
   return it->second.get();
 }
 
-VariableSymbol* FCSemanticContext::declareVariable(VarDeclPtr declaration) {
+std::shared_ptr<VariableSymbol> FCSemanticContext::declareVariable(VarDeclPtr declaration) {
   assert(declaration != nullptr);
   assert(!m_scopeStack.empty());
 
@@ -149,12 +156,6 @@ VariableSymbol* FCSemanticContext::declareVariable(VarDeclPtr declaration) {
       std::move(declaration), storage, scope.depth);
   scope.variables.emplace(name, symbol);
 
-
-  // 添加到持久化符号表
-  // 持久表覆盖式登记：内层同名声明更新持久视图，与作用域解析一致
-  m_persistentSymbolTable->addSymbol(name, symbol);
-
-
   // 根据作用域添加到相应的编译结果
   if (m_currentState.isActive && m_currentState.currentFunction) {
     m_currentState.currentFunction->symbols.addSymbol(name, symbol);
@@ -162,7 +163,7 @@ VariableSymbol* FCSemanticContext::declareVariable(VarDeclPtr declaration) {
     m_compiledProgram->allSymbols.addSymbol(name, symbol);
   }
 
-  return symbol.get();
+  return symbol;
 }
 
 bool FCSemanticContext::hasFunction(const std::string &functionName) const {
@@ -294,14 +295,13 @@ size_t SymbolTable::size() const {
 }
 
 // ---- SemanticBinding 侧表接口 ----
-bool FCSemanticContext::bindVariable(const void* astNode, const VariableSymbol* symbol) {
+bool FCSemanticContext::bindVariable(const void* astNode, std::shared_ptr<VariableSymbol> symbol) {
   if (astNode == nullptr || symbol == nullptr)
     return false;
-  // 从持久符号表反查共享句柄，保证侧表参与符号生命周期
-  auto shared = m_persistentSymbolTable->lookupShared(symbol->declaration->name);
-  if (shared == nullptr)
-    return false;
-  return m_binding.bind(astNode, shared);
+  // 直接绑定传入的共享句柄（解析时刻的作用域解析结果）。
+  // 严禁按名字反查持久表：同名内层声明会覆盖持久视图，
+  // 块结束后解析的外层引用会被误绑到内层符号
+  return m_binding.bind(astNode, std::move(symbol));
 }
 
 const VariableSymbol* FCSemanticContext::boundSymbol(const void* astNode) const {

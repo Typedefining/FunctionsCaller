@@ -1504,21 +1504,21 @@ private:
             FCSemanticContext ctx;
 
             auto g = std::make_shared<VarDecl>("g", "int");
-            auto* sym = ctx.declareVariable(g);
+            auto sym = ctx.declareVariable(g);
 
             expect(sym != nullptr, "semantic-api - declare global");
             expect(sym->storage.kind == VariableStorage::Kind::Global, "semantic-api - global kind");
             expect(sym->storage.slot == 0, "semantic-api - global slot 0");
 
-            expect(ctx.lookupGlobalVariable("g") == sym, "semantic-api - lookup global hit");
-            expect(ctx.lookupVariable("g") == sym, "semantic-api - lookup variable finds global");
-            expect(ctx.lookupVariableInCurrentScope("g") == sym, "semantic-api - global in current scope");
+            expect(ctx.lookupGlobalVariable("g") == sym.get(), "semantic-api - lookup global hit");
+            expect(ctx.lookupVariable("g") == sym.get(), "semantic-api - lookup variable finds global");
+            expect(ctx.lookupVariableInCurrentScope("g") == sym.get(), "semantic-api - global in current scope");
             expect(ctx.lookupGlobalVariable("missing") == nullptr, "semantic-api - lookup global miss");
             expect(ctx.lookupVariable("missing") == nullptr, "semantic-api - lookup miss");
 
             auto duplicate = std::make_shared<VarDecl>("g", "int");
             expect(ctx.declareVariable(duplicate) == nullptr, "semantic-api - duplicate global rejected");
-            expect(ctx.lookupGlobalVariable("g") == sym, "semantic-api - original global preserved");
+            expect(ctx.lookupGlobalVariable("g") == sym.get(), "semantic-api - original global preserved");
         }
 
         // ============================================================
@@ -1528,20 +1528,20 @@ private:
             FCSemanticContext ctx;
 
             auto g = std::make_shared<VarDecl>("g", "int");
-            auto* gsym = ctx.declareVariable(g);
+            auto gsym = ctx.declareVariable(g);
 
             {
                 auto guard = ctx.scopedFunction();
 
                 auto p = std::make_shared<VarDecl>("p", "int");
-                auto* psym = ctx.declareVariable(p);
+                auto psym = ctx.declareVariable(p);
 
                 expect(psym != nullptr, "semantic-api - declare local");
                 expect(psym->storage.kind == VariableStorage::Kind::Local, "semantic-api - local kind");
                 expect(psym->storage.slot == 0, "semantic-api - local slot 0");
 
-                expect(ctx.lookupVariable("p") == psym, "semantic-api - lookup local hit");
-                expect(ctx.lookupVariableInCurrentScope("p") == psym, "semantic-api - current scope hit");
+                expect(ctx.lookupVariable("p") == psym.get(), "semantic-api - lookup local hit");
+                expect(ctx.lookupVariableInCurrentScope("p") == psym.get(), "semantic-api - current scope hit");
                 // 注意：作用域栈 push 会导致外层 map 重新分配，
                 // 因此在跨作用域比较时重新查找，而不是保存旧的指针。
                 expect(ctx.lookupVariable("g") == ctx.lookupGlobalVariable("g"),
@@ -1553,7 +1553,7 @@ private:
 
                 auto duplicate = std::make_shared<VarDecl>("p", "int");
                 expect(ctx.declareVariable(duplicate) == nullptr, "semantic-api - duplicate local rejected");
-                expect(ctx.lookupVariableInCurrentScope("p") == psym, "semantic-api - original local preserved");
+                expect(ctx.lookupVariableInCurrentScope("p") == psym.get(), "semantic-api - original local preserved");
 
                 expect(ctx.currentScopeDeclarations().size() == 1, "semantic-api - currentScopeDeclarations");
                 expect(ctx.currentFrameLayoutSize() == 1, "semantic-api - currentFrameLayoutSize");
@@ -1581,8 +1581,8 @@ private:
 
                 ctx.pushScope();
                 auto inner = std::make_shared<VarDecl>("inner", "int");
-                auto* isym = ctx.declareVariable(inner);
-                expect(ctx.lookupVariableInCurrentScope("inner") == isym, "semantic-api - nested current hit");
+                auto isym = ctx.declareVariable(inner);
+                expect(ctx.lookupVariableInCurrentScope("inner") == isym.get(), "semantic-api - nested current hit");
                 // 重新查找，避免使用跨 push 失效的旧指针
                 expect(ctx.lookupVariable("outer") != nullptr, "semantic-api - nested sees parent");
                 expect(ctx.lookupVariableInCurrentScope("outer") == nullptr, "semantic-api - parent not in current scope");
@@ -1606,14 +1606,14 @@ private:
 
             ctx.pushScope();
             auto inner = std::make_shared<VarDecl>("x", "int");
-            auto* isym = ctx.declareVariable(inner);
-            expect(ctx.lookupVariable("x") == isym, "semantic-api - inner shadows outer");
-            expect(ctx.lookupVariableInCurrentScope("x") == isym, "semantic-api - shadowed is current");
+            auto isym = ctx.declareVariable(inner);
+            expect(ctx.lookupVariable("x") == isym.get(), "semantic-api - inner shadows outer");
+            expect(ctx.lookupVariableInCurrentScope("x") == isym.get(), "semantic-api - shadowed is current");
             ctx.popScope();
 
             // 重新查找：外层声明恢复可见，且不再是内层符号
             auto* restored = ctx.lookupVariable("x");
-            expect(restored != nullptr && restored != isym, "semantic-api - outer restored after pop");
+            expect(restored != nullptr && restored != isym.get(), "semantic-api - outer restored after pop");
             expect(ctx.lookupVariableInCurrentScope("x") == restored, "semantic-api - outer is current after pop");
         }
 
@@ -1626,17 +1626,17 @@ private:
             auto guard = ctx.scopedFunction();
 
             auto a = std::make_shared<VarDecl>("a", "int");
-            auto* asym = ctx.declareVariable(a);
+            auto asym = ctx.declareVariable(a);
             expect(asym->storage.slot == 0, "semantic-api - first local slot 0");
 
             ctx.pushScope();
             auto b = std::make_shared<VarDecl>("b", "int");
-            auto* bsym = ctx.declareVariable(b);
+            auto bsym = ctx.declareVariable(b);
             expect(bsym->storage.slot == 1, "semantic-api - nested local slot 1");
             ctx.popScope();
 
             auto c = std::make_shared<VarDecl>("c", "int");
-            auto* csym = ctx.declareVariable(c);
+            auto csym = ctx.declareVariable(c);
             expect(csym->storage.slot == 2, "semantic-api - slot not reused after scope exit");
             expect(ctx.currentFrameLayoutSize() == 3, "semantic-api - frame size includes all slots");
         }
@@ -1900,6 +1900,7 @@ private:
             FCScanner s2;
             auto ast2 = s2.analysis("def g1(x:int) { x * 2 }; g1(21)");
             ctx.compiledProgram = s2.semanticContext().getCompiledProgram();
+            ctx.semantic = &s2.semanticContext();
             FCValue r2 = evaluate(ast2.get(), ctx);
             expect(r2.type == FCValueCategory::Integer && r2.evaluteVal.intVal == 42,
                    "stress - context reuse program 2");
