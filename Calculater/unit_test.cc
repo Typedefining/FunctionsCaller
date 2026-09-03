@@ -126,6 +126,7 @@ private:
     static FCEvaluationContext makeEvalContext(const FCScanner& scanner)
     {
         FCEvaluationContext ctx(scanner.semanticContext().getCompiledProgram());
+        // 挂载语义绑定侧表（AST 节点 -> 符号）
         return ctx;
     }
 
@@ -134,6 +135,8 @@ private:
     static void attachSemanticOutput(FCCodegenContext& cc, const FCScanner& scanner)
     {
         cc.compiledProgram = scanner.semanticContext().getCompiledProgram();
+        // 挂载语义绑定侧表（AST 节点 -> 符号）
+        cc.semantic = &scanner.semanticContext();
     }
 
     // 把 FCValue 渲染成与期望值比较的字符串（与原有测试一致）。
@@ -477,6 +480,9 @@ private:
             {"def fsub(a:double, b:double) { a - b }; fsub(5.5, 2.0)", "float function subtraction", "3.5"},
             {"def fdiv(a:double, b:double) { a / b }; fdiv(7.5, 2.5)", "float function division", "3.0"},
             {"var x:int = 10; def f() { var x:int = 2; x }; f()", "local shadows global", "2"},
+            // 块级遮蔽：同函数内层块重新声明同名变量，内层声明必须覆盖外层符号
+            {"def f() { var x:int = 1; { var x:int = 2; x } }; f()", "block shadowing inner wins", "2"},
+            {"def f() { var x:int = 1; { var x:int = 2; }; x }; f()", "block shadowing outer restored", "1"},
             {"def nested2() { var x:int = 1; var y:int = 2; x + y }; nested2()", "multiple locals", "3"},
             {"def nf(n:int) { var s:int = 0; for i = 0, i < n, 1 in for j = 0, j < n, 1 in s = s + i; s }; nf(3)", "nested for loop", "9"},
             {"def accum(n:int) { var r:int = 1; for i = 1, i < n, 1 in r = r * 2; r }; accum(5)", "loop accumulation multiply", "16"},
@@ -979,16 +985,20 @@ private:
             // 局部变量分配 + 读取 + 赋值
             auto decl = std::make_shared<VarDecl>("loc", "int");
             VariableSymbol sym(decl, {VariableStorage::Kind::Local, 0}, 1);
-            cc.compiledProgram.allSymbols.addSymbol("loc", sym);
+            cc.compiledProgram.allSymbols.addSymbol("loc", std::make_shared<VariableSymbol>(sym));
+            auto locSymbol = cc.compiledProgram.allSymbols.lookupShared("loc");
             auto* locAlloca = cc.createEntryBlockAlloca(fn, "loc", cc.getType("int"));
-            cc.namedValues[decl.get()] = locAlloca;
+            cc.namedValues[locSymbol] = locAlloca;
 
             auto var = std::make_unique<FCVariableExprAST>(decl);
+            cc.semanticBinding().bind(var.get(), cc.compiledProgram.allSymbols.lookupShared("loc"));
             auto* vv = codegen(var.get(), cc);
             expect(vv != nullptr && vv->getType()->isIntegerTy(), "codegen-api - local variable load");
 
+            auto assignLHS = std::make_unique<FCVariableExprAST>(decl);
+            cc.semanticBinding().bind(assignLHS.get(), cc.compiledProgram.allSymbols.lookupShared("loc"));
             auto assign = std::make_unique<FCBinaryExprAST>(
-                '=', std::make_unique<FCVariableExprAST>(decl), std::make_unique<FCNumberExprAST>(5));
+                '=', std::move(assignLHS), std::make_unique<FCNumberExprAST>(5));
             auto* av = codegen(assign.get(), cc);
             expect(av != nullptr, "codegen-api - local assignment");
 
@@ -1275,18 +1285,18 @@ private:
         auto d1 = std::make_shared<VarDecl>("alpha", "int");
         VariableSymbol s1(d1, {VariableStorage::Kind::Global, 0}, 0);
 
-        expect(table.addSymbol("alpha", s1), "symbol-table - add new symbol");
-        expect(!table.addSymbol("alpha", s1), "symbol-table - duplicate add rejected");
+        expect(table.addSymbol("alpha", std::make_shared<VariableSymbol>(s1)), "symbol-table - add new symbol");
+        expect(!table.addSymbol("alpha", std::make_shared<VariableSymbol>(s1)), "symbol-table - duplicate add rejected");
         expect(table.size() == 1, "symbol-table - size after add");
 
         const SymbolTable& ctable = table;
-        expect(ctable.lookup("alpha") != nullptr, "symbol-table - const lookup hit");
-        expect(ctable.lookup("alpha")->declaration == d1, "symbol-table - const lookup declaration");
-        expect(ctable.lookup("alpha")->storage.slot == 0, "symbol-table - const lookup storage");
-        expect(ctable.lookup("missing") == nullptr, "symbol-table - const lookup miss");
+        expect(ctable.lookupShared("alpha") != nullptr, "symbol-table - const lookup hit");
+        expect(ctable.lookupShared("alpha")->declaration == d1, "symbol-table - const lookup declaration");
+        expect(ctable.lookupShared("alpha")->storage.slot == 0, "symbol-table - const lookup storage");
+        expect(ctable.lookupShared("missing") == nullptr, "symbol-table - const lookup miss");
 
-        expect(table.lookup("alpha") != nullptr, "symbol-table - mutable lookup hit");
-        expect(table.lookup("missing") == nullptr, "symbol-table - mutable lookup miss");
+        expect(table.lookupShared("alpha") != nullptr, "symbol-table - mutable lookup hit");
+        expect(table.lookupShared("missing") == nullptr, "symbol-table - mutable lookup miss");
 
         expect(table.getAllSymbols().size() == 1, "symbol-table - getAllSymbols size");
         expect(table.getAllSymbols().count("alpha") == 1, "symbol-table - getAllSymbols content");
@@ -1297,13 +1307,13 @@ private:
 
         auto d2 = std::make_shared<VarDecl>("beta", "double");
         VariableSymbol s2(d2, {VariableStorage::Kind::Local, 3}, 1);
-        expect(table.addSymbol("beta", s2), "symbol-table - add second symbol");
+        expect(table.addSymbol("beta", std::make_shared<VariableSymbol>(s2)), "symbol-table - add second symbol");
         table.dump();
         expect(table.size() == 1, "symbol-table - size after second add");
 
         table.clear();
         expect(table.size() == 0, "symbol-table - clear");
-        expect(table.lookup("beta") == nullptr, "symbol-table - lookup after clear");
+        expect(table.lookupShared("beta") == nullptr, "symbol-table - lookup after clear");
 
         // 通过 FCSemanticContext 间接驱动 SymbolTable（persistent 表）
         {
@@ -1341,12 +1351,12 @@ private:
 
             auto lookupVar = [&](const std::string& varName)
             {
-                auto* sym = prog.allSymbols.lookup(varName);
+                auto sym = prog.allSymbols.lookupShared(varName);
                 if (!sym)
                 {
                     for (auto& func : prog.functions)
                     {
-                        sym = func.second->symbols.lookup(varName);
+                        sym = func.second->symbols.lookupShared(varName);
                         if (sym) break;
                     }
                 }
@@ -1354,19 +1364,19 @@ private:
                 return sym;
             };
 
-            auto* gsym = lookupVar("g");
+            auto gsym = lookupVar("g");
             expect(gsym != nullptr && gsym->storage.kind == VariableStorage::Kind::Global &&
                    gsym->storage.slot == 0, "compiled - global symbol layout");
 
-            auto* asym = lookupVar("a");
+            auto asym = lookupVar("a");
             expect(asym != nullptr && asym->storage.kind == VariableStorage::Kind::Local &&
                    asym->storage.slot == 0, "compiled - param a layout");
 
-            auto* bsym = lookupVar("b");
+            auto bsym = lookupVar("b");
             expect(bsym != nullptr && bsym->storage.kind == VariableStorage::Kind::Local &&
                    bsym->storage.slot == 1, "compiled - param b layout");
 
-            auto* tsym = lookupVar("t");
+            auto tsym = lookupVar("t");
             expect(tsym != nullptr && tsym->storage.kind == VariableStorage::Kind::Local &&
                    tsym->storage.slot == 2, "compiled - local t layout");
 
@@ -1374,9 +1384,9 @@ private:
             expect(add != nullptr, "compiled - getFunction add");
             expect(add->frameSize == 3, "compiled - frame size includes params and locals");
             expect(add->maxTempSlots == 3, "compiled - max temp slots");
-            expect(add->symbols.lookup("a") != nullptr && add->symbols.lookup("b") != nullptr &&
-                   add->symbols.lookup("t") != nullptr, "compiled - function symbol table");
-            expect(add->symbols.lookup("g") == nullptr, "compiled - globals not in function symbols");
+            expect(add->symbols.lookupShared("a") != nullptr && add->symbols.lookupShared("b") != nullptr &&
+                   add->symbols.lookupShared("t") != nullptr, "compiled - function symbol table");
+            expect(add->symbols.lookupShared("g") == nullptr, "compiled - globals not in function symbols");
 
             // AST 指针身份
             auto* program = dynamic_cast<FCProgramAST*>(ast.get());
@@ -1403,8 +1413,8 @@ private:
             const auto& sem = scanner.semanticContext();
             const auto& prog = sem.getCompiledProgram();
             expect(prog.allSymbols.size() == 2, "compiled - only globals recorded");
-            expect(prog.allSymbols.lookup("a")->storage.slot == 0, "compiled - global a slot");
-            expect(prog.allSymbols.lookup("b")->storage.slot == 1, "compiled - global b slot");
+            expect(prog.allSymbols.lookupShared("a")->storage.slot == 0, "compiled - global a slot");
+            expect(prog.allSymbols.lookupShared("b")->storage.slot == 1, "compiled - global b slot");
             expect(sem.currentGlobalLayout().globalSize() == 2, "compiled - global layout size");
             expect(prog.functions.empty(), "compiled - no functions");
         }
@@ -1493,17 +1503,15 @@ private:
             FCSemanticContext ctx;
 
             auto g = std::make_shared<VarDecl>("g", "int");
-            auto* sym = ctx.declareVariable(g);
+            auto sym = ctx.declareVariable(g);
 
             expect(sym != nullptr, "semantic-api - declare global");
             expect(sym->storage.kind == VariableStorage::Kind::Global, "semantic-api - global kind");
             expect(sym->storage.slot == 0, "semantic-api - global slot 0");
 
             expect(ctx.lookupGlobalVariable("g") == sym, "semantic-api - lookup global hit");
-            expect(ctx.lookupVariable("g") == sym, "semantic-api - lookup variable finds global");
             expect(ctx.lookupVariableInCurrentScope("g") == sym, "semantic-api - global in current scope");
             expect(ctx.lookupGlobalVariable("missing") == nullptr, "semantic-api - lookup global miss");
-            expect(ctx.lookupVariable("missing") == nullptr, "semantic-api - lookup miss");
 
             auto duplicate = std::make_shared<VarDecl>("g", "int");
             expect(ctx.declareVariable(duplicate) == nullptr, "semantic-api - duplicate global rejected");
@@ -1517,27 +1525,27 @@ private:
             FCSemanticContext ctx;
 
             auto g = std::make_shared<VarDecl>("g", "int");
-            auto* gsym = ctx.declareVariable(g);
+            auto gsym = ctx.declareVariable(g);
 
             {
                 auto guard = ctx.scopedFunction();
 
                 auto p = std::make_shared<VarDecl>("p", "int");
-                auto* psym = ctx.declareVariable(p);
+                auto psym = ctx.declareVariable(p);
 
                 expect(psym != nullptr, "semantic-api - declare local");
                 expect(psym->storage.kind == VariableStorage::Kind::Local, "semantic-api - local kind");
                 expect(psym->storage.slot == 0, "semantic-api - local slot 0");
 
-                expect(ctx.lookupVariable("p") == psym, "semantic-api - lookup local hit");
+                expect(ctx.lookupVariableShared("p") == psym, "semantic-api - lookup local hit");
                 expect(ctx.lookupVariableInCurrentScope("p") == psym, "semantic-api - current scope hit");
                 // 注意：作用域栈 push 会导致外层 map 重新分配，
                 // 因此在跨作用域比较时重新查找，而不是保存旧的指针。
-                expect(ctx.lookupVariable("g") == ctx.lookupGlobalVariable("g"),
+                expect(ctx.lookupVariableShared("g") == ctx.lookupGlobalVariable("g"),
                     "semantic-api - lookup falls back to global");
-                expect(ctx.lookupVariable("g") != nullptr, "semantic-api - global reachable from function");
+                expect(ctx.lookupVariableShared("g") != nullptr, "semantic-api - global reachable from function");
                 expect(ctx.lookupVariableInCurrentScope("g") == nullptr, "semantic-api - current scope excludes global");
-                expect(ctx.lookupVariable("missing") == nullptr, "semantic-api - lookup miss");
+                expect(ctx.lookupVariableShared("missing") == nullptr, "semantic-api - lookup miss");
                 expect(ctx.lookupVariableInCurrentScope("missing") == nullptr, "semantic-api - current scope miss");
 
                 auto duplicate = std::make_shared<VarDecl>("p", "int");
@@ -1550,9 +1558,9 @@ private:
             }
 
             // 离开函数作用域后，局部变量消失
-            expect(ctx.lookupVariable("p") == nullptr, "semantic-api - local gone after function scope");
+            expect(ctx.lookupVariableShared("p") == nullptr, "semantic-api - local gone after function scope");
             expect(ctx.lookupGlobalVariable("g") != nullptr, "semantic-api - global survives function scope");
-            expect(ctx.lookupVariable("g") != nullptr, "semantic-api - global still reachable after pop");
+            expect(ctx.lookupVariableShared("g") != nullptr, "semantic-api - global still reachable after pop");
         }
 
         // ============================================================
@@ -1566,19 +1574,19 @@ private:
 
                 auto outer = std::make_shared<VarDecl>("outer", "int");
                 ctx.declareVariable(outer);
-                expect(ctx.lookupVariable("outer") != nullptr, "semantic-api - outer variable visible");
+                expect(ctx.lookupVariableShared("outer") != nullptr, "semantic-api - outer variable visible");
 
                 ctx.pushScope();
                 auto inner = std::make_shared<VarDecl>("inner", "int");
-                auto* isym = ctx.declareVariable(inner);
+                auto isym = ctx.declareVariable(inner);
                 expect(ctx.lookupVariableInCurrentScope("inner") == isym, "semantic-api - nested current hit");
                 // 重新查找，避免使用跨 push 失效的旧指针
-                expect(ctx.lookupVariable("outer") != nullptr, "semantic-api - nested sees parent");
+                expect(ctx.lookupVariableShared("outer") != nullptr, "semantic-api - nested sees parent");
                 expect(ctx.lookupVariableInCurrentScope("outer") == nullptr, "semantic-api - parent not in current scope");
                 ctx.popScope();
 
-                expect(ctx.lookupVariable("inner") == nullptr, "semantic-api - nested var gone after pop");
-                expect(ctx.lookupVariable("outer") != nullptr, "semantic-api - parent survives child scope");
+                expect(ctx.lookupVariableShared("inner") == nullptr, "semantic-api - nested var gone after pop");
+                expect(ctx.lookupVariableShared("outer") != nullptr, "semantic-api - parent survives child scope");
             }
         }
 
@@ -1595,13 +1603,13 @@ private:
 
             ctx.pushScope();
             auto inner = std::make_shared<VarDecl>("x", "int");
-            auto* isym = ctx.declareVariable(inner);
-            expect(ctx.lookupVariable("x") == isym, "semantic-api - inner shadows outer");
+            auto isym = ctx.declareVariable(inner);
+            expect(ctx.lookupVariableShared("x") == isym, "semantic-api - inner shadows outer");
             expect(ctx.lookupVariableInCurrentScope("x") == isym, "semantic-api - shadowed is current");
             ctx.popScope();
 
             // 重新查找：外层声明恢复可见，且不再是内层符号
-            auto* restored = ctx.lookupVariable("x");
+            auto restored = ctx.lookupVariableShared("x");
             expect(restored != nullptr && restored != isym, "semantic-api - outer restored after pop");
             expect(ctx.lookupVariableInCurrentScope("x") == restored, "semantic-api - outer is current after pop");
         }
@@ -1615,17 +1623,17 @@ private:
             auto guard = ctx.scopedFunction();
 
             auto a = std::make_shared<VarDecl>("a", "int");
-            auto* asym = ctx.declareVariable(a);
+            auto asym = ctx.declareVariable(a);
             expect(asym->storage.slot == 0, "semantic-api - first local slot 0");
 
             ctx.pushScope();
             auto b = std::make_shared<VarDecl>("b", "int");
-            auto* bsym = ctx.declareVariable(b);
+            auto bsym = ctx.declareVariable(b);
             expect(bsym->storage.slot == 1, "semantic-api - nested local slot 1");
             ctx.popScope();
 
             auto c = std::make_shared<VarDecl>("c", "int");
-            auto* csym = ctx.declareVariable(c);
+            auto csym = ctx.declareVariable(c);
             expect(csym->storage.slot == 2, "semantic-api - slot not reused after scope exit");
             expect(ctx.currentFrameLayoutSize() == 3, "semantic-api - frame size includes all slots");
         }
@@ -1643,12 +1651,12 @@ private:
                 auto guard = ctx.scopedScope();
                 auto y = std::make_shared<VarDecl>("y", "int");
                 ctx.declareVariable(y);
-                expect(ctx.lookupVariable("y") != nullptr, "semantic-api - scope guard inner visible");
-                expect(ctx.lookupVariable("x") != nullptr, "semantic-api - scope guard outer visible");
+                expect(ctx.lookupVariableShared("y") != nullptr, "semantic-api - scope guard inner visible");
+                expect(ctx.lookupVariableShared("x") != nullptr, "semantic-api - scope guard outer visible");
             }
 
-            expect(ctx.lookupVariable("y") == nullptr, "semantic-api - scope guard inner gone");
-            expect(ctx.lookupVariable("x") != nullptr, "semantic-api - scope guard outer persists");
+            expect(ctx.lookupVariableShared("y") == nullptr, "semantic-api - scope guard inner gone");
+            expect(ctx.lookupVariableShared("x") != nullptr, "semantic-api - scope guard outer persists");
         }
 
         // ============================================================
@@ -1773,24 +1781,27 @@ private:
             // 局部变量但无调用帧
             auto localDecl = std::make_shared<VarDecl>("v", "int");
             VariableSymbol localSym(localDecl, {VariableStorage::Kind::Local, 0}, 1);
-            ctx.compiledProgram.allSymbols.addSymbol("v", localSym);
+            ctx.compiledProgram.allSymbols.addSymbol("v", std::make_shared<VariableSymbol>(localSym));
             auto localVar = std::make_unique<FCVariableExprAST>(localDecl);
+            ctx.bindNode(localVar.get(), "v");
             expect(evaluate(localVar.get(), ctx).type == FCValueCategory::Dangle,
                    "evaluator-error - local variable without frame");
 
             // 全局变量但槽位非法
             auto negDecl = std::make_shared<VarDecl>("g", "int");
             VariableSymbol negSym(negDecl, {VariableStorage::Kind::Global, -1}, 0);
-            ctx.compiledProgram.allSymbols.addSymbol("g", negSym);
+            ctx.compiledProgram.allSymbols.addSymbol("g", std::make_shared<VariableSymbol>(negSym));
             auto negVar = std::make_unique<FCVariableExprAST>(negDecl);
+            ctx.bindNode(negVar.get(), "g");
             expect(evaluate(negVar.get(), ctx).type == FCValueCategory::Dangle,
                    "evaluator-error - global variable with negative slot");
 
             // 局部变量槽位超出帧大小
             auto oobDecl = std::make_shared<VarDecl>("o", "int");
             VariableSymbol oobSym(oobDecl, {VariableStorage::Kind::Local, 100}, 1);
-            ctx.compiledProgram.allSymbols.addSymbol("o", oobSym);
+            ctx.compiledProgram.allSymbols.addSymbol("o", std::make_shared<VariableSymbol>(oobSym));
             auto oobVar = std::make_unique<FCVariableExprAST>(oobDecl);
+            ctx.bindNode(oobVar.get(), "o");
             ctx.pushFrame("oob");
             expect(evaluate(oobVar.get(), ctx).type == FCValueCategory::Dangle,
                    "evaluator-error - local variable slot out of range");
@@ -1799,8 +1810,9 @@ private:
             // 全局槽位会自动扩展
             auto bigDecl = std::make_shared<VarDecl>("big", "int");
             VariableSymbol bigSym(bigDecl, {VariableStorage::Kind::Global, 5}, 0);
-            ctx.compiledProgram.allSymbols.addSymbol("big", bigSym);
+            ctx.compiledProgram.allSymbols.addSymbol("big", std::make_shared<VariableSymbol>(bigSym));
             auto bigVar = std::make_unique<FCVariableExprAST>(bigDecl);
+            ctx.bindNode(bigVar.get(), "big");
             expect(evaluate(bigVar.get(), ctx).type == FCValueCategory::Dangle,
                    "evaluator-error - uninitialized global slot reads dangle");
             expect(ctx.globalFrame.locals.size() == 6, "evaluator-error - global frame auto-resized");
@@ -1936,15 +1948,45 @@ private:
     }
 };
 
+static void run(const char* src) {
+  std::printf("---- src: %s\n", src);
+  FCScanner scanner;
+  auto ast = scanner.analysis(src);
+  if (ast == nullptr) { std::printf("parse failed\n"); return; }
+  FCEvaluationContext ctx(scanner.semanticContext().getCompiledProgram());
+  // 打印函数符号表槽位绑定
+  for (const auto& [name, sym] : scanner.semanticContext().getCompiledProgram().functions) {
+    if (sym && sym->ast) {
+      std::printf("  func %s frameSize=%zu: ", name.c_str(), (size_t)sym->frameSize);
+      for (const auto& [vn, vs] : sym->symbols.getAllSymbols())
+        std::printf("%s(%s,slot=%d) ", vn.c_str(),
+                    vs->storage.kind == FCMarks::VariableStorage::Kind::Global ? "G" : "L",
+                    vs->storage.slot);
+      std::putchar(10);
+    }
+  }
+  FCValue v = evaluate(ast.get(), ctx);
+  if (v.type == FCValueCategory::Integer) std::printf("result = %d\n", v.evaluteVal.intVal);
+  else if (v.type == FCValueCategory::Floating) std::printf("result = %f\n", v.evaluteVal.doubleVal);
+  else std::printf("result = <dangle/other>\n");
+}
+
 int main()
 {
+    run("def f() { var x:int = 1; { var x:int = 2; x } }; f()");       // 期望 2
+    run("def f() { var x:int = 1; { var x:int = 2; }; x }; f()");      // 期望 1
+    run("def f() { var x:int = 1; x }; f()");                          // 期望 1（对照）
+    run("def f() { var x:int = 1; { var y:int = 2; x } }; f()");       // 期望 1（对照：不同名）
+    run("def f() { { var x:int = 2; x } }; f()");                      // 期望 2（对照：仅内层）
     std::cout << std::unitbuf;
     std::cerr << std::unitbuf;
-
     std::cout << "COMPREHENSIVE TOY LANGUAGE TEST SUITE\n";
     std::cout << std::string(60, '=') << "\n";
 
     ComprehensiveTestSuite tests;
     tests.runAllTests();
     return tests.result();
+
+
+
 }

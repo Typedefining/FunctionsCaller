@@ -12,48 +12,6 @@ FCValue evaluateExpression(const FCExprAST *expression,
                             FCEvaluationContext &context);
 Frame *frameForStorage(const VariableStorage &storage, FCEvaluationContext &context);
 
-bool lookupVarSymbol(const std::string& name, FCEvaluationContext &context, Frame* currentFrame, VariableSymbol* symbol)
-{
-	Frame* resultFrame = nullptr;
-	VariableSymbol* resultSymbol = nullptr;
-
-  if (!context.callStack.empty())
-  {
-    resultFrame = &context.currentFrame();
-    auto function = context.compiledProgram.functions[resultFrame->funcName];
-    if (function && function->symbols.size() > 0)
-      resultSymbol = function->symbols.lookup(name);
-  }
-  else
-  {
-    resultFrame = &context.globalFrame;
-  }
-
-  if (!resultSymbol)
-  {
-    resultSymbol = context.compiledProgram.allSymbols.lookup(name);
-  }
-
-  if (!resultSymbol)
-  {
-    assert("evaluateVariable can't find symbol");
-    return false;
-  }
-
-  if (symbol)
-  {
-    *symbol = *resultSymbol;
-  }
-
-  if (currentFrame)
-  {
-    *currentFrame = *resultFrame;
-  }
-
-  return true;
-}
-
-
 namespace {
 FCValue makeDangleValue() {
   FCValue value;
@@ -82,13 +40,11 @@ FCValue evaluateNumber(const FCNumberExprAST *node) {
 }
 
 FCValue evaluateVariable(const FCVariableExprAST *node, FCEvaluationContext &context) {
-  VariableSymbol symbol;
-  if (!lookupVarSymbol(node->decl->name, context, nullptr, &symbol))
-  {
-    return {};
-  }
+  std::shared_ptr<VariableSymbol> symbol = context.boundSymbol(node);
+  if (symbol == nullptr)
+    return makeDangleValue();
 
-  const VariableStorage storage = symbol.storage;
+  const VariableStorage &storage = symbol->storage;
   Frame *frame = frameForStorage(storage, context);
   if (frame == nullptr)
     return makeDangleValue();
@@ -110,7 +66,8 @@ FCValue evaluateIf(const FCIfExprAST *node, FCEvaluationContext &context) {
 }
 
 FCValue evaluateFor(const FCForExprAST *node, FCEvaluationContext &context) {
-  if (node->getDecl() == nullptr || context.callStack.empty())
+  std::shared_ptr<VariableSymbol> forSymbol = context.boundSymbol(node);
+  if (node->getDecl() == nullptr || forSymbol == nullptr || context.callStack.empty())
     return makeDangleValue();
   const auto start = evaluateExpression(node->getStart(), context);
   FCValue step;
@@ -125,13 +82,7 @@ FCValue evaluateFor(const FCForExprAST *node, FCEvaluationContext &context) {
       step.type != FCValueCategory::Integer)
     return makeDangleValue();
 
-    VariableSymbol symbol;
-    if (!lookupVarSymbol(node->getDecl()->name, context, nullptr, &symbol))
-    {
-      return {};
-    }
-
-  const VariableStorage storage = symbol.storage;
+  const VariableStorage &storage = forSymbol->storage;
   size_t frameIdx = context.callStack.size() - 1;
   if (storage.slot < 0 || storage.slot >= static_cast<int>(context.callStack[frameIdx].locals.size()))
     return makeDangleValue();
@@ -174,16 +125,11 @@ FCValue evaluateSequence(const FCSeqExprAST *node,
 
 FCValue evaluateDeclaration(const FCVarDeclExprAST *node,
                             FCEvaluationContext &context) {
-  Frame currentFunc;
-  VariableSymbol symbol;
-  if (!lookupVarSymbol(node->decl->name, context, &currentFunc, &symbol))
-  {
-    return {};
-  }
-
-  const VariableStorage storage = symbol.storage;
-  if (node->decl == nullptr || node->initExpr == nullptr)
+  std::shared_ptr<VariableSymbol> symbol = context.boundSymbol(node);
+  if (symbol == nullptr || node->decl == nullptr || node->initExpr == nullptr)
     return makeDangleValue();
+
+  const VariableStorage &storage = symbol->storage;
   const auto value = evaluateExpression(node->initExpr.get(), context);
   if (value.type == FCValueCategory::Dangle)
     return value;
@@ -223,14 +169,14 @@ FCValue evaluateBinary(const FCBinaryExprAST *expression,
     if (value.type == FCValueCategory::Dangle)
       return value;
 
-    Frame currentFunc;
-    VariableSymbol symbol;
-    if (!lookupVarSymbol(variable->decl->name, context, &currentFunc, &symbol))
+    std::shared_ptr<VariableSymbol> lhsSymbol = context.boundSymbol(variable);
+    if (lhsSymbol == nullptr)
     {
-      return {};
+      std::fprintf(stderr, "LogError: LHS of assignment is not bound to a symbol\n");
+      return makeDangleValue();
     }
 
-    const VariableStorage storage = symbol.storage;
+    const VariableStorage &storage = lhsSymbol->storage;
     Frame *frame = frameForStorage(storage, context);
     if (frame == nullptr) {
       std::fprintf(stderr, "LogError: Invalid slot for %s\n",
@@ -342,7 +288,7 @@ FCValue evaluateCall(const FCCallExprAST *expression,
     }
 
     auto func = context.compiledProgram.getFunction(expression->getName());
-    auto symbol = func->symbols.lookup(parameter->name);
+    auto symbol = func->symbols.lookupShared(parameter->name);
     VariableStorage storage;
     if (symbol)
     {
@@ -350,7 +296,7 @@ FCValue evaluateCall(const FCCallExprAST *expression,
     }
     else
     {
-      symbol = context.compiledProgram.allSymbols.lookup(parameter->name);
+      symbol = context.compiledProgram.allSymbols.lookupShared(parameter->name);
       storage  = symbol->storage;
     }
     const int slot = storage.slot;

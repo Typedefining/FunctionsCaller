@@ -299,10 +299,13 @@ FCScanner::parseBinOpRHS(int ExprPrec, std::unique_ptr<FCExprAST> LHS) {
   // 如果后面不是 '(', 那就是变量引用（静态绑定：在 parse 时查找 VarDecl 并把
   // decl 绑入 AST）
   if (m_curTok != static_cast<int>(FCToken::tok_parenthes_open)) {
-    auto varSym = m_semanticContext.lookupVariable(IdName);
+    auto varSym = m_semanticContext.lookupVariableShared(IdName);
     if (!varSym)
       return logError("unknown variable");
-    return std::make_unique<FCVariableExprAST>(varSym->declaration);
+    auto variableExpr = std::make_unique<FCVariableExprAST>(varSym->declaration);
+    // 侧表绑定：AST 节点指针 -> 解析时刻的符号（共享句柄直传，AST 保持纯语法结构）
+    m_semanticContext.bindVariable(variableExpr.get(), varSym);
+    return variableExpr;
   }
 
   // 函数调用分支
@@ -456,7 +459,7 @@ std::unique_ptr<FCExprAST> FCScanner::ParseForExpr() {
   getNextToken();
 
   VarDeclPtr decl = std::make_shared<VarDecl>(VarName, "int");
-  auto* varSymbol = m_semanticContext.declareVariable(decl);
+  auto varSymbol = m_semanticContext.declareVariable(decl);
   if (!varSymbol) {
     return nullptr;
   }
@@ -491,8 +494,10 @@ std::unique_ptr<FCExprAST> FCScanner::ParseForExpr() {
 
   auto Body = parseExpression();
 
-  return std::make_unique<FCForExprAST>(decl, std::move(Start), std::move(End),
-                                        std::move(Step), std::move(Body));
+  auto forExpr = std::make_unique<FCForExprAST>(decl, std::move(Start), std::move(End),
+                                               std::move(Step), std::move(Body));
+  m_semanticContext.bindVariable(forExpr.get(), std::move(varSymbol));
+  return forExpr;
 }
 
 std::unique_ptr<FCExprAST> FCScanner::ParseVarExpr() {
@@ -523,13 +528,15 @@ std::unique_ptr<FCExprAST> FCScanner::ParseVarExpr() {
     return nullptr;
 
   auto decl = std::make_shared<VarDecl>(varName, typeName);
-  auto *varSymbol = m_semanticContext.declareVariable(decl);
+  auto varSymbol = m_semanticContext.declareVariable(decl);
 
   if (!varSymbol) {
     return nullptr;
   }
 
-  return std::make_unique<FCVarDeclExprAST>(decl, std::move(init));
+  auto declExpr = std::make_unique<FCVarDeclExprAST>(decl, std::move(init));
+  m_semanticContext.bindVariable(declExpr.get(), std::move(varSymbol));
+  return declExpr;
 }
 
 ::std::unique_ptr<FCExprAST> FCScanner::parseBlockExpr() {

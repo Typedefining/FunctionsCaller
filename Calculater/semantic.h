@@ -23,11 +23,12 @@ struct CompiledProgram;
 struct SymbolTable;
 using VarDeclPtr = std::shared_ptr<VarDecl>;
 
-
 struct Scope {
-    std::unordered_map<std::string, VariableSymbol> variables;
+    std::unordered_map<std::string, std::shared_ptr<VariableSymbol>> variables;
     int depth = 0;
 };
+
+struct SemanticBinding;
 
 class FrameLayout {
 public:
@@ -85,11 +86,11 @@ public:
   void pushFunctionScope();
   void popFunctionScope();
 
-  const VariableSymbol* lookupVariable(const std::string &name) const;
-  const VariableSymbol* lookupVariableInCurrentScope(const std::string &name) const;
-  const VariableSymbol* lookupGlobalVariable(const std::string &name) const;
+  std::shared_ptr<VariableSymbol> lookupVariableShared(const std::string &name) const;
+  std::shared_ptr<VariableSymbol> lookupVariableInCurrentScope(const std::string &name) const;
+  std::shared_ptr<VariableSymbol> lookupGlobalVariable(const std::string &name) const;
 
-  VariableSymbol* declareVariable(VarDeclPtr declaration);
+  std::shared_ptr<VariableSymbol> declareVariable(VarDeclPtr declaration);
 
   bool hasFunction(const std::string &functionName) const;
 
@@ -99,7 +100,12 @@ public:
   const CompiledProgram& getCompiledProgram() const;
   const CompiledFunction* getCompiledFunction(const std::string& name) const;
 
-  const std::unordered_map<std::string, VariableSymbol> & currentScopeDeclarations() const;
+  const std::unordered_map<std::string, std::shared_ptr<VariableSymbol>> & currentScopeDeclarations() const;
+
+  bool bindVariable(const void* astNode, std::shared_ptr<VariableSymbol> symbol);
+  // 按 AST 节点查询绑定符号；后端（evaluator/codegen）调用
+  std::shared_ptr<VariableSymbol> boundSymbol(const void* astNode) const;
+  const SemanticBinding& semanticBinding() const;
 
   const FrameLayout& currentFrameLayout() const { return m_frameLayout; }
   int currentFrameLayoutSize() const;
@@ -171,7 +177,6 @@ private:
   FrameLayout m_frameLayout;
   GlobalLayout m_globalLayout;
 
-  std::shared_ptr<SymbolTable> m_persistentSymbolTable = std::make_shared<SymbolTable>();
   std::shared_ptr<CompiledProgram> m_compiledProgram = std::make_shared<CompiledProgram>();
 };
 

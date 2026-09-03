@@ -14,27 +14,15 @@ public:
 private:
 	FCMarks::FCSemanticContext m_semanticContext;
 
-	// 当前处理的标识
 	int m_curTok;
-	// 最新待处理字符
 	int m_lastChar;
-	// 输入字符串迭代器
 	::std::string::iterator m_idx;
 
-	// 当前id
 	::std::string m_identifierStr;
-
-	// 记录字符串字面量
 	::std::string m_stringLiteral;
-
-	// 分发标志
 	bool m_curDouble;
-	// 记录整型字面量
 	int m_numIntgerVal;
-	// 记录浮点字面量
 	double m_numFloatVal;
-
-	// 输入的字符串
 	::std::string m_inputsBuffer;
 
 	private:

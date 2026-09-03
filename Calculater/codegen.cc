@@ -263,17 +263,18 @@ llvm::Value* codegenString(const FCStringExprAST* expression,
 llvm::Value* codegenVariable(const FCVariableExprAST* expression,
 	FCCodegenContext& context)
 {
-	if (expression->decl == nullptr)
-		return logCodegenError("variable declaration is missing");
+	auto variableSymbol = context.boundSymbol(expression);
+	if (variableSymbol == nullptr)
+		return logCodegenError("variable is not resolved to a symbol");
 
-	auto it = context.namedValues.find(expression->decl.get());
+	auto it = context.namedValues.find(variableSymbol);
 	if (it != context.namedValues.end())
 	{
 		return context.builder.CreateLoad(
 			it->second->getAllocatedType(), it->second, expression->decl->name);
 	}
 
-	auto global = context.globalValues.find(expression->decl.get());
+	auto global = context.globalValues.find(variableSymbol);
 	if (global == context.globalValues.end())
 		return logCodegenError("global variable is not declared");
 	return context.builder.CreateLoad(
@@ -286,13 +287,14 @@ llvm::Value* codegenBinary(const FCBinaryExprAST* expression,
 	if (expression->getOperator() == '=')
 	{
 		auto* variable = dynamic_cast<const FCVariableExprAST*>(expression->getLHS());
-		if (variable == nullptr || variable->decl == nullptr)
-			return logCodegenError("left side of assignment must be a variable");
+		auto lhsSymbol = context.boundSymbol(variable);
+		if (variable == nullptr || lhsSymbol == nullptr)
+			return logCodegenError("left side of assignment must be a resolved variable");
 
 		llvm::Value* address = nullptr;
 		llvm::Type* valueType = nullptr;
 
-		auto local = context.namedValues.find(variable->decl.get());
+		auto local = context.namedValues.find(lhsSymbol);
 		if (local != context.namedValues.end())
 		{
 			address = local->second;
@@ -301,7 +303,7 @@ llvm::Value* codegenBinary(const FCBinaryExprAST* expression,
 
 		if (!address || !valueType)
 		{
-			auto global = context.globalValues.find(variable->decl.get());
+			auto global = context.globalValues.find(lhsSymbol);
 			if (global != context.globalValues.end())
 			{
 				address = global->second;
@@ -466,6 +468,9 @@ llvm::Value* codegenFunction(FCFunctionAST* expression,
 	auto* entry = llvm::BasicBlock::Create(context.llvmContext, "entry", function);
 	context.builder.SetInsertPoint(entry);
 
+	// 参数符号表：来自语义期注册的 CompiledFunction（与 AST resolved 共享同一 Symbol 对象）
+	auto* compiledFunc = context.compiledProgram.getFunction(expression->getProto()->getProtoName());
+
 	unsigned index = 0;
 	for (auto& argument : function->args())
 	{
@@ -481,7 +486,19 @@ llvm::Value* codegenFunction(FCFunctionAST* expression,
 		auto* alloca = context.createEntryBlockAlloca(
 			function, parameter->name, argument.getType());
 		context.builder.CreateStore(&argument, alloca);
-		context.namedValues.emplace(parameter.get(), alloca);
+		auto parameterSymbol = compiledFunc != nullptr
+			? compiledFunc->symbols.lookupShared(parameter->name) : nullptr;
+		if (parameterSymbol == nullptr && compiledFunc != nullptr)
+		{
+			// 语义期注册过的函数必须能找到参数符号，缺失说明绑定流程有 bug
+			context.namedValues = std::move(oldNamedValues);
+			context.currentFunction = oldFunction;
+			context.builder.restoreIP(oldInsertPoint);
+			return logCodegenError("function parameter symbol is missing");
+		}
+		// 未注册的手工构造函数（无语义期符号）容错跳过登记，函数体引用参数时会显式报错
+		if (parameterSymbol != nullptr)
+			context.namedValues.emplace(parameterSymbol, alloca);
 		++index;
 	}
 
@@ -577,14 +594,16 @@ llvm::Value* codegenFor(const FCForExprAST* expression,
 {
 	if (context.currentFunction == nullptr || expression->getDecl() == nullptr)
 		return logCodegenError("for expression is outside a function");
-
-	auto oldIt = context.namedValues.find(expression->getDecl().get());
+	const auto forSymbol = context.boundSymbol(expression);
+	if (forSymbol == nullptr)
+		return logCodegenError("for variable is not resolved to a symbol");
+	auto oldIt = context.namedValues.find(forSymbol);
 	llvm::AllocaInst* oldAddress = oldIt == context.namedValues.end()
 		? nullptr : oldIt->second;
 	auto* variable = context.createEntryBlockAlloca(
 		context.currentFunction, expression->getDecl()->name,
 		context.getType(expression->getDecl()->typeName));
-	context.namedValues[expression->getDecl().get()] = variable;
+	context.namedValues[forSymbol] = variable;
 
 	auto* start = codegen(expression->getStart(), context);
 	start = castValue(context, start, variable->getAllocatedType());
@@ -632,9 +651,9 @@ llvm::Value* codegenFor(const FCForExprAST* expression,
 	context.builder.SetInsertPoint(afterBlock);
 
 	if (oldAddress == nullptr)
-		context.namedValues.erase(expression->getDecl().get());
+		context.namedValues.erase(forSymbol);
 	else
-		context.namedValues[expression->getDecl().get()] = oldAddress;
+		context.namedValues[forSymbol] = oldAddress;
 	return llvm::ConstantInt::get(integerType(context), 0);
 }
 
@@ -657,19 +676,17 @@ llvm::Value* codegenDeclaration(const FCVarDeclExprAST* expression,
 	if (context.currentFunction == nullptr || expression->decl == nullptr)
 		return logCodegenError("variable declaration is outside a function");
 
-	bool isLocal = false;
-	if (context.currentFunction)
-	{
-		auto currentFunc = context.compiledProgram.functions[context.currentFunction->getName().data()];
-		if (currentFunc && currentFunc->symbols.lookup(expression->decl->name))
-		{
-			isLocal = true;
-		}
-	}
+	auto declSymbol = context.boundSymbol(expression);
+	if (declSymbol == nullptr)
+		return logCodegenError("variable declaration is not resolved to a symbol");
+
+	// 局部/全局直接读符号存储类别，不再按名字反查函数符号表
+	// （同时消除原 unordered_map::operator[] 查不到时插入空条目的副作用）
+	const bool isLocal = declSymbol->storage.kind == VariableStorage::Kind::Local;
 
 	if (isLocal)
 	{
-		auto local = context.namedValues.find(expression->decl.get());
+		auto local = context.namedValues.find(declSymbol);
 		if (local != context.namedValues.end())
 		{
 			return logCodegenError("variable has defiened in function!");
@@ -678,7 +695,7 @@ llvm::Value* codegenDeclaration(const FCVarDeclExprAST* expression,
 		auto* variable = context.createEntryBlockAlloca(
 			context.currentFunction, expression->decl->name,
 			context.getType(expression->decl->typeName));
-		context.namedValues[expression->decl.get()] = variable;
+		context.namedValues[declSymbol] = variable;
 
 		llvm::Value* initialValue = expression->initExpr == nullptr
 			? llvm::Constant::getNullValue(variable->getAllocatedType())
@@ -692,7 +709,7 @@ llvm::Value* codegenDeclaration(const FCVarDeclExprAST* expression,
 	}
 	else
 	{
-		auto global = context.globalValues.find(expression->decl.get());
+		auto global = context.globalValues.find(declSymbol);
 		if (global == context.globalValues.end())
 				return logCodegenError("global variable is not declared");
 
@@ -710,15 +727,16 @@ llvm::Value* codegenDeclaration(const FCVarDeclExprAST* expression,
 
 }
 
-llvm::GlobalVariable* declareGlobal(const VarDecl* declaration,
+llvm::GlobalVariable* declareGlobal(std::shared_ptr<VariableSymbol> symbol,
 	FCCodegenContext& context)
 {
-	if (declaration == nullptr)
+	if (symbol == nullptr || symbol->declaration == nullptr)
 		return nullptr;
-	if (auto existing = context.globalValues.find(declaration);
+	if (auto existing = context.globalValues.find(symbol);
 		existing != context.globalValues.end())
 		return existing->second;
 
+	const auto* declaration = symbol->declaration.get();
 	auto* type = context.getType(declaration->typeName);
 	auto* global = new llvm::GlobalVariable(
 		*context.module,
@@ -727,7 +745,7 @@ llvm::GlobalVariable* declareGlobal(const VarDecl* declaration,
 		llvm::GlobalValue::InternalLinkage,
 		llvm::Constant::getNullValue(type),
 		declaration->name);
-	context.globalValues.emplace(declaration, global);
+	context.globalValues.emplace(symbol, global);
 	return global;
 }
 
@@ -738,10 +756,10 @@ void declareGlobalsInExpression(const FCExprAST* expression,
 		return;
 	if (auto* declaration = dynamic_cast<const FCVarDeclExprAST*>(expression))
 	{
-		auto symbol = context.compiledProgram.allSymbols.lookup(declaration->decl->name);
+		auto symbol = context.compiledProgram.allSymbols.lookupShared(declaration->decl->name);
 		if (symbol && symbol->storage.kind == VariableStorage::Kind::Global)
 		{
-			declareGlobal(declaration->decl.get(), context);
+			declareGlobal(symbol, context);
 		}
 		return;
 	}
@@ -949,7 +967,7 @@ llvm::Value* FCExprClass::codegen(FCExprAST* expression,
 	}
 	if (auto* declaration = dynamic_cast<FCVarDeclExprAST*>(expression))
 	{
-		auto symbol = context.compiledProgram.allSymbols.lookup(declaration->decl->name);
+		auto symbol = context.compiledProgram.allSymbols.lookupShared(declaration->decl->name);
 		if (context.currentFunction == nullptr && symbol->storage.kind == VariableStorage::Kind::Global)
 			return codegenStandaloneTopLevel(declaration, context);
 		return codegenDeclaration(declaration, context);

@@ -11,6 +11,7 @@
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Instructions.h"
+#include "semantic.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
@@ -26,11 +27,23 @@ namespace FCExprClass
 		llvm::LLVMContext llvmContext;
 		llvm::IRBuilder<> builder;
 		std::unique_ptr<llvm::Module> module;
-		std::map<const VarDecl*, llvm::AllocaInst*> namedValues;
-		std::map<const VarDecl*, llvm::GlobalVariable*> globalValues;
+		std::map<std::shared_ptr<VariableSymbol>, llvm::AllocaInst*> namedValues;
+		std::map<std::shared_ptr<VariableSymbol>, llvm::GlobalVariable*> globalValues;
 		std::unordered_map<std::string, FCFunctionAST*> definitions;
 		llvm::Function* currentFunction = nullptr;
 		CompiledProgram compiledProgram;
+		const FCSemanticContext* semantic = nullptr;
+		FCMarks::SemanticBinding localBinding;
+
+		std::shared_ptr<VariableSymbol> boundSymbol(const void* astNode) const
+		{
+			if (semantic != nullptr)
+				return semantic->boundSymbol(astNode);
+			return localBinding.find(astNode);
+		}
+
+		// 本地侧表访问（手工绑定场景）
+		FCMarks::SemanticBinding& semanticBinding() { return localBinding; }
 
 		explicit FCCodegenContext(const std::string& moduleName, const CompiledProgram& program);
 		llvm::Type* getType(const std::string& typeName);

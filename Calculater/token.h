@@ -93,25 +93,18 @@ class SymbolTable {
 public:
   SymbolTable() = default;
 
-  // 添加符号
-  bool addSymbol(const std::string& name, VariableSymbol symbol);
-  // 查找符号
-  const VariableSymbol* lookup(const std::string& name) const;
-  VariableSymbol* lookup(const std::string& name);
-  // 移除符号
+  bool addSymbol(const std::string& name, std::shared_ptr<VariableSymbol> symbol);
+
+  std::shared_ptr<VariableSymbol> lookupShared(const std::string& name) const;
   bool removeSymbol(const std::string& name);
-  // 获取所有符号
-  const std::unordered_map<std::string, VariableSymbol>& getAllSymbols() const;
-  // 清空符号表
+
+  const std::unordered_map<std::string, std::shared_ptr<VariableSymbol>>& getAllSymbols() const;
   void clear();
-  // 获取符号数量
   size_t size() const;
-  // 调试输出
   void dump() const;
 
-
 private:
-  std::unordered_map<std::string, VariableSymbol> m_symbols;
+  std::unordered_map<std::string, std::shared_ptr<VariableSymbol>> m_symbols;
 };
 
 struct CompiledFunction {
@@ -128,8 +121,25 @@ struct CompiledFunction {
     , maxTempSlots(0) {}
 };
 
+struct SemanticBinding {
+    std::unordered_map<const void*, std::shared_ptr<VariableSymbol>> variables;
+
+    bool bind(const void* node, std::shared_ptr<VariableSymbol> symbol) {
+        return variables.emplace(node, std::move(symbol)).second;
+    }
+
+    std::shared_ptr<VariableSymbol> find(const void* node) const {
+        auto it = variables.find(node);
+        return it != variables.end() ? it->second : nullptr;
+    }
+
+    void clear() { variables.clear(); }
+    size_t size() const { return variables.size(); }
+};
+
 struct CompiledProgram {
   SymbolTable allSymbols;
+  std::shared_ptr<SemanticBinding> m_binding = std::make_shared<SemanticBinding>();
   std::unordered_map<std::string, std::shared_ptr<CompiledFunction>> functions;
   int globalFrameSize;
 
