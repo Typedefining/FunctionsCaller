@@ -7,6 +7,8 @@
 #include <utility>
 #include <vector>
 
+#include "runtime.h"
+
 namespace FCExprClass
 {
   struct FCExprAST;
@@ -56,33 +58,25 @@ struct VarDecl {
   VarDecl(const std::string &n, const std::string &t) : name(n), typeName(t) {}
 };
 
-struct VariableStorage {
-  enum class Kind {
-      Global,
-      Local
-  };
-  Kind kind;
-  int slot = -1;
-};
-
 struct VariableSymbol {
   using VarDeclPtr = std::shared_ptr<VarDecl>;
-  VarDeclPtr declaration;      // 保留原始 AST 声明
-  VariableStorage storage;     // 存储位置信息
+  VarDeclPtr declaration;
+  int slot;                    // 所属域内的槽位：全局域对应 globalSymbols 下标，函数域对应帧内下标
   int scopeDepth;              // 声明时的作用域深度
   bool isMutable;              // 是否可变
   bool isCaptured;             // 是否被闭包捕获
+  VariableRuntimeInfo runtime; // 运行时定位：-1 为全局，>=0 为调用栈帧下标
 
   VariableSymbol()
     : declaration(nullptr)
-    , storage{VariableStorage::Kind::Local, -1}
+    , slot{-1}
     , scopeDepth(0)
     , isMutable(false)
     , isCaptured(false) {}
 
-  VariableSymbol(VarDeclPtr decl, VariableStorage st, int depth)
+  VariableSymbol(VarDeclPtr decl, int st, int depth)
     : declaration(std::move(decl))
-    , storage(st)
+    , slot(st)
     , scopeDepth(depth)
     , isMutable(false)
     , isCaptured(false) {}
@@ -110,7 +104,7 @@ private:
 struct CompiledFunction {
   using FCFunctionAST = FCExprClass::FCFunctionAST;
   FCFunctionAST* ast;
-  std::vector<VariableStorage> parameters;
+  std::vector<int> parametersIdx;  // 形参槽位，按原型声明顺序，语义期填充
   SymbolTable symbols;
   int frameSize;
   int maxTempSlots;
@@ -133,17 +127,20 @@ struct SemanticBinding {
         return it != variables.end() ? it->second : nullptr;
     }
 
+    std::shared_ptr<VariableSymbol> find(const FCExprClass::FCVariableExprAST* node) const {
+        return find(static_cast<const void*>(node));
+    }
+
     void clear() { variables.clear(); }
     size_t size() const { return variables.size(); }
 };
 
 struct CompiledProgram {
-  SymbolTable allSymbols;
   std::shared_ptr<SemanticBinding> m_binding = std::make_shared<SemanticBinding>();
   std::unordered_map<std::string, std::shared_ptr<CompiledFunction>> functions;
-  int globalFrameSize;
+  std::vector<std::shared_ptr<VariableSymbol>> globalSymbols;  // 按全局槽位顺序，替代中心化名称表
 
-  CompiledProgram() : globalFrameSize(0) {}
+  CompiledProgram() = default;
 
   const CompiledFunction* getFunction(const std::string& name) const {
       auto it = functions.find(name);
@@ -247,7 +244,7 @@ struct FCFunctionAST : public FCExprAST {
 
 public:
   FCFunctionAST(std::unique_ptr<FCPrototypeAST> proto,
-                std::unique_ptr<FCExprAST> body, int localCount = 0);
+                std::unique_ptr<FCExprAST> body, int localCount);
   FCTypeDescribe type = FCMarks::FCTypeDescribe::Function;
   ::std::string getProtoName() const;
   const FCExprAST *getBody() const;

@@ -17,7 +17,6 @@ namespace FCMarks {
 
 struct VarDecl;
 struct VariableSymbol;
-struct VariableStorage;
 struct CompiledFunction;
 struct CompiledProgram;
 struct SymbolTable;

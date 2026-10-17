@@ -680,11 +680,10 @@ llvm::Value* codegenDeclaration(const FCVarDeclExprAST* expression,
 	if (declSymbol == nullptr)
 		return logCodegenError("variable declaration is not resolved to a symbol");
 
-	// 局部/全局直接读符号存储类别，不再按名字反查函数符号表
-	// （同时消除原 unordered_map::operator[] 查不到时插入空条目的副作用）
-	const bool isLocal = declSymbol->storage.kind == VariableStorage::Kind::Local;
+	// 变量符号自身携带声明时的作用域深度：0 为全局，否则为当前函数局部
+	const bool isGlobal = declSymbol->scopeDepth == 0;
 
-	if (isLocal)
+	if (isGlobal)
 	{
 		auto local = context.namedValues.find(declSymbol);
 		if (local != context.namedValues.end())
@@ -752,35 +751,10 @@ llvm::GlobalVariable* declareGlobal(std::shared_ptr<VariableSymbol> symbol,
 void declareGlobalsInExpression(const FCExprAST* expression,
 	FCCodegenContext& context)
 {
-	if (expression == nullptr)
-		return;
-	if (auto* declaration = dynamic_cast<const FCVarDeclExprAST*>(expression))
-	{
-		auto symbol = context.compiledProgram.allSymbols.lookupShared(declaration->decl->name);
-		if (symbol && symbol->storage.kind == VariableStorage::Kind::Global)
-		{
-			declareGlobal(symbol, context);
-		}
-		return;
-	}
-	if (auto* block = dynamic_cast<const FCBlockExprAST*>(expression))
-	{
-		for (const auto& item : block->getExpressions())
-			declareGlobalsInExpression(item.get(), context);
-		return;
-	}
-	if (auto* sequence = dynamic_cast<const FCSeqExprAST*>(expression))
-	{
-		for (const auto& item : sequence->getExpressions())
-			declareGlobalsInExpression(item.get(), context);
-		return;
-	}
-	if (auto* conditional = dynamic_cast<const FCIfExprAST*>(expression))
-	{
-		declareGlobalsInExpression(conditional->getThen(), context);
-		declareGlobalsInExpression(conditional->getElse(), context);
-		return;
-	}
+	// 全局变量已由语义期按声明顺序收集到 globalSymbols，不需要再按名字
+	// 从中心化表中反查，也不需要递归遍历 AST 猜测哪些声明是全局的
+	for (const auto& symbol : context.compiledProgram.globalSymbols)
+		declareGlobal(symbol, context);
 }
 
 llvm::Value* codegenProgram(const FCProgramAST* expression,
@@ -967,10 +941,9 @@ llvm::Value* FCExprClass::codegen(FCExprAST* expression,
 	}
 	if (auto* declaration = dynamic_cast<FCVarDeclExprAST*>(expression))
 	{
-		auto symbol = context.compiledProgram.allSymbols.lookupShared(declaration->decl->name);
-		if (context.currentFunction == nullptr && symbol->storage.kind == VariableStorage::Kind::Global)
-			return codegenStandaloneTopLevel(declaration, context);
-		return codegenDeclaration(declaration, context);
+		// 顶层声明的变量一律为全局（语义期 isGlobalScope 已按 README 规则处理），
+		// 直接走独立的顶层代码生成路径
+		return codegenStandaloneTopLevel(declaration, context);
 	}
 	if (auto* program = dynamic_cast<FCProgramAST*>(expression))
 		return codegenProgram(program, context);

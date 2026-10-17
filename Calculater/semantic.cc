@@ -72,7 +72,8 @@ bool FCSemanticContext::isInFunctionScope() const {
 }
 
 bool FCSemanticContext::isGlobalScope() const {
-  return !m_currentState.isActive && m_scopeStack.size() == 1;
+  // 只要当前不在函数体内，顶层作用域（含顶层块、顶层分支）中的声明都是全局变量
+  return !m_currentState.isActive;
 }
 
 std::shared_ptr<VariableSymbol>
@@ -128,22 +129,19 @@ FCSemanticContext::declareVariable(VarDeclPtr declaration) {
     return nullptr;
   }
 
-  VariableStorage storage;
-  if (isGlobalScope()) {
-    storage = {VariableStorage::Kind::Global, m_globalLayout.allocateSlot()};
-  } else {
-    storage = {VariableStorage::Kind::Local, m_frameLayout.allocateSlot()};
-  }
+  // 变量在声明时取得所属布局内的槽位：全局符号表的下标，或函数帧内的下标
+  const int slot = isGlobalScope() ? m_globalLayout.allocateSlot()
+                                   : m_frameLayout.allocateSlot();
 
   const std::string name = declaration->name;
-  auto symbol = std::make_shared<VariableSymbol>(std::move(declaration),
-                                                 storage, scope.depth);
+  auto symbol = std::make_shared<VariableSymbol>(std::move(declaration), slot,
+                                                 scope.depth);
   scope.variables.emplace(name, symbol);
 
   if (m_currentState.isActive && m_currentState.currentFunction) {
     m_currentState.currentFunction->symbols.addSymbol(name, symbol);
   } else if (isGlobalScope()) {
-    m_compiledProgram->allSymbols.addSymbol(name, symbol);
+    m_compiledProgram->globalSymbols.push_back(symbol);
   }
 
   return symbol;
@@ -170,6 +168,14 @@ bool FCSemanticContext::registerFunction(const std::string &functionName,
     compiledFunc->maxTempSlots =
         m_frameLayout.frameSize(); // Assuming maxTempSlots is the same as frame
                                    // size for now
+
+    // 按原型声明顺序记录形参槽位，调用期据此把实参写入帧的固定位置
+    for (const auto &varDecl : function->getProto()->getArgs()) {
+      auto param = compiledFunc->symbols.lookupShared(varDecl->name);
+      if (param) {
+        compiledFunc->parametersIdx.push_back(param->slot);
+      }
+    }
   }
 
   m_compiledProgram->functions[functionName] = std::move(compiledFunc);
@@ -217,13 +223,10 @@ void FCSemanticContext::dumpScopes() const {
         continue;
 
       const auto &decl = symbol.declaration;
-      const auto &storage = symbol.storage;
 
-      const char *storageKind =
-          storage.kind == VariableStorage::Kind::Global ? "Global" : "Local";
-
-      std::printf("  - %s: type=%s, storage=%s, slot=%d\n", decl->name.c_str(),
-                  decl->typeName.c_str(), storageKind, storage.slot);
+      std::printf("  - %s: type=%s, slot=%d, depth=%d, mutable=%s\n",
+                  decl->name.c_str(), decl->typeName.c_str(), symbol->slot,
+                  symbol->scopeDepth, symbol->isMutable ? "yes" : "no");
     }
   }
 }
@@ -275,12 +278,11 @@ FCSemanticContext::boundSymbol(const void *astNode) const {
 void SymbolTable::dump() const {
   printf("Symbol Table (%zu symbols):\n", m_symbols.size());
   for (const auto &[name, symbol] : m_symbols) {
-    const char *kind = symbol->storage.kind == VariableStorage::Kind::Global
-                           ? "Global"
-                           : "Local";
+    const char *kind = symbol->slot < 0 ? "Unassigned"
+                                        : "Local"; // 符号表仅容纳函数域符号
 
     printf("  %s: slot=%d, kind=%s, depth=%d, mutable=%s\n", name.c_str(),
-           symbol->storage.slot, kind, symbol->scopeDepth,
+           symbol->slot, kind, symbol->scopeDepth,
            symbol->isMutable ? "yes" : "no");
   }
 }

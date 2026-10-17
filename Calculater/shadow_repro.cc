@@ -18,9 +18,7 @@ static void run(const char* src) {
     if (sym && sym->ast) {
       std::printf("  func %s frameSize=%zu: ", name.c_str(), (size_t)sym->frameSize);
       for (const auto& [vn, vs] : sym->symbols.getAllSymbols())
-        std::printf("%s(%s,slot=%d) ", vn.c_str(),
-                    vs->storage.kind == FCMarks::VariableStorage::Kind::Global ? "G" : "L",
-                    vs->storage.slot);
+        std::printf("%s(slot=%d,depth=%d) ", vn.c_str(), vs->slot, vs->scopeDepth);
       std::putchar(10);
     }
   }

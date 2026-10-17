@@ -8,10 +8,6 @@
 using namespace FCExprClass;
 using namespace FCMarks;
 
-FCValue evaluateExpression(const FCExprAST *expression,
-                            FCEvaluationContext &context);
-Frame *frameForStorage(const VariableStorage &storage, FCEvaluationContext &context);
-
 namespace {
 FCValue makeDangleValue() {
   FCValue value;
@@ -44,12 +40,12 @@ FCValue evaluateVariable(const FCVariableExprAST *node, FCEvaluationContext &con
   if (symbol == nullptr)
     return makeDangleValue();
 
-  const VariableStorage &storage = symbol->storage;
-  Frame *frame = frameForStorage(storage, context);
-  if (frame == nullptr)
+  Frame *frame = context.frameForSymbol(*symbol);
+  if (frame == nullptr || symbol->slot < 0 ||
+      symbol->slot >= static_cast<int>(frame->locals.size()))
     return makeDangleValue();
 
-  return frame->locals[storage.slot];
+  return frame->locals[symbol->slot];
 }
 
 FCValue evaluateIf(const FCIfExprAST *node, FCEvaluationContext &context) {
@@ -82,19 +78,19 @@ FCValue evaluateFor(const FCForExprAST *node, FCEvaluationContext &context) {
       step.type != FCValueCategory::Integer)
     return makeDangleValue();
 
-  const VariableStorage &storage = forSymbol->storage;
+  const int slot = forSymbol->slot;
   size_t frameIdx = context.callStack.size() - 1;
-  if (storage.slot < 0 || storage.slot >= static_cast<int>(context.callStack[frameIdx].locals.size()))
+  if (slot < 0 || slot >= static_cast<int>(context.callStack[frameIdx].locals.size()))
     return makeDangleValue();
 
-  context.callStack[frameIdx].locals[storage.slot] = start;
+  context.callStack[frameIdx].locals[slot] = start;
 
   FCValue result = start;
   while (evaluateExpression(node->getEnd(), context).evaluteVal.intVal != 0) {
     result = evaluateExpression(node->getBody(), context);
     if (result.type == FCValueCategory::Dangle)
       return result;
-    context.callStack[frameIdx].locals[storage.slot].evaluteVal.intVal += step.evaluteVal.intVal;
+    context.callStack[frameIdx].locals[slot].evaluteVal.intVal += step.evaluteVal.intVal;
   }
   return result;
 }
@@ -129,14 +125,14 @@ FCValue evaluateDeclaration(const FCVarDeclExprAST *node,
   if (symbol == nullptr || node->decl == nullptr || node->initExpr == nullptr)
     return makeDangleValue();
 
-  const VariableStorage &storage = symbol->storage;
   const auto value = evaluateExpression(node->initExpr.get(), context);
   if (value.type == FCValueCategory::Dangle)
     return value;
-  Frame *frame = frameForStorage(storage, context);
-  if (frame == nullptr)
+  Frame *frame = context.frameForSymbol(*symbol);
+  if (frame == nullptr || symbol->slot < 0 ||
+      symbol->slot >= static_cast<int>(frame->locals.size()))
     return makeDangleValue();
-  frame->locals[storage.slot] = value;
+  frame->locals[symbol->slot] = value;
   return value;
 }
 
@@ -170,21 +166,20 @@ FCValue evaluateBinary(const FCBinaryExprAST *expression,
       return value;
 
     std::shared_ptr<VariableSymbol> lhsSymbol = context.boundSymbol(variable);
-    if (lhsSymbol == nullptr)
-    {
+    if (lhsSymbol == nullptr) {
       std::fprintf(stderr, "LogError: LHS of assignment is not bound to a symbol\n");
       return makeDangleValue();
     }
 
-    const VariableStorage &storage = lhsSymbol->storage;
-    Frame *frame = frameForStorage(storage, context);
-    if (frame == nullptr) {
+    Frame *frame = context.frameForSymbol(*lhsSymbol);
+    if (frame == nullptr || lhsSymbol->slot < 0 ||
+        lhsSymbol->slot >= static_cast<int>(frame->locals.size())) {
       std::fprintf(stderr, "LogError: Invalid slot for %s\n",
                    variable->decl->name.c_str());
       return makeDangleValue();
     }
 
-    frame->locals[storage.slot] = value;
+    frame->locals[lhsSymbol->slot] = value;
     return value;
   }
 
@@ -289,20 +284,8 @@ FCValue evaluateCall(const FCCallExprAST *expression,
 
     auto func = context.compiledProgram.getFunction(expression->getName());
     auto symbol = func->symbols.lookupShared(parameter->name);
-    VariableStorage storage;
-    if (symbol)
-    {
-      storage = symbol->storage;
-    }
-    else
-    {
-      symbol = context.compiledProgram.allSymbols.lookupShared(parameter->name);
-      storage  = symbol->storage;
-    }
-    const int slot = storage.slot;
-
-    if (slot < 0 || slot >= static_cast<int>(frame.locals.size())) {
-      std::fprintf(stderr, "Invalid parameter slot in %s\n",
+    if (symbol == nullptr || symbol->slot < 0 ||
+        symbol->slot >= static_cast<int>(frame.locals.size())) {
                   expression->getName().c_str());
       context.popFrame();
       return makeDangleValue();
@@ -361,34 +344,6 @@ FCValue evaluateExpression(const FCExprAST *expression,
   return makeDangleValue();
 }
 
-Frame *frameForStorage(const VariableStorage &storage, FCEvaluationContext &context) {
-  switch (storage.kind) {
-  case VariableStorage::Kind::Global:
-    if (storage.slot < 0)
-      return nullptr;
-
-    if (storage.slot >= static_cast<int>(context.globalFrame.locals.size())) {
-      context.globalFrame.locals.resize(storage.slot + 1);
-    }
-
-    return &context.globalFrame;
-  case VariableStorage::Kind::Local:
-    if (storage.slot < 0 || context.callStack.empty()) {
-
-      return nullptr;
-    }
-
-    Frame &frame = context.currentFrame();
-    if (storage.slot >= static_cast<int>(frame.locals.size())) {
-      return nullptr;
-    }
-
-    return &frame;
-  }
-
-  return nullptr;
-}
-
 namespace FCExprClass {
 bool FCFunctionRegistry::registerFunction(FCFunctionAST *function) {
   if (function == nullptr)
@@ -429,10 +384,13 @@ bool FCFunctionRegistry::index(FCExprAST *root) {
   return false;
 }
 
-FCEvaluationContext::FCEvaluationContext(const CompiledProgram& program)
-  : compiledProgram(program)
-{
-
+FCEvaluationContext::FCEvaluationContext(const CompiledProgram &program)
+    : compiledProgram(program) {
+  // 顶层帧承载全局变量，后续 pushFrame 为每次函数调用分配新的调用帧
+  Frame globalFrame;
+  globalFrame.funcName = "<global>";
+  globalFrame.locals.resize(program.globalSymbols.size());
+  callStack.push_back(std::move(globalFrame));
 }
 
 void FCEvaluationContext::pushFrame(const std::string &functionName) {
@@ -441,6 +399,16 @@ void FCEvaluationContext::pushFrame(const std::string &functionName) {
   if (const auto *function = functions.findFunction(functionName))
     frame.locals.resize(function->getLocalCount());
   callStack.push_back(std::move(frame));
+}
+
+void FCEvaluationContext::popFrame() {
+  assert(callStack.size() > 1); // 保留顶层全局帧
+  callStack.pop_back();
+}
+
+Frame &FCEvaluationContext::currentFrame() {
+  assert(!callStack.empty());
+  return callStack.back();
 }
 
 void FCEvaluationContext::popFrame() {

@@ -984,19 +984,18 @@ private:
 
             // 局部变量分配 + 读取 + 赋值
             auto decl = std::make_shared<VarDecl>("loc", "int");
-            VariableSymbol sym(decl, {VariableStorage::Kind::Local, 0}, 1);
-            cc.compiledProgram.allSymbols.addSymbol("loc", std::make_shared<VariableSymbol>(sym));
-            auto locSymbol = cc.compiledProgram.allSymbols.lookupShared("loc");
+            auto sym = std::make_shared<VariableSymbol>(decl, 0, 1);
+            auto locSymbol = sym;
             auto* locAlloca = cc.createEntryBlockAlloca(fn, "loc", cc.getType("int"));
             cc.namedValues[locSymbol] = locAlloca;
 
             auto var = std::make_unique<FCVariableExprAST>(decl);
-            cc.semanticBinding().bind(var.get(), cc.compiledProgram.allSymbols.lookupShared("loc"));
+            cc.semanticBinding().bind(var.get(), sym);
             auto* vv = codegen(var.get(), cc);
             expect(vv != nullptr && vv->getType()->isIntegerTy(), "codegen-api - local variable load");
 
             auto assignLHS = std::make_unique<FCVariableExprAST>(decl);
-            cc.semanticBinding().bind(assignLHS.get(), cc.compiledProgram.allSymbols.lookupShared("loc"));
+            cc.semanticBinding().bind(assignLHS.get(), sym);
             auto assign = std::make_unique<FCBinaryExprAST>(
                 '=', std::move(assignLHS), std::make_unique<FCNumberExprAST>(5));
             auto* av = codegen(assign.get(), cc);
@@ -1230,35 +1229,43 @@ private:
             expect(vd->initExpr != nullptr, "token-api - vardecl init");
         }
 
-        // VariableStorage / VariableSymbol 默认值
+        // VariableSymbol / VariableRuntimeInfo 默认值
         {
             VariableSymbol sym;
             expect(sym.declaration == nullptr, "token-api - default symbol null decl");
-            expect(sym.storage.kind == VariableStorage::Kind::Local, "token-api - default symbol local");
-            expect(sym.storage.slot == -1, "token-api - default symbol slot -1");
-            expect(sym.scopeDepth == 0 && !sym.isMutable && !sym.isCaptured,
-                "token-api - default symbol flags");
+            expect(sym.slot == -1, "token-api - default symbol slot -1");
+            expect(sym.scopeDepth == 0 && !sym.isMutable && !sym.isCaptured && sym.runtime.frameIndex == -1,
+                "token-api - default symbol flags and runtime");
 
             auto decl = std::make_shared<VarDecl>("g", "int");
-            VariableSymbol custom(decl, {VariableStorage::Kind::Global, 4}, 2);
-            expect(custom.declaration == decl && custom.storage.kind == VariableStorage::Kind::Global &&
-                   custom.storage.slot == 4 && custom.scopeDepth == 2,
+            VariableSymbol custom(decl, 4, 2);
+            expect(custom.declaration == decl && custom.slot == 4 && custom.scopeDepth == 2,
                 "token-api - custom symbol fields");
-
-            VariableStorage st;
-            expect(st.slot == -1, "token-api - storage default slot");
         }
 
         // CompiledProgram / CompiledFunction 默认值
         {
             CompiledProgram prog;
-            expect(prog.globalFrameSize == 0, "token-api - compiled program default frame size");
+            expect(prog.globalSymbols.empty(), "token-api - compiled program empty globals");
             expect(prog.getFunction("none") == nullptr, "token-api - compiled program missing function");
 
             CompiledFunction cf;
             expect(cf.ast == nullptr && cf.frameSize == 0 && cf.maxTempSlots == 0,
                 "token-api - compiled function defaults");
-            expect(cf.parameters.empty(), "token-api - compiled function empty params");
+            expect(cf.parametersIdx.empty(), "token-api - compiled function empty params");
+        }
+
+        // SemanticBinding 按节点指针查找
+        {
+            auto binding = std::make_shared<SemanticBinding>();
+            auto node = std::make_unique<FCVariableExprAST>(std::make_shared<VarDecl>("x", "int"));
+            auto sym = std::make_shared<VariableSymbol>(node->decl, 0, 0);
+
+            expect(binding->find(node.get()) == nullptr, "token-api - binding miss before bind");
+            expect(binding->bind(node.get(), sym), "token-api - binding bind");
+            expect(binding->find(node.get()) == sym, "token-api - binding find by node");
+            expect(binding->find(static_cast<const void*>(node.get())) == sym,
+                "token-api - binding find by void pointer");
         }
 
         // FCTypeDescribe 枚举值
@@ -1283,7 +1290,7 @@ private:
 
         SymbolTable table;
         auto d1 = std::make_shared<VarDecl>("alpha", "int");
-        VariableSymbol s1(d1, {VariableStorage::Kind::Global, 0}, 0);
+        VariableSymbol s1(d1, 0, 0);
 
         expect(table.addSymbol("alpha", std::make_shared<VariableSymbol>(s1)), "symbol-table - add new symbol");
         expect(!table.addSymbol("alpha", std::make_shared<VariableSymbol>(s1)), "symbol-table - duplicate add rejected");
@@ -1292,7 +1299,7 @@ private:
         const SymbolTable& ctable = table;
         expect(ctable.lookupShared("alpha") != nullptr, "symbol-table - const lookup hit");
         expect(ctable.lookupShared("alpha")->declaration == d1, "symbol-table - const lookup declaration");
-        expect(ctable.lookupShared("alpha")->storage.slot == 0, "symbol-table - const lookup storage");
+        expect(ctable.lookupShared("alpha")->slot == 0, "symbol-table - const lookup slot");
         expect(ctable.lookupShared("missing") == nullptr, "symbol-table - const lookup miss");
 
         expect(table.lookupShared("alpha") != nullptr, "symbol-table - mutable lookup hit");
@@ -1306,7 +1313,7 @@ private:
         expect(table.size() == 0, "symbol-table - empty after remove");
 
         auto d2 = std::make_shared<VarDecl>("beta", "double");
-        VariableSymbol s2(d2, {VariableStorage::Kind::Local, 3}, 1);
+        VariableSymbol s2(d2, 3, 1);
         expect(table.addSymbol("beta", std::make_shared<VariableSymbol>(s2)), "symbol-table - add second symbol");
         table.dump();
         expect(table.size() == 1, "symbol-table - size after second add");
@@ -1322,7 +1329,7 @@ private:
             ctx.declareVariable(std::make_shared<VarDecl>("p2", "double"));
             // persistent 表与 compiledProgram 无关，这里只验证编译输出
             const auto& prog = ctx.getCompiledProgram();
-            expect(prog.allSymbols.size() == 2, "symbol-table - semantic globals recorded");
+            expect(prog.globalSymbols.size() == 2, "symbol-table - semantic globals recorded");
         }
     }
 
