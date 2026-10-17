@@ -1354,11 +1354,19 @@ private:
             {
                 symbolCnt += func.second->frameSize;
             }
-            expect(prog.allSymbols.size() + symbolCnt == 4, "compiled - all symbols recorded");
+            expect(prog.globalSymbols.size() + symbolCnt == 4, "compiled - all symbols recorded");
 
             auto lookupVar = [&](const std::string& varName)
             {
-                auto sym = prog.allSymbols.lookupShared(varName);
+                std::shared_ptr<VariableSymbol> sym = nullptr;
+                for (const auto& gs : prog.globalSymbols)
+                {
+                    if (gs->declaration && gs->declaration->name == varName)
+                    {
+                        sym = gs;
+                        break;
+                    }
+                }
                 if (!sym)
                 {
                     for (auto& func : prog.functions)
@@ -1372,20 +1380,20 @@ private:
             };
 
             auto gsym = lookupVar("g");
-            expect(gsym != nullptr && gsym->storage.kind == VariableStorage::Kind::Global &&
-                   gsym->storage.slot == 0, "compiled - global symbol layout");
+            expect(gsym != nullptr && gsym->runtime.frameIndex == -1 &&
+                   gsym->slot == 0, "compiled - global symbol layout");
 
             auto asym = lookupVar("a");
-            expect(asym != nullptr && asym->storage.kind == VariableStorage::Kind::Local &&
-                   asym->storage.slot == 0, "compiled - param a layout");
+            expect(asym != nullptr && asym->runtime.frameIndex != -1 &&
+                   asym->slot == 0, "compiled - param a layout");
 
             auto bsym = lookupVar("b");
-            expect(bsym != nullptr && bsym->storage.kind == VariableStorage::Kind::Local &&
-                   bsym->storage.slot == 1, "compiled - param b layout");
+            expect(bsym != nullptr && bsym->runtime.frameIndex != -1 &&
+                   bsym->slot == 1, "compiled - param b layout");
 
             auto tsym = lookupVar("t");
-            expect(tsym != nullptr && tsym->storage.kind == VariableStorage::Kind::Local &&
-                   tsym->storage.slot == 2, "compiled - local t layout");
+            expect(tsym != nullptr && tsym->runtime.frameIndex != -1 &&
+                   tsym->slot == 2, "compiled - local t layout");
 
             const auto* add = prog.getFunction("add");
             expect(add != nullptr, "compiled - getFunction add");
@@ -1419,11 +1427,24 @@ private:
             expect(ast != nullptr, "compiled - globals scan ok");
             const auto& sem = scanner.semanticContext();
             const auto& prog = sem.getCompiledProgram();
-            expect(prog.allSymbols.size() == 2, "compiled - only globals recorded");
-            expect(prog.allSymbols.lookupShared("a")->storage.slot == 0, "compiled - global a slot");
-            expect(prog.allSymbols.lookupShared("b")->storage.slot == 1, "compiled - global b slot");
+            expect(prog.globalSymbols.size() == 2, "compiled - only globals recorded");
+            expect(prog.globalSymbols[0]->slot == 0, "compiled - global a slot");
+            expect(prog.globalSymbols[1]->slot == 1, "compiled - global b slot");
             expect(sem.currentGlobalLayout().globalSize() == 2, "compiled - global layout size");
             expect(prog.functions.empty(), "compiled - no functions");
+        }
+
+        // 顶层块中的 var 必须注册为全局（README:291）
+        {
+            FCScanner scanner;
+            auto ast = scanner.analysis("{ var g:int = 42; g }");
+            expect(ast != nullptr, "compiled - top-level block scan ok");
+            const auto& sem = scanner.semanticContext();
+            const auto& prog = sem.getCompiledProgram();
+            expect(prog.globalSymbols.size() == 1, "compiled - top-level block global count");
+            expect(prog.globalSymbols[0]->runtime.frameIndex == -1,
+                   "compiled - top-level block var is global");
+            expect(prog.globalSymbols[0]->slot == 0, "compiled - top-level block global slot");
         }
 
         // 无局部变量的函数
@@ -1513,8 +1534,8 @@ private:
             auto sym = ctx.declareVariable(g);
 
             expect(sym != nullptr, "semantic-api - declare global");
-            expect(sym->storage.kind == VariableStorage::Kind::Global, "semantic-api - global kind");
-            expect(sym->storage.slot == 0, "semantic-api - global slot 0");
+            expect(sym->runtime.frameIndex == -1, "semantic-api - global frameIndex");
+            expect(sym->slot == 0, "semantic-api - global slot 0");
 
             expect(ctx.lookupGlobalVariable("g") == sym, "semantic-api - lookup global hit");
             expect(ctx.lookupVariableInCurrentScope("g") == sym, "semantic-api - global in current scope");
@@ -1541,8 +1562,8 @@ private:
                 auto psym = ctx.declareVariable(p);
 
                 expect(psym != nullptr, "semantic-api - declare local");
-                expect(psym->storage.kind == VariableStorage::Kind::Local, "semantic-api - local kind");
-                expect(psym->storage.slot == 0, "semantic-api - local slot 0");
+                expect(psym->runtime.frameIndex != -1, "semantic-api - local frameIndex");
+                expect(psym->slot == 0, "semantic-api - local slot 0");
 
                 expect(ctx.lookupVariableShared("p") == psym, "semantic-api - lookup local hit");
                 expect(ctx.lookupVariableInCurrentScope("p") == psym, "semantic-api - current scope hit");
@@ -1631,17 +1652,17 @@ private:
 
             auto a = std::make_shared<VarDecl>("a", "int");
             auto asym = ctx.declareVariable(a);
-            expect(asym->storage.slot == 0, "semantic-api - first local slot 0");
+            expect(asym->slot == 0, "semantic-api - first local slot 0");
 
             ctx.pushScope();
             auto b = std::make_shared<VarDecl>("b", "int");
             auto bsym = ctx.declareVariable(b);
-            expect(bsym->storage.slot == 1, "semantic-api - nested local slot 1");
+            expect(bsym->slot == 1, "semantic-api - nested local slot 1");
             ctx.popScope();
 
             auto c = std::make_shared<VarDecl>("c", "int");
             auto csym = ctx.declareVariable(c);
-            expect(csym->storage.slot == 2, "semantic-api - slot not reused after scope exit");
+            expect(csym->slot == 2, "semantic-api - slot not reused after scope exit");
             expect(ctx.currentFrameLayoutSize() == 3, "semantic-api - frame size includes all slots");
         }
 
@@ -1787,28 +1808,31 @@ private:
 
             // 局部变量但无调用帧
             auto localDecl = std::make_shared<VarDecl>("v", "int");
-            VariableSymbol localSym(localDecl, {VariableStorage::Kind::Local, 0}, 1);
-            ctx.compiledProgram.allSymbols.addSymbol("v", std::make_shared<VariableSymbol>(localSym));
+            VariableSymbol localSym(localDecl, 0, 1);
+            localSym.runtime.frameIndex = 0;
+            ctx.compiledProgram.globalSymbols.push_back(std::make_shared<VariableSymbol>(localSym));
             auto localVar = std::make_unique<FCVariableExprAST>(localDecl);
-            ctx.bindNode(localVar.get(), "v");
+            ctx.bindNode(localVar.get(), std::make_shared<VariableSymbol>(localSym));
             expect(evaluate(localVar.get(), ctx).type == FCValueCategory::Dangle,
                    "evaluator-error - local variable without frame");
 
             // 全局变量但槽位非法
             auto negDecl = std::make_shared<VarDecl>("g", "int");
-            VariableSymbol negSym(negDecl, {VariableStorage::Kind::Global, -1}, 0);
-            ctx.compiledProgram.allSymbols.addSymbol("g", std::make_shared<VariableSymbol>(negSym));
+            VariableSymbol negSym(negDecl, -1, 0);
+            negSym.runtime.frameIndex = -1;
+            ctx.compiledProgram.globalSymbols.push_back(std::make_shared<VariableSymbol>(negSym));
             auto negVar = std::make_unique<FCVariableExprAST>(negDecl);
-            ctx.bindNode(negVar.get(), "g");
+            ctx.bindNode(negVar.get(), std::make_shared<VariableSymbol>(negSym));
             expect(evaluate(negVar.get(), ctx).type == FCValueCategory::Dangle,
                    "evaluator-error - global variable with negative slot");
 
             // 局部变量槽位超出帧大小
             auto oobDecl = std::make_shared<VarDecl>("o", "int");
-            VariableSymbol oobSym(oobDecl, {VariableStorage::Kind::Local, 100}, 1);
-            ctx.compiledProgram.allSymbols.addSymbol("o", std::make_shared<VariableSymbol>(oobSym));
+            VariableSymbol oobSym(oobDecl, 100, 1);
+            oobSym.runtime.frameIndex = 0;
+            ctx.compiledProgram.globalSymbols.push_back(std::make_shared<VariableSymbol>(oobSym));
             auto oobVar = std::make_unique<FCVariableExprAST>(oobDecl);
-            ctx.bindNode(oobVar.get(), "o");
+            ctx.bindNode(oobVar.get(), std::make_shared<VariableSymbol>(oobSym));
             ctx.pushFrame("oob");
             expect(evaluate(oobVar.get(), ctx).type == FCValueCategory::Dangle,
                    "evaluator-error - local variable slot out of range");
@@ -1816,13 +1840,14 @@ private:
 
             // 全局槽位会自动扩展
             auto bigDecl = std::make_shared<VarDecl>("big", "int");
-            VariableSymbol bigSym(bigDecl, {VariableStorage::Kind::Global, 5}, 0);
-            ctx.compiledProgram.allSymbols.addSymbol("big", std::make_shared<VariableSymbol>(bigSym));
+            VariableSymbol bigSym(bigDecl, 5, 0);
+            bigSym.runtime.frameIndex = -1;
+            ctx.compiledProgram.globalSymbols.push_back(std::make_shared<VariableSymbol>(bigSym));
             auto bigVar = std::make_unique<FCVariableExprAST>(bigDecl);
-            ctx.bindNode(bigVar.get(), "big");
+            ctx.bindNode(bigVar.get(), std::make_shared<VariableSymbol>(bigSym));
             expect(evaluate(bigVar.get(), ctx).type == FCValueCategory::Dangle,
                    "evaluator-error - uninitialized global slot reads dangle");
-            expect(ctx.globalFrame.locals.size() == 6, "evaluator-error - global frame auto-resized");
+            expect(ctx.callStack[0].locals.size() == 4, "evaluator-error - global frame sized by globalSymbols");
         }
 
         // 帧 API 直接测试
@@ -1967,8 +1992,8 @@ static void run(const char* src) {
       std::printf("  func %s frameSize=%zu: ", name.c_str(), (size_t)sym->frameSize);
       for (const auto& [vn, vs] : sym->symbols.getAllSymbols())
         std::printf("%s(%s,slot=%d) ", vn.c_str(),
-                    vs->storage.kind == FCMarks::VariableStorage::Kind::Global ? "G" : "L",
-                    vs->storage.slot);
+                    vs->runtime.frameIndex == -1 ? "G" : "L",
+                    vs->slot);
       std::putchar(10);
     }
   }
