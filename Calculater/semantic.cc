@@ -136,6 +136,7 @@ FCSemanticContext::declareVariable(VarDeclPtr declaration) {
   const std::string name = declaration->name;
   auto symbol = std::make_shared<VariableSymbol>(std::move(declaration), slot,
                                                  scope.depth);
+  symbol->runtime.frameIndex = isGlobalScope() ? -1 : 0;
   scope.variables.emplace(name, symbol);
 
   if (m_currentState.isActive && m_currentState.currentFunction) {
