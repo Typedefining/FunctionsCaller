@@ -290,7 +290,7 @@ FCValue evaluateCall(const FCCallExprAST *expression,
       context.popFrame();
       return makeDangleValue();
     }
-    frame.locals[slot] = argumentValues[i];
+    frame.locals[symbol->slot] = argumentValues[i];
   }
 
   const auto result = evaluateExpression(function->getBody(), context);

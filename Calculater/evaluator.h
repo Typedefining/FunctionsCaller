@@ -35,10 +35,10 @@ struct FCEvaluationContext {
     return localBinding.bind(astNode, std::move(symbol));
   }
 
-  // 根据符号的作用域深度决定它落在哪一帧上：深度 0 为顶层帧，
+  // 按符号的运行时定位决定它落在哪一帧上：frameIndex == -1 为全局（顶层帧），
   // 其余为当前调用帧（闭包捕获将在后续任务中按 runtime.frameIndex 定位）。
   Frame *frameForSymbol(const VariableSymbol &symbol) {
-    if (symbol.scopeDepth == 0) {
+    if (symbol.runtime.frameIndex == -1) {
       if (callStack.empty())
         return nullptr;
       return &callStack[0];
