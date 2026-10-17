@@ -680,10 +680,33 @@ llvm::Value* codegenDeclaration(const FCVarDeclExprAST* expression,
 	if (declSymbol == nullptr)
 		return logCodegenError("variable declaration is not resolved to a symbol");
 
-	// 变量符号自身携带声明时的作用域深度：0 为全局，否则为当前函数局部
-	const bool isGlobal = declSymbol->scopeDepth == 0;
+	// 变量符号自身携带运行时定位：frameIndex == -1 为全局，其余为局部
+	const bool isGlobal = declSymbol->runtime.frameIndex == -1;
 
 	if (isGlobal)
+	{
+		auto global = context.globalValues.find(declSymbol);
+		if (global == context.globalValues.end())
+		{
+			auto* globalValue = declareGlobal(declSymbol, context);
+			if (globalValue == nullptr)
+				return logCodegenError("global variable declaration failed");
+			context.globalValues.emplace(declSymbol, globalValue);
+			global = context.globalValues.find(declSymbol);
+		}
+
+		auto* globalValue = global->second;
+		llvm::Value* initialValue = expression->initExpr == nullptr
+			? llvm::Constant::getNullValue(globalValue->getValueType())
+			: codegen(expression->initExpr.get(), context);
+		initialValue = castValue(context, initialValue, globalValue->getValueType());
+		if (initialValue == nullptr)
+			return logCodegenError("global variable initializer type mismatch");
+
+		context.builder.CreateStore(initialValue, globalValue);
+		return initialValue;
+	}
+	else
 	{
 		auto local = context.namedValues.find(declSymbol);
 		if (local != context.namedValues.end())
@@ -704,23 +727,6 @@ llvm::Value* codegenDeclaration(const FCVarDeclExprAST* expression,
 			return logCodegenError("variable initializer type mismatch");
 
 		context.builder.CreateStore(initialValue, variable);
-		return initialValue;
-	}
-	else
-	{
-		auto global = context.globalValues.find(declSymbol);
-		if (global == context.globalValues.end())
-				return logCodegenError("global variable is not declared");
-
-		auto* globalValue = global->second;
-		llvm::Value* initialValue = expression->initExpr == nullptr
-			? llvm::Constant::getNullValue(globalValue->getValueType())
-			: codegen(expression->initExpr.get(), context);
-		initialValue = castValue(context, initialValue, globalValue->getValueType());
-		if (initialValue == nullptr)
-			return logCodegenError("global variable initializer type mismatch");
-
-		context.builder.CreateStore(initialValue, globalValue);
 		return initialValue;
 	}
 
@@ -748,8 +754,7 @@ llvm::GlobalVariable* declareGlobal(std::shared_ptr<VariableSymbol> symbol,
 	return global;
 }
 
-void declareGlobalsInExpression(const FCExprAST* expression,
-	FCCodegenContext& context)
+void declareGlobalsInExpression(FCCodegenContext& context)
 {
 	// 全局变量已由语义期按声明顺序收集到 globalSymbols，不需要再按名字
 	// 从中心化表中反查，也不需要递归遍历 AST 猜测哪些声明是全局的
@@ -760,8 +765,8 @@ void declareGlobalsInExpression(const FCExprAST* expression,
 llvm::Value* codegenProgram(const FCProgramAST* expression,
 	FCCodegenContext& context)
 {
-	for (const auto& statement : expression->getStatements())
-		declareGlobalsInExpression(statement.get(), context);
+	// 全局变量由语义期已按声明顺序收集，在此统一声明
+	declareGlobalsInExpression(context);
 
 	for (const auto& statement : expression->getStatements())
 	{
@@ -846,7 +851,7 @@ llvm::Value* codegenProgram(const FCProgramAST* expression,
 llvm::Value* codegenStandaloneTopLevel(const FCExprAST* expression,
 	FCCodegenContext& context)
 {
-	declareGlobalsInExpression(expression, context);
+	declareGlobalsInExpression(context);
 
 	auto* mainFunction = context.module->getFunction("__fc_main");
 	if (mainFunction == nullptr)
