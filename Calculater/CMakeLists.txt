@@ -1,4 +1,4 @@
-﻿cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.16)
 
 project(FunctionsCalculater)
 
@@ -23,6 +23,8 @@ llvm_map_components_to_libnames(LLVM_LIBS
 add_library(FunctionsCore STATIC
 	token.h
 	token.cc
+	lexer.h
+	lexer.cc
 )
 target_include_directories(FunctionsCore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
