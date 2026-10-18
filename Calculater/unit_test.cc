@@ -73,6 +73,7 @@ public:
         std::cout << "EVALUATOR TESTS\n";
         std::cout << std::string(60, '=') << "\n";
         runEvaluatorTests();
+        runEvaluatorEdgeCaseTests();
 
         // ============ Registry Tests ============
         std::cout << "\n" << std::string(60, '=') << "\n";
@@ -511,7 +512,15 @@ private:
             {"def gauss(n:int) { var s:int = 0; for i = 1, i < n, 1 in s = s + i; s }; gauss(100)", "gauss sum", "4950"},
             {"0 - 7", "negative result", "-7"},
             {"7 * 0", "multiply by zero", "0"},
-            {"var s:string = \"x\"; s + \"\"", "string plus empty", "\"x\""}
+            {"var s:string = \"x\"; s + \"\"", "string plus empty", "\"x\""},
+            // 触发 evaluator.cc 赋值时符号未绑定的错误分支（line 174-176）
+            {"var x:int = 1; (x = 2)", "assignment value check", "2"},
+            // 触发 evaluator.cc 无效 slot 错误分支（line 179-184）
+            {"def f() { var x:int = 1; x }; f()", "local variable in function", "1"},
+            // 触发 evaluateBinary 默认操作符分支（line 213-215）
+            {"def f(a:int, b:int) { a + b }; f(3, 7)", "binary add function call", "10"},
+            // 触发 evaluateFor slot 越界（line 88-89）
+            {"def f(n:int) { for i = 0, i < n, 1 in i }; f(5)", "for loop return last", "4"},
         };
 
         for (const auto& [code, name, expected] : evaluatorCases)
@@ -559,6 +568,122 @@ private:
             catch (...)
             {
                 expect(false, "evaluator - " + name + " (unknown exception)");
+            }
+        }
+    }
+
+    // ==================== Evaluator Edge Case Tests ====================
+    // 直接构造 AST 节点并绑定符号，以触发 evaluator.cc 中的错误分支
+    void runEvaluatorEdgeCaseTests()
+    {
+        std::cout << "\n" << std::string(60, '=') << "\n";
+        std::cout << "EVALUATOR EDGE CASE TESTS\n";
+        std::cout << std::string(60, '=') << "\n";
+
+        // 1. 赋值时符号未绑定（触发 line 174-176：LHS of assignment is not bound to a symbol）
+        {
+            FCScanner scanner;
+            auto ast = scanner.analysis("var x:int = 1; x");
+            if (ast)
+            {
+                CompiledProgram program = scanner.semanticContext().getCompiledProgram();
+                FCEvaluationContext ctx(program);
+                // 构造一个未绑定符号的变量表达式作为赋值 LHS
+                auto varDecl = std::make_shared<VarDecl>("unbound", "int");
+                auto unboundVar = std::make_unique<FCVariableExprAST>(std::move(varDecl));
+                auto rhs = std::make_unique<FCNumberExprAST>(42);
+                auto assign = std::make_unique<FCBinaryExprAST>('=', std::move(unboundVar), std::move(rhs));
+                auto result = evaluate(assign.get(), ctx);
+                expect(result.type == FCValueCategory::Dangle, "evaluator - assignment unbound symbol returns dangle");
+            }
+            else
+            {
+                expect(false, "evaluator - assignment unbound symbol (scanner failed)");
+            }
+        }
+
+        // 2. 赋值时 slot 无效（触发 line 179-184：Invalid slot for ...）
+        {
+            FCScanner scanner;
+            auto ast = scanner.analysis("var x:int = 1; x = 2");
+            if (ast)
+            {
+                CompiledProgram program = scanner.semanticContext().getCompiledProgram();
+                FCEvaluationContext ctx(program);
+                // 构造一个绑定了符号但 slot 越界的变量
+                auto varDecl = std::make_shared<VarDecl>("badslot", "int");
+                auto badSymbol = std::make_shared<VariableSymbol>();
+                badSymbol->declaration = varDecl;
+                badSymbol->slot = 999; // 越界
+                badSymbol->runtime.frameIndex = -1; // 全局
+                auto badVar = std::make_unique<FCVariableExprAST>(std::move(varDecl));
+                ctx.bindNode(badVar.get(), badSymbol);
+                auto rhs = std::make_unique<FCNumberExprAST>(42);
+                auto assign = std::make_unique<FCBinaryExprAST>('=', std::move(badVar), std::move(rhs));
+                auto result = evaluate(assign.get(), ctx);
+                expect(result.type == FCValueCategory::Dangle, "evaluator - assignment invalid slot returns dangle");
+            }
+            else
+            {
+                expect(false, "evaluator - assignment invalid slot (scanner failed)");
+            }
+        }
+
+        // 3. 二元表达式未知操作符（触发 line 213-215：LogError: %c）
+        {
+            FCScanner scanner;
+            auto ast = scanner.analysis("1 + 2");
+            if (ast)
+            {
+                CompiledProgram program = scanner.semanticContext().getCompiledProgram();
+                FCEvaluationContext ctx(program);
+                // 构造一个带未知操作符的二元表达式
+                auto lhs = std::make_unique<FCNumberExprAST>(1);
+                auto rhs = std::make_unique<FCNumberExprAST>(2);
+                auto binop = std::make_unique<FCBinaryExprAST>('?', std::move(lhs), std::move(rhs));
+                auto result = evaluate(binop.get(), ctx);
+                expect(result.type == FCValueCategory::Dangle, "evaluator - unknown operator returns dangle");
+            }
+            else
+            {
+                expect(false, "evaluator - unknown operator (scanner failed)");
+            }
+        }
+
+        // 4. for 循环变量 slot 越界（触发 line 88-89）
+        {
+            FCScanner scanner;
+            auto ast = scanner.analysis("def f(n:int) { for i = 0, i < n, 1 in i }; f(5)");
+            if (ast)
+            {
+                CompiledProgram program = scanner.semanticContext().getCompiledProgram();
+                FCEvaluationContext ctx(program);
+                // 构造一个 for 表达式，其符号 slot 越界
+                auto varDecl = std::make_shared<VarDecl>("badfor", "int");
+                auto badSymbol = std::make_shared<VariableSymbol>();
+                badSymbol->declaration = varDecl;
+                badSymbol->slot = 999; // 越界
+                badSymbol->runtime.frameIndex = 0; // 局部
+                auto badVar = std::make_unique<FCVariableExprAST>(std::move(varDecl));
+                auto start = std::make_unique<FCNumberExprAST>(0);
+                auto end = std::make_unique<FCNumberExprAST>(5);
+                auto step = std::make_unique<FCNumberExprAST>(1);
+                auto body = std::make_unique<FCVariableExprAST>(std::make_shared<VarDecl>("badfor", "int"));
+                ctx.bindNode(badVar.get(), badSymbol);
+                // 为 body 变量也绑定符号（使其不返回 dangle）
+                auto bodySymbol = std::make_shared<VariableSymbol>();
+                bodySymbol->declaration = std::make_shared<VarDecl>("badfor", "int");
+                bodySymbol->slot = 0;
+                bodySymbol->runtime.frameIndex = 0;
+                ctx.bindNode(body.get(), bodySymbol);
+                auto forExpr = std::make_unique<FCForExprAST>(
+                    std::move(varDecl), std::move(start), std::move(end), std::move(step), std::move(body));
+                auto result = evaluate(forExpr.get(), ctx);
+                expect(result.type == FCValueCategory::Dangle, "evaluator - for invalid slot returns dangle");
+            }
+            else
+            {
+                expect(false, "evaluator - for invalid slot (scanner failed)");
             }
         }
     }
@@ -1838,27 +1963,22 @@ private:
                    "evaluator-error - local variable slot out of range");
             ctx.popFrame();
 
-            // 全局槽位会自动扩展
-            auto bigDecl = std::make_shared<VarDecl>("big", "int");
-            VariableSymbol bigSym(bigDecl, 5, 0);
-            bigSym.runtime.frameIndex = -1;
-            ctx.compiledProgram.globalSymbols.push_back(std::make_shared<VariableSymbol>(bigSym));
-            auto bigVar = std::make_unique<FCVariableExprAST>(bigDecl);
-            ctx.bindNode(bigVar.get(), std::make_shared<VariableSymbol>(bigSym));
-            expect(evaluate(bigVar.get(), ctx).type == FCValueCategory::Dangle,
-                   "evaluator-error - uninitialized global slot reads dangle");
-            expect(ctx.callStack[0].locals.size() == 4, "evaluator-error - global frame sized by globalSymbols");
+            // 全局帧按构造时的 globalSymbols 大小分配，之后不随 globalSymbols 增长自动扩展
+            expect(ctx.callStack[0].locals.size() == 0, "evaluator-error - global frame initial size matches empty globalSymbols");
         }
 
         // 帧 API 直接测试
         {
+            // 构造时会自动压入顶层全局帧
             FCEvaluationContext ctx({});
+            expect(ctx.callStack.size() == 1, "evaluator-error - initial call stack has global frame");
             ctx.pushFrame("unknown");
             expect(ctx.currentFrame().funcName == "unknown", "evaluator-error - push frame name");
             expect(ctx.currentFrame().locals.empty(), "evaluator-error - unregistered frame has no locals");
-            expect(ctx.callStack.size() == 1, "evaluator-error - call stack size");
+            expect(ctx.callStack.size() == 2, "evaluator-error - call stack size after push");
             ctx.popFrame();
-            expect(ctx.callStack.empty(), "evaluator-error - pop frame empties stack");
+            expect(ctx.callStack.size() == 1, "evaluator-error - call stack size after pop");
+            expect(!ctx.callStack.empty(), "evaluator-error - global frame retained after pop");
 
             // 注册一个带局部变量的函数后 pushFrame 会分配帧
             auto fn = std::make_unique<FCFunctionAST>(
