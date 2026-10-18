@@ -60,9 +60,13 @@ llvm::Type* inferExprType(const FCExprAST* expression,
 		return stringType(context);
 
 	if (auto* variable = dynamic_cast<const FCVariableExprAST*>(expression))
-		return variable->decl == nullptr
-			? integerType(context)
-			: context.getType(variable->decl->typeName);
+	{
+		// 语法节点只携带变量名，类型需通过语义绑定回到符号的声明上查询
+		auto symbol = context.boundSymbol(variable);
+		return symbol != nullptr && symbol->declaration != nullptr
+			? context.getType(symbol->declaration->typeName)
+			: integerType(context);
+	}
 
 	if (auto* binary = dynamic_cast<const FCBinaryExprAST*>(expression))
 	{
@@ -271,14 +275,14 @@ llvm::Value* codegenVariable(const FCVariableExprAST* expression,
 	if (it != context.namedValues.end())
 	{
 		return context.builder.CreateLoad(
-			it->second->getAllocatedType(), it->second, expression->decl->name);
+			it->second->getAllocatedType(), it->second, expression->name);
 	}
 
 	auto global = context.globalValues.find(variableSymbol);
 	if (global == context.globalValues.end())
 		return logCodegenError("global variable is not declared");
 	return context.builder.CreateLoad(
-		global->second->getValueType(), global->second, expression->decl->name);
+		global->second->getValueType(), global->second, expression->name);
 }
 
 llvm::Value* codegenBinary(const FCBinaryExprAST* expression,

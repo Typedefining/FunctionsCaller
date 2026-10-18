@@ -25,6 +25,8 @@ add_library(FunctionsCore STATIC
 	token.cc
 	lexer.h
 	lexer.cc
+	parser.h
+	parser.cc
 )
 target_include_directories(FunctionsCore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 

@@ -1,4 +1,4 @@
-﻿#include "scanner.h"
+#include "scanner.h"
 #include <cctype>
 #include <cstdlib>
 #include <tuple>
@@ -302,7 +302,7 @@ FCScanner::parseBinOpRHS(int ExprPrec, std::unique_ptr<FCExprAST> LHS) {
     auto varSym = m_semanticContext.lookupVariableShared(IdName);
     if (!varSym)
       return logError("unknown variable");
-    auto variableExpr = std::make_unique<FCVariableExprAST>(varSym->declaration);
+    auto variableExpr = std::make_unique<FCVariableExprAST>(varSym->declaration->name);
     // 侧表绑定：AST 节点指针 -> 解析时刻的符号（共享句柄直传，AST 保持纯语法结构）
     m_semanticContext.bindVariable(variableExpr.get(), varSym);
     return variableExpr;

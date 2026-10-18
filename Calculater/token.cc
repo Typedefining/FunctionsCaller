@@ -28,13 +28,18 @@ void FCStringExprAST::info()
 	::std::cout << "FCStringExprAST Val: " << m_stringVal << ::std::endl;
 }
 
-FCVariableExprAST::FCVariableExprAST(VarDeclPtr d) : decl(std::move(d))
+FCVariableExprAST::FCVariableExprAST(std::string varName) : name(std::move(varName))
+{
+}
+
+FCVariableExprAST::FCVariableExprAST(VarDeclPtr v)
+	: name(v ? v->name : std::string())
 {
 }
 
 void FCVariableExprAST::info()
 {
-	::std::cout << "FCVariableExprAST (decl) Name: " << decl->name << " typeName=" << decl->typeName << ::std::endl;
+	::std::cout << "FCVariableExprAST Name: " << name << ::std::endl;
 }
 
 FCBinaryExprAST::FCBinaryExprAST(char op,

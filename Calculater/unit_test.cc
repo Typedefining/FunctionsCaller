@@ -589,8 +589,7 @@ private:
                 CompiledProgram program = scanner.semanticContext().getCompiledProgram();
                 FCEvaluationContext ctx(program);
                 // 构造一个未绑定符号的变量表达式作为赋值 LHS
-                auto varDecl = std::make_shared<VarDecl>("unbound", "int");
-                auto unboundVar = std::make_unique<FCVariableExprAST>(std::move(varDecl));
+                auto unboundVar = std::make_unique<FCVariableExprAST>(std::string("unbound"));
                 auto rhs = std::make_unique<FCNumberExprAST>(42);
                 auto assign = std::make_unique<FCBinaryExprAST>('=', std::move(unboundVar), std::move(rhs));
                 auto result = evaluate(assign.get(), ctx);
@@ -616,7 +615,7 @@ private:
                 badSymbol->declaration = varDecl;
                 badSymbol->slot = 999; // 越界
                 badSymbol->runtime.frameIndex = -1; // 全局
-                auto badVar = std::make_unique<FCVariableExprAST>(std::move(varDecl));
+                auto badVar = std::make_unique<FCVariableExprAST>(std::string("badslot"));
                 ctx.bindNode(badVar.get(), badSymbol);
                 auto rhs = std::make_unique<FCNumberExprAST>(42);
                 auto assign = std::make_unique<FCBinaryExprAST>('=', std::move(badVar), std::move(rhs));
@@ -664,11 +663,11 @@ private:
                 badSymbol->declaration = varDecl;
                 badSymbol->slot = 999; // 越界
                 badSymbol->runtime.frameIndex = 0; // 局部
-                auto badVar = std::make_unique<FCVariableExprAST>(std::move(varDecl));
+                auto badVar = std::make_unique<FCVariableExprAST>(std::string("badfor"));
                 auto start = std::make_unique<FCNumberExprAST>(0);
                 auto end = std::make_unique<FCNumberExprAST>(5);
                 auto step = std::make_unique<FCNumberExprAST>(1);
-                auto body = std::make_unique<FCVariableExprAST>(std::make_shared<VarDecl>("badfor", "int"));
+                auto body = std::make_unique<FCVariableExprAST>(std::string("badfor"));
                 ctx.bindNode(badVar.get(), badSymbol);
                 // 为 body 变量也绑定符号（使其不返回 dangle）
                 auto bodySymbol = std::make_shared<VariableSymbol>();
@@ -1114,12 +1113,12 @@ private:
             auto* locAlloca = cc.createEntryBlockAlloca(fn, "loc", cc.getType("int"));
             cc.namedValues[locSymbol] = locAlloca;
 
-            auto var = std::make_unique<FCVariableExprAST>(decl);
+            auto var = std::make_unique<FCVariableExprAST>(std::string("loc"));
             cc.semanticBinding().bind(var.get(), sym);
             auto* vv = codegen(var.get(), cc);
             expect(vv != nullptr && vv->getType()->isIntegerTy(), "codegen-api - local variable load");
 
-            auto assignLHS = std::make_unique<FCVariableExprAST>(decl);
+            auto assignLHS = std::make_unique<FCVariableExprAST>(std::string("loc"));
             cc.semanticBinding().bind(assignLHS.get(), sym);
             auto assign = std::make_unique<FCBinaryExprAST>(
                 '=', std::move(assignLHS), std::make_unique<FCNumberExprAST>(5));
@@ -1172,7 +1171,6 @@ private:
 
             auto decl = std::make_shared<VarDecl>("v", "int");
             std::make_unique<FCVariableExprAST>(decl)->info();
-
             std::make_unique<FCBinaryExprAST>(
                 '+', std::make_unique<FCNumberExprAST>(1),
                 std::make_unique<FCNumberExprAST>(2))->info();
@@ -1254,7 +1252,7 @@ private:
         {
             auto decl = std::make_shared<VarDecl>("v", "double");
             FCVariableExprAST v(decl);
-            expect(v.decl == decl, "token-api - variable decl pointer");
+            expect(v.name == decl->name, "token-api - variable name");
             expect(v.type == FCTypeDescribe::VariableExpr, "token-api - variable type");
             expect(decl->name == "v" && decl->typeName == "double", "token-api - VarDecl fields");
         }
@@ -1383,8 +1381,8 @@ private:
         // SemanticBinding 按节点指针查找
         {
             auto binding = std::make_shared<SemanticBinding>();
-            auto node = std::make_unique<FCVariableExprAST>(std::make_shared<VarDecl>("x", "int"));
-            auto sym = std::make_shared<VariableSymbol>(node->decl, 0, 0);
+            auto node = std::make_unique<FCVariableExprAST>(std::string("x"));
+            auto sym = std::make_shared<VariableSymbol>(std::make_shared<VarDecl>("x", "int"), 0, 0);
 
             expect(binding->find(node.get()) == nullptr, "token-api - binding miss before bind");
             expect(binding->bind(node.get(), sym), "token-api - binding bind");
@@ -1936,7 +1934,7 @@ private:
             VariableSymbol localSym(localDecl, 0, 1);
             localSym.runtime.frameIndex = 0;
             ctx.compiledProgram.globalSymbols.push_back(std::make_shared<VariableSymbol>(localSym));
-            auto localVar = std::make_unique<FCVariableExprAST>(localDecl);
+            auto localVar = std::make_unique<FCVariableExprAST>(std::string("v"));
             ctx.bindNode(localVar.get(), std::make_shared<VariableSymbol>(localSym));
             expect(evaluate(localVar.get(), ctx).type == FCValueCategory::Dangle,
                    "evaluator-error - local variable without frame");
@@ -1946,7 +1944,7 @@ private:
             VariableSymbol negSym(negDecl, -1, 0);
             negSym.runtime.frameIndex = -1;
             ctx.compiledProgram.globalSymbols.push_back(std::make_shared<VariableSymbol>(negSym));
-            auto negVar = std::make_unique<FCVariableExprAST>(negDecl);
+            auto negVar = std::make_unique<FCVariableExprAST>(std::string("g"));
             ctx.bindNode(negVar.get(), std::make_shared<VariableSymbol>(negSym));
             expect(evaluate(negVar.get(), ctx).type == FCValueCategory::Dangle,
                    "evaluator-error - global variable with negative slot");
@@ -1956,7 +1954,7 @@ private:
             VariableSymbol oobSym(oobDecl, 100, 1);
             oobSym.runtime.frameIndex = 0;
             ctx.compiledProgram.globalSymbols.push_back(std::make_shared<VariableSymbol>(oobSym));
-            auto oobVar = std::make_unique<FCVariableExprAST>(oobDecl);
+            auto oobVar = std::make_unique<FCVariableExprAST>(std::string("o"));
             ctx.bindNode(oobVar.get(), std::make_shared<VariableSymbol>(oobSym));
             ctx.pushFrame("oob");
             expect(evaluate(oobVar.get(), ctx).type == FCValueCategory::Dangle,

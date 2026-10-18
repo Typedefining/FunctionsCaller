@@ -161,7 +161,7 @@ FCValue evaluateBinary(const FCBinaryExprAST *expression,
   if (op == '=') {
     auto *variable =
         dynamic_cast<const FCVariableExprAST *>(expression->getLHS());
-    if (variable == nullptr || variable->decl == nullptr) {
+    if (variable == nullptr || variable->name.empty()) {
       std::fprintf(stderr, "LogError: LHS of assignment must be a variable\n");
       return makeDangleValue();
     }
@@ -180,7 +180,7 @@ FCValue evaluateBinary(const FCBinaryExprAST *expression,
     if (frame == nullptr || lhsSymbol->slot < 0 ||
         lhsSymbol->slot >= static_cast<int>(frame->locals.size())) {
       std::fprintf(stderr, "LogError: Invalid slot for %s\n",
-                   variable->decl->name.c_str());
+                   variable->name.c_str());
       return makeDangleValue();
     }
 
