@@ -108,6 +108,9 @@ public:
         // ============ Semantic API Tests ============
         runSemanticApiTests();
 
+        // ============ Semantic Analyzer Tests ============
+        runSemanticAnalyzerTests();
+
         // ============ Evaluator Error Tests ============
         runEvaluatorErrorTests();
 
@@ -1837,6 +1840,197 @@ private:
         }
     }
 
+    // ==================== Semantic Analyzer Tests ====================
+    void runSemanticAnalyzerTests()
+    {
+        std::cout << "\n" << std::string(60, '=') << "\n";
+        std::cout << "SEMANTIC ANALYZER TESTS\n";
+        std::cout << std::string(60, '=') << "\n";
+
+        // ============================================================
+        // Global variable declared at top level
+        // ============================================================
+        {
+            FCSemanticContext ctx;
+            FCSemanticContext::SemanticAnalyzer analyzer(ctx);
+
+            auto gDecl = std::make_shared<VarDecl>("g", "int");
+            auto gVar = std::make_unique<FCVariableExprAST>(std::string("g"));
+            // 先声明再使用：全局声明
+            auto gvd = std::make_unique<FCVarDeclExprAST>(gDecl, nullptr);
+            expect(analyzer.analyze(gvd.get()), "semantic-analyzer - declare global g");
+
+            // 现在变量应被绑定（使用节点再走一遍分析，触发 bindVariable）
+            expect(analyzer.analyze(gVar.get()), "semantic-analyzer - use global g");
+
+            auto bound = ctx.semanticBinding().find(gVar.get());
+            expect(bound != nullptr, "semantic-analyzer - global g bound");
+            expect(bound->runtime.frameIndex == -1, "semantic-analyzer - global g frameIndex -1");
+            expect(bound->slot == 0, "semantic-analyzer - global g slot 0");
+        }
+
+        // ============================================================
+        // Top-level block: var inside { } at top level must be global
+        // ============================================================
+        {
+            FCSemanticContext ctx;
+            FCSemanticContext::SemanticAnalyzer analyzer(ctx);
+
+            auto blk = std::make_unique<FCBlockExprAST>(
+                [] {
+                    std::vector<std::unique_ptr<FCExprAST>> v;
+                    v.emplace_back(std::make_unique<FCVarDeclExprAST>(
+                        std::make_shared<VarDecl>("inner", "int"), nullptr));
+                    return v;
+                }());
+            expect(analyzer.analyze(blk.get()), "semantic-analyzer - top-level block inner");
+
+            auto sym = ctx.lookupGlobalVariable("inner");
+            expect(sym != nullptr, "semantic-analyzer - block var is global");
+            expect(sym->runtime.frameIndex == -1, "semantic-analyzer - block var frameIndex -1");
+        }
+
+        // ============================================================
+        // Local variable inside function scope
+        // ============================================================
+        {
+            FCSemanticContext ctx;
+            FCSemanticContext::SemanticAnalyzer analyzer(ctx);
+
+            auto fn = std::make_unique<FCFunctionAST>(
+                std::make_unique<FCPrototypeAST>("f", std::vector<VarDeclPtr>{}),
+                std::make_unique<FCBlockExprAST>(
+                    [] {
+                        std::vector<std::unique_ptr<FCExprAST>> v;
+                        v.emplace_back(std::make_unique<FCVarDeclExprAST>(
+                            std::make_shared<VarDecl>("local", "int"), nullptr));
+                        return v;
+                    }()),
+                0);
+            expect(analyzer.analyze(fn.get()), "semantic-analyzer - function local");
+
+            // 函数分析完成后，局部变量记录在 CompiledFunction::symbols 中，
+            // 而非 FCSemanticContext 的 scope stack（已 pop）
+            auto compiledFn = ctx.getCompiledFunction("f");
+            expect(compiledFn != nullptr, "semantic-analyzer - compiled function f");
+            auto sym = compiledFn->symbols.lookupShared("local");
+            expect(sym != nullptr, "semantic-analyzer - local visible");
+            expect(sym->runtime.frameIndex != -1, "semantic-analyzer - local frameIndex not -1");
+
+            // 函数作用域结束后，局部不可见于全局查找
+            expect(ctx.lookupVariableShared("local") == nullptr, "semantic-analyzer - local gone after function");
+        }
+
+        // ============================================================
+        // Shadowing: inner x shadows outer x, they are distinct symbols
+        // ============================================================
+        {
+            FCSemanticContext ctx;
+            FCSemanticContext::SemanticAnalyzer analyzer(ctx);
+
+            auto outer = std::make_unique<FCFunctionAST>(
+                std::make_unique<FCPrototypeAST>("outer", std::vector<VarDeclPtr>{}),
+                std::make_unique<FCBlockExprAST>(
+                    [] {
+                        std::vector<std::unique_ptr<FCExprAST>> v;
+                        v.emplace_back(std::make_unique<FCVarDeclExprAST>(
+                            std::make_shared<VarDecl>("x", "int"), nullptr));
+                        v.emplace_back(std::make_unique<FCBlockExprAST>(
+                            [] {
+                                std::vector<std::unique_ptr<FCExprAST>> inner;
+                                inner.emplace_back(std::make_unique<FCVarDeclExprAST>(
+                                    std::make_shared<VarDecl>("x", "int"), nullptr));
+                                return inner;
+                            }()));
+                        return v;
+                    }()),
+                0);
+            expect(analyzer.analyze(outer.get()), "semantic-analyzer - shadowing");
+
+            auto globX = ctx.lookupGlobalVariable("x");
+            expect(globX == nullptr, "semantic-analyzer - x not global");
+
+            // 函数符号表中 x 应为外层符号（pop 后可见）
+            auto fn = ctx.getCompiledFunction("outer");
+            expect(fn != nullptr, "semantic-analyzer - compiled function outer");
+            auto restored = fn->symbols.lookupShared("x");
+            expect(restored != nullptr, "semantic-analyzer - x in function symbol table");
+        }
+
+        // ============================================================
+        // Undeclared variable use is rejected
+        // ============================================================
+        {
+            FCSemanticContext ctx;
+            FCSemanticContext::SemanticAnalyzer analyzer(ctx);
+
+            auto bad = std::make_unique<FCVariableExprAST>(std::string("undeclared"));
+            expect(!analyzer.analyze(bad.get()), "semantic-analyzer - undeclared variable rejected");
+        }
+
+        // ============================================================
+        // Variable binding: analyzer binds AST node to its symbol
+        // ============================================================
+        {
+            FCSemanticContext ctx;
+            FCSemanticContext::SemanticAnalyzer analyzer(ctx);
+
+            auto gDecl = std::make_shared<VarDecl>("gb", "int");
+            auto gvd = std::make_unique<FCVarDeclExprAST>(gDecl, nullptr);
+            expect(analyzer.analyze(gvd.get()), "semantic-analyzer - declare gb");
+
+            auto use = std::make_unique<FCVariableExprAST>(std::string("gb"));
+            expect(analyzer.analyze(use.get()), "semantic-analyzer - use gb");
+
+            auto bound = ctx.semanticBinding().find(use.get());
+            expect(bound != nullptr, "semantic-analyzer - use node bound");
+            expect(bound == ctx.lookupGlobalVariable("gb"), "semantic-analyzer - bound symbol is global gb");
+        }
+
+        // ============================================================
+        // For loop variable declared in function scope is local
+        // ============================================================
+        {
+            FCSemanticContext ctx;
+            FCSemanticContext::SemanticAnalyzer analyzer(ctx);
+
+            auto fLoop = std::make_unique<FCFunctionAST>(
+                std::make_unique<FCPrototypeAST>("loopfn", std::vector<VarDeclPtr>{}),
+                std::make_unique<FCForExprAST>(
+                    std::make_shared<VarDecl>("i", "int"),
+                    std::make_unique<FCNumberExprAST>(0),
+                    std::make_unique<FCNumberExprAST>(10),
+                    std::make_unique<FCNumberExprAST>(1),
+                    std::make_unique<FCVariableExprAST>(std::string("i"))),
+                0);
+            expect(analyzer.analyze(fLoop.get()), "semantic-analyzer - for loop");
+
+            auto compiledLoop = ctx.getCompiledFunction("loopfn");
+            expect(compiledLoop != nullptr, "semantic-analyzer - compiled function loopfn");
+            auto sym = compiledLoop->symbols.lookupShared("i");
+            expect(sym != nullptr, "semantic-analyzer - for var i visible");
+            expect(sym->runtime.frameIndex != -1, "semantic-analyzer - for var i is local");
+        }
+
+        // ============================================================
+        // If expression: variables in branches analyzed
+        // ============================================================
+        {
+            FCSemanticContext ctx;
+            FCSemanticContext::SemanticAnalyzer analyzer(ctx);
+
+            auto br = std::make_unique<FCIfExprAST>(
+                std::make_unique<FCNumberExprAST>(1),
+                std::make_unique<FCVarDeclExprAST>(
+                    std::make_shared<VarDecl>("branchVar", "int"), nullptr),
+                nullptr);
+            expect(analyzer.analyze(br.get()), "semantic-analyzer - if branch var");
+
+            expect(ctx.lookupGlobalVariable("branchVar") != nullptr,
+                   "semantic-analyzer - branch var is global (top level)");
+        }
+    }
+
     // ==================== Evaluator Error Tests ====================
     void runEvaluatorErrorTests()
     {
@@ -2140,3 +2334,4 @@ int main()
 
 
 }
+

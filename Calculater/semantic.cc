@@ -103,17 +103,12 @@ FCSemanticContext::lookupVariableInCurrentScope(const std::string &name) const {
 
 std::shared_ptr<VariableSymbol>
 FCSemanticContext::lookupGlobalVariable(const std::string &name) const {
-  if (m_scopeStack.empty())
-    return nullptr;
-
-  auto &globalScope = m_scopeStack.front();
-
-  auto it = globalScope.variables.find(name);
-
-  if (it == globalScope.variables.end())
-    return nullptr;
-
-  return it->second;
+  for (const auto &symbol : m_compiledProgram->globalSymbols) {
+    if (symbol && symbol->declaration && symbol->declaration->name == name) {
+      return symbol;
+    }
+  }
+  return nullptr;
 }
 
 std::shared_ptr<VariableSymbol>
@@ -121,6 +116,10 @@ FCSemanticContext::declareVariable(VarDeclPtr declaration) {
   assert(declaration != nullptr);
   assert(!m_scopeStack.empty());
 
+  // 变量始终记录在当前作用域（栈顶），保持块作用域 RAII 语义：
+  // pushScope/ popScope 后，局部声明随块消失。
+  // 全局变量（isGlobalScope() 为 true）同时已在 declareVariable 末尾
+  // 加入 m_compiledProgram->globalSymbols，供 lookupGlobalVariable 查找。
   Scope &scope = m_scopeStack.back();
 
   if (scope.variables.find(declaration->name) != scope.variables.end()) {
@@ -288,4 +287,171 @@ void SymbolTable::dump() const {
   }
 }
 
+// ==================== SemanticAnalyzer ====================
+
+FCSemanticContext::SemanticAnalyzer::SemanticAnalyzer(FCSemanticContext &ctx)
+    : m_ctx(ctx) {}
+
+bool FCSemanticContext::SemanticAnalyzer::analyze(const FCExprClass::FCExprAST *root) {
+  if (!root) {
+    return false;
+  }
+  return analyzeExpr(root);
+}
+
+bool FCSemanticContext::SemanticAnalyzer::analyzeExpr(const FCExprClass::FCExprAST *expr) {
+  if (!expr) {
+    return true;
+  }
+
+  if (auto *n = dynamic_cast<const FCExprClass::FCProgramAST *>(expr))
+    return analyzeProgram(n);
+  if (auto *n = dynamic_cast<const FCExprClass::FCBlockExprAST *>(expr))
+    return analyzeBlock(n);
+  if (auto *n = dynamic_cast<const FCExprClass::FCSeqExprAST *>(expr))
+    return analyzeSeq(n);
+  if (auto *n = dynamic_cast<const FCExprClass::FCVarDeclExprAST *>(expr))
+    return analyzeVarDecl(n);
+  if (auto *n = dynamic_cast<const FCExprClass::FCVariableExprAST *>(expr))
+    return analyzeVariable(n);
+  if (auto *n = dynamic_cast<const FCExprClass::FCForExprAST *>(expr))
+    return analyzeFor(n);
+  if (auto *n = dynamic_cast<const FCExprClass::FCIfExprAST *>(expr))
+    return analyzeIf(n);
+  if (auto *n = dynamic_cast<const FCExprClass::FCCallExprAST *>(expr))
+    return analyzeCall(n);
+  if (auto *n = dynamic_cast<const FCExprClass::FCBinaryExprAST *>(expr))
+    return analyzeBinary(n);
+  if (auto *n = dynamic_cast<const FCExprClass::FCFunctionAST *>(expr))
+    return analyzeFunction(n);
+  if (auto *n = dynamic_cast<const FCExprClass::FCNumberExprAST *>(expr))
+    return analyzeNumber(n);
+  if (auto *n = dynamic_cast<const FCExprClass::FCStringExprAST *>(expr))
+    return analyzeString(n);
+
+  return true;
+}
+
+bool FCSemanticContext::SemanticAnalyzer::analyzeProgram(const FCExprClass::FCProgramAST *node) {
+  for (const auto &stmt : node->getStatements()) {
+    if (!analyzeExpr(stmt.get())) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool FCSemanticContext::SemanticAnalyzer::analyzeBlock(const FCExprClass::FCBlockExprAST *node) {
+  FCSemanticContext::ScopeGuard guard(m_ctx);
+  for (const auto &expr : node->getExpressions()) {
+    if (!analyzeExpr(expr.get())) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool FCSemanticContext::SemanticAnalyzer::analyzeSeq(const FCExprClass::FCSeqExprAST *node) {
+  for (const auto &expr : node->getExpressions()) {
+    if (!analyzeExpr(expr.get())) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool FCSemanticContext::SemanticAnalyzer::analyzeVarDecl(const FCExprClass::FCVarDeclExprAST *node) {
+  auto symbol = m_ctx.declareVariable(node->decl);
+  if (!symbol) {
+    return false;
+  }
+  if (node->initExpr) {
+    return analyzeExpr(node->initExpr.get());
+  }
+  return true;
+}
+
+bool FCSemanticContext::SemanticAnalyzer::analyzeVariable(const FCExprClass::FCVariableExprAST *node) {
+  auto symbol = resolveVariable(node->name);
+  if (!symbol) {
+    fprintf(stderr, "Error: variable '%s' is not declared\n", node->name.c_str());
+    return false;
+  }
+  return m_ctx.bindVariable(node, symbol);
+}
+
+bool FCSemanticContext::SemanticAnalyzer::analyzeFor(const FCExprClass::FCForExprAST *node) {
+  FCSemanticContext::ScopeGuard guard(m_ctx);
+
+  auto symbol = m_ctx.declareVariable(node->getDecl());
+  if (!symbol) {
+    return false;
+  }
+
+  if (!analyzeExpr(node->getStart())) return false;
+  if (!analyzeExpr(node->getEnd())) return false;
+  if (!analyzeExpr(node->getStep())) return false;
+  if (!analyzeExpr(node->getBody())) return false;
+  return true;
+}
+
+bool FCSemanticContext::SemanticAnalyzer::analyzeIf(const FCExprClass::FCIfExprAST *node) {
+  if (!analyzeExpr(node->getCondition())) return false;
+  if (!analyzeExpr(node->getThen())) return false;
+  if (node->getElse()) {
+    if (!analyzeExpr(node->getElse())) return false;
+  }
+  return true;
+}
+
+bool FCSemanticContext::SemanticAnalyzer::analyzeCall(const FCExprClass::FCCallExprAST *node) {
+  for (const auto &arg : node->getArgs()) {
+    if (!analyzeExpr(arg.get())) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool FCSemanticContext::SemanticAnalyzer::analyzeBinary(const FCExprClass::FCBinaryExprAST *node) {
+  if (!analyzeExpr(node->getLHS())) return false;
+  if (!analyzeExpr(node->getRHS())) return false;
+  return true;
+}
+
+bool FCSemanticContext::SemanticAnalyzer::analyzeFunction(const FCExprClass::FCFunctionAST *node) {
+  FCSemanticContext::FunctionScopeGuard guard(m_ctx);
+
+  // 注册函数，以便后续阶段（evaluator/codegen）可按名称查找
+  m_ctx.registerFunction(node->getProtoName(), node);
+
+  for (const auto &arg : node->getProto()->getArgs()) {
+    auto symbol = m_ctx.declareVariable(arg);
+    if (!symbol) {
+      return false;
+    }
+  }
+
+  return analyzeExpr(node->getBody());
+}
+
+bool FCSemanticContext::SemanticAnalyzer::analyzeNumber(const FCExprClass::FCNumberExprAST *) {
+  return true;
+}
+
+bool FCSemanticContext::SemanticAnalyzer::analyzeString(const FCExprClass::FCStringExprAST *) {
+  return true;
+}
+
+std::shared_ptr<VariableSymbol>
+FCSemanticContext::SemanticAnalyzer::resolveVariable(const std::string &name) {
+  return m_ctx.lookupVariableShared(name);
+}
+
+const SemanticBinding &
+FCSemanticContext::semanticBinding() const {
+  return *m_compiledProgram->m_binding;
+}
+
 } // namespace FCMarks
+

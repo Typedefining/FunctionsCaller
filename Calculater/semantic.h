@@ -11,6 +11,17 @@ namespace FCExprClass
 {
   struct FCExprAST;
   struct FCFunctionAST;
+  struct FCProgramAST;
+  struct FCBlockExprAST;
+  struct FCSeqExprAST;
+  struct FCVarDeclExprAST;
+  struct FCVariableExprAST;
+  struct FCForExprAST;
+  struct FCIfExprAST;
+  struct FCCallExprAST;
+  struct FCBinaryExprAST;
+  struct FCNumberExprAST;
+  struct FCStringExprAST;
 }
 
 namespace FCMarks {
@@ -151,6 +162,35 @@ public:
 
   ScopeGuard scopedScope() { return ScopeGuard(*this); }
   FunctionScopeGuard scopedFunction() { return FunctionScopeGuard(*this); }
+
+  // 按 AST 遍历的语义分析器入口（步骤3：新增）
+  class SemanticAnalyzer {
+  public:
+    explicit SemanticAnalyzer(FCSemanticContext &ctx);
+
+    // 分析整个程序 AST，返回是否成功
+    bool analyze(const FCExprClass::FCExprAST *root);
+
+  private:
+    FCSemanticContext &m_ctx;
+
+    bool analyzeExpr(const FCExprClass::FCExprAST *expr);
+
+    bool analyzeProgram(const FCExprClass::FCProgramAST *node);
+    bool analyzeBlock(const FCExprClass::FCBlockExprAST *node);
+    bool analyzeSeq(const FCExprClass::FCSeqExprAST *node);
+    bool analyzeVarDecl(const FCExprClass::FCVarDeclExprAST *node);
+    bool analyzeVariable(const FCExprClass::FCVariableExprAST *node);
+    bool analyzeFor(const FCExprClass::FCForExprAST *node);
+    bool analyzeIf(const FCExprClass::FCIfExprAST *node);
+    bool analyzeCall(const FCExprClass::FCCallExprAST *node);
+    bool analyzeBinary(const FCExprClass::FCBinaryExprAST *node);
+    bool analyzeFunction(const FCExprClass::FCFunctionAST *node);
+    bool analyzeNumber(const FCExprClass::FCNumberExprAST *node);
+    bool analyzeString(const FCExprClass::FCStringExprAST *node);
+
+    std::shared_ptr<VariableSymbol> resolveVariable(const std::string &name);
+  };
 
 private:
   struct CurrentCompilationState {
