@@ -8,6 +8,8 @@
 using namespace FCExprClass;
 using namespace FCMarks;
 
+FCValue evaluateExpression(const FCExprAST *expression, FCEvaluationContext &context);
+
 namespace {
 FCValue makeDangleValue() {
   FCValue value;
@@ -64,6 +66,9 @@ FCValue evaluateIf(const FCIfExprAST *node, FCEvaluationContext &context) {
 FCValue evaluateFor(const FCForExprAST *node, FCEvaluationContext &context) {
   std::shared_ptr<VariableSymbol> forSymbol = context.boundSymbol(node);
   if (node->getDecl() == nullptr || forSymbol == nullptr || context.callStack.empty())
+    return makeDangleValue();
+  // for 循环变量应为局部变量，不应落在全局帧（frameIndex == -1）上
+  if (forSymbol->runtime.frameIndex == -1)
     return makeDangleValue();
   const auto start = evaluateExpression(node->getStart(), context);
   FCValue step;
@@ -286,7 +291,8 @@ FCValue evaluateCall(const FCCallExprAST *expression,
     auto symbol = func->symbols.lookupShared(parameter->name);
     if (symbol == nullptr || symbol->slot < 0 ||
         symbol->slot >= static_cast<int>(frame.locals.size())) {
-                  expression->getName().c_str());
+      fprintf(stderr, "Error: unresolved parameter '%s'\n",
+              expression->getName().c_str());
       context.popFrame();
       return makeDangleValue();
     }
@@ -399,16 +405,6 @@ void FCEvaluationContext::pushFrame(const std::string &functionName) {
   if (const auto *function = functions.findFunction(functionName))
     frame.locals.resize(function->getLocalCount());
   callStack.push_back(std::move(frame));
-}
-
-void FCEvaluationContext::popFrame() {
-  assert(callStack.size() > 1); // 保留顶层全局帧
-  callStack.pop_back();
-}
-
-Frame &FCEvaluationContext::currentFrame() {
-  assert(!callStack.empty());
-  return callStack.back();
 }
 
 void FCEvaluationContext::popFrame() {

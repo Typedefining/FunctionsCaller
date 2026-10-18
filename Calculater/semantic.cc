@@ -226,8 +226,8 @@ void FCSemanticContext::dumpScopes() const {
       const auto &decl = symbol.declaration;
 
       std::printf("  - %s: type=%s, slot=%d, depth=%d, mutable=%s\n",
-                  decl->name.c_str(), decl->typeName.c_str(), symbol->slot,
-                  symbol->scopeDepth, symbol->isMutable ? "yes" : "no");
+                  decl->name.c_str(), decl->typeName.c_str(), symbol.slot,
+                  symbol.scopeDepth, symbol.isMutable ? "yes" : "no");
     }
   }
 }

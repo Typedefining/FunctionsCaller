@@ -670,6 +670,9 @@ llvm::Value* codegenSequence(const FCSeqExprAST* expression,
 	return last;
 }
 
+llvm::GlobalVariable* declareGlobal(std::shared_ptr<VariableSymbol> symbol,
+	FCCodegenContext& context);
+
 llvm::Value* codegenDeclaration(const FCVarDeclExprAST* expression,
 	FCCodegenContext& context)
 {
@@ -946,8 +949,10 @@ llvm::Value* FCExprClass::codegen(FCExprAST* expression,
 	}
 	if (auto* declaration = dynamic_cast<FCVarDeclExprAST*>(expression))
 	{
-		// 顶层声明的变量一律为全局（语义期 isGlobalScope 已按 README 规则处理），
-		// 直接走独立的顶层代码生成路径
+		// 函数内的局部变量声明走 codegenDeclaration（按 frameIndex 分全局/局部）；
+		// 顶层（无当前函数）的全局声明走 codegenStandaloneTopLevel。
+		if (context.currentFunction != nullptr)
+			return codegenDeclaration(declaration, context);
 		return codegenStandaloneTopLevel(declaration, context);
 	}
 	if (auto* program = dynamic_cast<FCProgramAST*>(expression))

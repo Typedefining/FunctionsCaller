@@ -12,6 +12,7 @@
 namespace FCExprClass
 {
   struct FCExprAST;
+  struct FCVariableExprAST;
   struct FCFunctionAST;
 }
 
