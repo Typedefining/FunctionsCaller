@@ -25,6 +25,25 @@ bool Parser::check(int kind) const {
 	return m_curTok.kind == kind;
 }
 
+// 表达式起始符判定：序列终止的唯一权威。
+// 与 parsePrimary 的 case 表同构——结构性 token（} ) else in def eof ;）
+// 一律不是表达式起始，出现在序列位置即序列自然终止，交还外层结构消费。
+static bool startsExpression(int kind) {
+	switch (kind) {
+	case static_cast<int>(FCToken::tok_identifier):
+	case static_cast<int>(FCToken::tok_number):
+	case static_cast<int>(FCToken::tok_string):
+	case static_cast<int>(FCToken::tok_parenthes_open):
+	case static_cast<int>(FCToken::tok_brace_open):
+	case static_cast<int>(FCToken::tok_if):
+	case static_cast<int>(FCToken::tok_for):
+	case static_cast<int>(FCToken::tok_var):
+		return true;
+	default:
+		return false;
+	}
+}
+
 // 优先级表与 FCSemanticContext 的 m_binopPrecedence 保持一致
 int Parser::tokenPrecedence(FCMarks::FCBinaryOp op) {
 	switch (op) {
@@ -58,25 +77,30 @@ std::unique_ptr<FCExprAST> Parser::parseProgram() {
 	std::vector<std::unique_ptr<FCExprAST>> statements;
 
 	while (m_curTok.kind != static_cast<int>(FCToken::tok_eof)) {
-		std::unique_ptr<FCExprAST> stmt;
-
-		switch (m_curTok.kind) {
-		case static_cast<int>(FCToken::tok_def):
-			stmt = parseDefinition();
-			break;
-		case static_cast<int>(FCToken::tok_semicolon):
-			advance();
-			continue;
-		default:
-			stmt = parseSeqExpr();
-			break;
+		// def 是语句而非表达式：交回 parseDefinition；
+		// def 块的 '}' 之后允许一个收尾 ';'（惯例写法 "def ...}; expr"）
+		if (m_curTok.kind == static_cast<int>(FCToken::tok_def)) {
+			auto fn = parseDefinition();
+			if (fn) {
+				statements.push_back(std::move(fn));
+				if (m_curTok.kind == static_cast<int>(FCToken::tok_semicolon))
+					advance();
+				continue;
+			}
+			// 函数定义失败（含函数体错误）即整体失败
+			return nullptr;
 		}
-
-		if (stmt) {
+		// 顶层裸 ';' 是空语句，非法（与其他层级规则一致）
+		if (m_curTok.kind == static_cast<int>(FCToken::tok_semicolon)) {
+			logError("empty statement at top level");
+			return nullptr;
+		}
+		if (auto stmt = parseSeqExpr()) {
 			statements.push_back(std::move(stmt));
-		} else {
-			advance();
+			continue;
 		}
+		// seq 失败即整体失败：不再空转（避免同一 token 反复进入 seq）
+		return nullptr;
 	}
 
 	if (statements.size() == 1)
@@ -393,13 +417,13 @@ std::unique_ptr<FCExprAST> Parser::parseBlockExpr() {
 	advance();
 
 	std::vector<std::unique_ptr<FCExprAST>> expressions;
-	// 允许空块
-	if (m_curTok.kind == static_cast<int>(FCToken::tok_brace_close)) {
-		advance();
-		return std::make_unique<FCBlockExprAST>(std::move(expressions));
-	}
+	// 块的终止符是 '}'，由块自己消费；';' 只是表达式分隔符
+	while (m_curTok.kind != static_cast<int>(FCToken::tok_brace_close)) {
+		if (m_curTok.kind == static_cast<int>(FCToken::tok_eof))
+			return logError("unterminated block");
+		if (m_curTok.kind == static_cast<int>(FCToken::tok_semicolon))
+			return logError("empty statement in block");
 
-	while (true) {
 		auto expr = parseExpression();
 		if (!expr)
 			return nullptr;
@@ -407,18 +431,13 @@ std::unique_ptr<FCExprAST> Parser::parseBlockExpr() {
 
 		if (m_curTok.kind == static_cast<int>(FCToken::tok_semicolon)) {
 			advance();
-			if (m_curTok.kind == static_cast<int>(FCToken::tok_brace_close)) {
-				advance();
-				break;
-			}
-			continue;
-		} else if (m_curTok.kind == static_cast<int>(FCToken::tok_brace_close)) {
-			advance();
-			break;
-		} else {
-			return logError("expected ';' or '}' in block");
+			continue;   // ';' 后允许直接 '}'（末尾分隔符合法）
 		}
+		if (m_curTok.kind == static_cast<int>(FCToken::tok_brace_close))
+			break;      // 最后一条不带 ';' 直接收尾，同样合法
+		return logError("expected ';' or '}' in block");
 	}
+	advance();  // 消费 '}'
 
 	return std::make_unique<FCBlockExprAST>(std::move(expressions));
 }
@@ -431,17 +450,15 @@ std::unique_ptr<FCExprAST> Parser::parseSeqExpr() {
 	std::vector<std::unique_ptr<FCExprAST>> exprList;
 	exprList.push_back(std::move(first));
 
+	// 终止判定唯一权威：下一个 token 不是表达式起始符即终止，
+	// 由外层结构（}、)、else、in、def、eof）消费，序列不做猜测
 	while (m_curTok.kind == static_cast<int>(FCToken::tok_semicolon)) {
 		advance();
-		if (m_curTok.kind == static_cast<int>(FCToken::tok_eof) ||
-		    m_curTok.kind == static_cast<int>(FCToken::tok_def) ||
-		    m_curTok.kind == static_cast<int>(FCToken::tok_else) ||
-		    m_curTok.kind == static_cast<int>(FCToken::tok_brace_close) ||
-		    m_curTok.kind == static_cast<int>(FCToken::tok_end))
+		if (!startsExpression(m_curTok.kind))
 			break;
 		auto next = parseExpression();
 		if (!next)
-			break;
+			return nullptr;
 		exprList.push_back(std::move(next));
 	}
 

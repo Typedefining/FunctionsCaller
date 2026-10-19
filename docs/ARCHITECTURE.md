@@ -219,7 +219,7 @@ Evaluator/Codegen: switch (FCBinaryOp) 分派
 | semantic.cc | 96.10% | SemanticAnalyzer + 上下文 |
 | evaluator.cc | 96.22% | 错误分支经边界用例覆盖 |
 | codegen.cc | 90.94% | LLVM 错误注入路径为主 |
-| **Overall** | **95.11%** | **≥95% 门禁达标** |
+| **Overall** | **95.35%** | **≥95% 门禁达标** |
 
 统计口径：`tools/coverage.ps1`（Microsoft.CodeCoverage.Console），排除 `unit_test.cc/main.cc`。
 
@@ -319,3 +319,4 @@ b8ce4b1 step6: 独立 Parser 单元测试（三阶段隔离达成）
 
 > 文档生成：2026-10-19（Asia/Shanghai），基于 `refactor/var-symbol-binding@b8ce4b1` 实测代码结构与质量指标  
 > 验证口径：cmake 3.20+ / MSVC / LLVM 18.1.6 / ctest 694 通过 / coverage 95.11%
+

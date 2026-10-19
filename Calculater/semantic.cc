@@ -123,12 +123,12 @@ FCSemanticContext::lookupVariableInCurrentScope(const std::string &name) const {
 
 std::shared_ptr<VariableSymbol>
 FCSemanticContext::lookupGlobalVariable(const std::string &name) const {
-  for (const auto &symbol : m_compiledProgram->globalSymbols) {
-    if (symbol && symbol->declaration && symbol->declaration->name == name) {
-      return symbol;
-    }
-  }
-  return nullptr;
+  // 单一查找路径：全局变量登记在 <global> 帧记录的符号表
+  // （globalSymbols 向量仅作为槽位序兼容视图保留）
+  auto it = m_compiledProgram->functions.find("<global>");
+  if (it == m_compiledProgram->functions.end())
+    return nullptr;
+  return it->second->symbols.lookupShared(name);
 }
 
 std::shared_ptr<VariableSymbol>

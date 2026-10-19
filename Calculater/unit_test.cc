@@ -173,7 +173,6 @@ private:
     void runScannerTests()
     {
         std::vector<std::pair<std::string, std::string>> scannerCases = {
-            {"; 1", "leading semicolon"},
             {"1 + 2 * 3", "integer precedence"},
             {"(1 + 2) * 3", "parentheses"},
             {"1.5 + 2.5", "floating literal"},
@@ -228,7 +227,6 @@ private:
             {"1 + 2 + 3 + 4 + 5 + 6 + 7 + 8 + 9 + 10", "long additive chain"},
             {"var x1:int = 1; x1 + x1", "identifier containing digit"},
             {"def f(a:int) { a = a + 1; a }", "assignment to parameter"},
-            {"; ; ; 1", "multiple leading semicolons"},
             {"1; def f() { 2 }; 3", "mixed statements with def in middle"},
             {"\"\"", "empty string literal"},
             {"2.0", "float with trailing digit"},
@@ -283,6 +281,18 @@ private:
             expect(recovered != nullptr, "scanner-facade - resetState recovers scanner");
             expect(!semErr.hadParseError() && !semErr.hadSemanticError(),
                    "scanner-facade - flags cleared after reset");
+
+            // 分隔符统一规则：顶层裸 ';' 是空语句，非法
+            FCScanner bareSemi;
+            expect(bareSemi.analysis("; 1") == nullptr,
+                   "scanner-facade - top-level bare semicolon rejected");
+            expect(bareSemi.hadParseError(),
+                   "scanner-facade - bare semicolon flags parse error");
+
+            // def 块后的收尾 ';' 是惯例写法，保持合法（"def ...}; expr"）
+            FCScanner defTail;
+            auto tailAst = defTail.analysis("def f() { 1 }; f()");
+            expect(tailAst != nullptr, "scanner-facade - def trailing semicolon stays legal");
         }
     }
 
@@ -720,6 +730,52 @@ private:
             {
                 expect(false, "evaluator - for invalid slot (scanner failed)");
             }
+        }
+
+        // 5. 调用注册在 AST registry 但无语义期 CompiledProgram 记录的函数
+        //    （触发 evaluateCall 的 no-compiled-record 防御分支）
+        {
+            FCEvaluationContext ctx({});
+            auto fn = std::make_unique<FCFunctionAST>(
+                std::make_unique<FCPrototypeAST>("ghost", std::vector<VarDeclPtr>{}),
+                std::make_unique<FCNumberExprAST>(1));
+            ctx.functions.registerFunction(fn.get());
+            std::vector<std::unique_ptr<FCExprAST>> args;
+            auto call = std::make_unique<FCCallExprAST>("ghost", std::move(args));
+            auto result = evaluate(call.get(), ctx);
+            expect(result.type == FCValueCategory::Dangle,
+                   "evaluator - call without compiled record returns dangle");
+        }
+
+        // 6. 调用的函数其形参未登记进 CompiledFunction 符号表
+        //    （触发 unresolved-parameter 防御分支）
+        {
+            FCSemanticContext sem;
+            auto fnAst = std::make_unique<FCFunctionAST>(
+                std::make_unique<FCPrototypeAST>("hollow",
+                    [] {
+                        std::vector<VarDeclPtr> a;
+                        a.push_back(std::make_shared<VarDecl>("p", "int"));
+                        return a;
+                    }()),
+                std::make_unique<FCVariableExprAST>(std::string("p")));
+            {
+                FCSemanticContext::SemanticAnalyzer analyzer(sem);
+                expect(analyzer.analyze(fnAst.get()),
+                       "evaluator - hollow function analyzed");
+            }
+            // 正常记录存在；篡改 prototypes 指向不存在符号的形参以触发分支：
+            // 直接构造一个调用并从 CompiledProgram 拷贝中删除参数符号即可
+            CompiledProgram program = sem.getCompiledProgram();
+            program.functions["hollow"]->symbols = SymbolTable{};  // 清空符号表
+            FCEvaluationContext ctx(program);
+            ctx.functions.registerFunction(fnAst.get());
+            std::vector<std::unique_ptr<FCExprAST>> callArgs;
+            callArgs.push_back(std::make_unique<FCNumberExprAST>(1));
+            auto call = std::make_unique<FCCallExprAST>("hollow", std::move(callArgs));
+            auto result = evaluate(call.get(), ctx);
+            expect(result.type == FCValueCategory::Dangle,
+                   "evaluator - unresolved parameter symbol returns dangle");
         }
     }
 
@@ -1682,6 +1738,89 @@ private:
             expect(program != nullptr && program->getStatements().size() == 2,
                    "parser - program wraps function and expr");
         }
+
+        // ---- 分隔符统一规则（startsExpression 终止 + 结构性 token 归属制）----
+        // else 终止括号序列，由 if 消费：if c then (a;b) else d 正确拆分
+        {
+            FC::Lexer lexer("if 1 then (2; 3) else 4");
+            FC::Parser parser(lexer);
+            auto ast = parser.parseProgram();
+            expect(ast != nullptr, "parser - else terminates paren seq");
+            auto* cond = dynamic_cast<FCIfExprAST*>(ast.get());
+            expect(cond != nullptr && cond->getElse() != nullptr,
+                   "parser - if consumes else after paren seq");
+            auto* seq = dynamic_cast<const FCSeqExprAST*>(cond->getThen());
+            expect(seq != nullptr && seq->getExpressions().size() == 2,
+                   "parser - paren seq holds two exprs before else");
+        }
+
+        // '}' 终止顶层序列，块由自己消费：{ a; b } 作为 if 分支
+        {
+            FC::Lexer lexer("if 1 then { 2; 3 } else 4");
+            FC::Parser parser(lexer);
+            auto ast = parser.parseProgram();
+            expect(ast != nullptr, "parser - brace terminates seq");
+            auto* cond = dynamic_cast<FCIfExprAST*>(ast.get());
+            expect(cond != nullptr, "parser - if consumes branches around block");
+            auto* blk = dynamic_cast<const FCBlockExprAST*>(cond->getThen());
+            expect(blk != nullptr && blk->getExpressions().size() == 2,
+                   "parser - block consumes its brace-terminated items");
+        }
+
+        // ')' 终止括号序列，由括号自己消费
+        {
+            FC::Lexer lexer("(1; 2) + 3");
+            FC::Parser parser(lexer);
+            auto ast = parser.parseProgram();
+            expect(ast != nullptr, "parser - paren close terminates seq");
+            auto* add = dynamic_cast<FCBinaryExprAST*>(ast.get());
+            expect(add != nullptr && add->getOperator() == FCBinaryOp::Add,
+                   "parser - seq in parens binds as add operand");
+        }
+
+        // def 终止顶层序列：表达式 def 表达式 三语句程序
+        {
+            FC::Lexer lexer("1; def f() { 2 }; 3");
+            FC::Parser parser(lexer);
+            auto ast = parser.parseProgram();
+            expect(ast != nullptr, "parser - def terminates top-level seq");
+            auto* program = dynamic_cast<FCProgramAST*>(ast.get());
+            expect(program != nullptr && program->getStatements().size() == 3,
+                   "parser - program alternates exprs and defs");
+        }
+
+        // 顶层裸 ';' 非法：空语句一律报错
+        {
+            FC::Lexer lexer("; 1");
+            FC::Parser parser(lexer);
+            auto ast = parser.parseProgram();
+            expect(ast == nullptr && parser.hadError(),
+                   "parser - top-level bare semicolon is an error");
+        }
+
+        // 块内 "x;" 收尾合法；"(a;)" 括号内末尾分号同样合法
+        {
+            FC::Lexer lexer("def f() { 1; }");
+            FC::Parser parser(lexer);
+            auto ast = parser.parseProgram();
+            expect(ast != nullptr, "parser - block trailing semicolon legal");
+        }
+
+        // 新增错误路径：块内裸 ';' / 未闭合块
+        {
+            FC::Lexer lexer("def f() { 1; ; 2 }");
+            FC::Parser parser(lexer);
+            auto ast = parser.parseProgram();
+            expect(ast == nullptr && parser.hadError(),
+                   "parser - bare semicolon inside block is an error");
+        }
+        {
+            FC::Lexer lexer("def f() { 1");
+            FC::Parser parser(lexer);
+            auto ast = parser.parseProgram();
+            expect(ast == nullptr && parser.hadError(),
+                   "parser - unterminated block is an error");
+        }
     }
 
     // ==================== Symbol Table Tests ====================
@@ -2380,6 +2519,13 @@ private:
                 std::make_unique<FCNumberExprAST>(1));
             expect(!analyzer.analyze(dupFn.get()),
                    "semantic-analyzer - duplicate parameter rejected at declaration");
+
+            // bindVariable 的防御分支：null 节点或 null 符号一律拒绝
+            auto useNode = std::make_unique<FCVariableExprAST>(std::string("gb"));
+            expect(!ctx.bindVariable(nullptr, nullptr),
+                   "semantic-analyzer - bindVariable rejects null node and symbol");
+            expect(!ctx.bindVariable(useNode.get(), nullptr),
+                   "semantic-analyzer - bindVariable rejects null symbol");
         }
     }
 

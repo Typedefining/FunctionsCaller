@@ -39,7 +39,6 @@ enum struct FCToken {
   //}
   tok_brace_close = 15,
   tok_comma = 16,
-  tok_end,
   tok_assign,
   tok_colon,
   tok_semicolon,

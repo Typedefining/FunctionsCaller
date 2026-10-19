@@ -280,6 +280,16 @@ FCValue evaluateCall(const FCCallExprAST *expression,
 
   context.pushFrame(expression->getName());
   Frame &frame = context.currentFrame();
+
+  // 调用前先确认语义期记录存在（帧布局与参数符号都来自它）
+  auto func = context.compiledProgram.getFunction(expression->getName());
+  if (func == nullptr) {
+    std::fprintf(stderr, "Error: no compiled record for '%s'\n",
+                 expression->getName().c_str());
+    context.popFrame();
+    return makeDangleValue();
+  }
+
   for (size_t i = 0; i < argumentValues.size(); ++i) {
     const auto &parameter = prototype->getArgs()[i];
     if (parameter == nullptr) {
@@ -287,13 +297,6 @@ FCValue evaluateCall(const FCCallExprAST *expression,
       return makeDangleValue();
     }
 
-    auto func = context.compiledProgram.getFunction(expression->getName());
-    if (func == nullptr) {
-      std::fprintf(stderr, "Error: no compiled record for '%s'\n",
-                   expression->getName().c_str());
-      context.popFrame();
-      return makeDangleValue();
-    }
     auto symbol = func->symbols.lookupShared(parameter->name);
     if (symbol == nullptr || symbol->slot < 0 ||
         symbol->slot >= static_cast<int>(frame.locals.size())) {
