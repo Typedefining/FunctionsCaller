@@ -2,6 +2,8 @@
 #include "evaluator.h"
 #include "scanner.h"
 #include "semantic.h"
+#include "lexer.h"
+#include "parser.h"
 #include <chrono>
 #include <iomanip>
 #include <iostream>
@@ -98,6 +100,9 @@ public:
 
         // ============ Token / AST API Tests ============
         runTokenApiTests();
+
+        // ============ Lexer Tests (独立词法测试，不依赖 Parser/Semantic) ============
+        runLexerTests();
 
         // ============ Symbol Table Tests ============
         runSymbolTableTests();
@@ -250,6 +255,30 @@ private:
             {
                 std::cout << "      FAILED - AST is null\n";
             }
+        }
+
+        // Facade 阶段错误标记与状态重置
+        {
+            // 解析错误：hadParseError 为 true
+            FCScanner parseErr;
+            auto bad = parseErr.analysis("1 +");
+            expect(bad == nullptr, "scanner-facade - parse error returns null");
+            expect(parseErr.hadParseError(), "scanner-facade - hadParseError flag set");
+            expect(!parseErr.hadSemanticError(), "scanner-facade - no semantic error on parse failure");
+
+            // 语义错误：引用未声明变量，hadSemanticError 为 true
+            FCScanner semErr;
+            auto undeclared = semErr.analysis("def f() { undeclared }");
+            expect(undeclared == nullptr, "scanner-facade - semantic error returns null");
+            expect(!semErr.hadParseError(), "scanner-facade - no parse error on semantic failure");
+            expect(semErr.hadSemanticError(), "scanner-facade - hadSemanticError flag set");
+
+            // resetState 后可复用同一实例继续解析
+            semErr.resetState();
+            auto recovered = semErr.analysis("1 + 2");
+            expect(recovered != nullptr, "scanner-facade - resetState recovers scanner");
+            expect(!semErr.hadParseError() && !semErr.hadSemanticError(),
+                   "scanner-facade - flags cleared after reset");
         }
     }
 
@@ -770,10 +799,10 @@ private:
         FCFunctionRegistry registry;
         auto func1 = std::make_unique<FCFunctionAST>(
             std::make_unique<FCPrototypeAST>("duplicate", std::vector<VarDeclPtr>{}),
-            std::make_unique<FCNumberExprAST>(1), 0);
+            std::make_unique<FCNumberExprAST>(1));
         auto func2 = std::make_unique<FCFunctionAST>(
             std::make_unique<FCPrototypeAST>("duplicate", std::vector<VarDeclPtr>{}),
-            std::make_unique<FCNumberExprAST>(2), 0);
+            std::make_unique<FCNumberExprAST>(2));
 
         bool first = registry.registerFunction(func1.get());
         bool second = registry.registerFunction(func2.get());
@@ -798,7 +827,7 @@ private:
 
             auto fn = std::make_unique<FCFunctionAST>(
                 std::make_unique<FCPrototypeAST>("solo", std::vector<VarDeclPtr>{}),
-                std::make_unique<FCNumberExprAST>(1), 0);
+                std::make_unique<FCNumberExprAST>(1));
             expect(reg.index(fn.get()), "registry - index single function");
             expect(reg.findFunction("solo") != nullptr, "registry - find after index");
 
@@ -809,7 +838,7 @@ private:
             std::vector<std::unique_ptr<FCExprAST>> stmts;
             stmts.push_back(std::make_unique<FCFunctionAST>(
                 std::make_unique<FCPrototypeAST>("progfn", std::vector<VarDeclPtr>{}),
-                std::make_unique<FCNumberExprAST>(1), 0));
+                std::make_unique<FCNumberExprAST>(1)));
             auto prog = std::make_unique<FCProgramAST>(std::move(stmts));
             expect(reg.index(prog.get()), "registry - index program with functions");
             expect(reg.findFunction("progfn") != nullptr, "registry - program function found");
@@ -1008,7 +1037,7 @@ private:
             {"def f() { if 1.5 then 1 else \"x\" }", "float condition with string branch"},
             {"def f() { var x:int = 1; x = x + \"s\"; x }", "assignment with mismatched rhs"},
             {"def f() { for i = 0, i < 3, 1 in 1.0 = 2.0 }", "assignment to literal in loop body"},
-            {"if 1 then (var g:int = 2; g) else 3; def f() { g }", "top-level if with scoped declaration"}
+            {"def f() { undeclared }", "function references undeclared variable"}
         };
 
         for (const auto& [code, name] : errorCases)
@@ -1046,13 +1075,13 @@ private:
 
             auto emptyBody = std::make_unique<FCFunctionAST>(
                 std::make_unique<FCPrototypeAST>("empty", std::vector<VarDeclPtr>{}),
-                nullptr, 0);
+                nullptr);
             expect(codegen(emptyBody.get(), cc) == nullptr,
                    "codegen-error - codegen function with null body");
 
             auto nullBody2 = std::make_unique<FCFunctionAST>(
                 std::make_unique<FCPrototypeAST>("empty2", std::vector<VarDeclPtr>{}),
-                std::make_unique<FCNumberExprAST>(1), 0);
+                std::make_unique<FCNumberExprAST>(1));
             (void)nullBody2;
         }
     }
@@ -1146,13 +1175,13 @@ private:
             fnArgs.push_back(std::make_shared<VarDecl>("x", "int"));
             auto fn = std::make_unique<FCFunctionAST>(
                 std::make_unique<FCPrototypeAST>("reuse", std::move(fnArgs)),
-                std::make_unique<FCNumberExprAST>(1), 0);
+                std::make_unique<FCNumberExprAST>(1));
             expect(codegen(fn.get(), cc) != nullptr, "codegen-api - completes pre-declared prototype");
 
             // 同一个函数对象重复 codegen：直接复用已有实现
             auto fn2 = std::make_unique<FCFunctionAST>(
                 std::make_unique<FCPrototypeAST>("twice", std::vector<VarDeclPtr>{}),
-                std::make_unique<FCNumberExprAST>(2), 0);
+                std::make_unique<FCNumberExprAST>(2));
             expect(codegen(fn2.get(), cc) != nullptr, "codegen-api - first codegen of function");
             expect(codegen(fn2.get(), cc) != nullptr, "codegen-api - second codegen reuses existing");
             expect(cc.module->getFunction("twice") != nullptr, "codegen-api - twice function present");
@@ -1177,6 +1206,25 @@ private:
             std::make_unique<FCBinaryExprAST>(
                 '+', std::make_unique<FCNumberExprAST>(1),
                 std::make_unique<FCNumberExprAST>(2))->info();
+            // 覆盖 binaryOpName 全部名称分支
+            std::make_unique<FCBinaryExprAST>(
+                '=', std::make_unique<FCNumberExprAST>(1),
+                std::make_unique<FCNumberExprAST>(2))->info();
+            std::make_unique<FCBinaryExprAST>(
+                '<', std::make_unique<FCNumberExprAST>(1),
+                std::make_unique<FCNumberExprAST>(2))->info();
+            std::make_unique<FCBinaryExprAST>(
+                '-', std::make_unique<FCNumberExprAST>(1),
+                std::make_unique<FCNumberExprAST>(2))->info();
+            std::make_unique<FCBinaryExprAST>(
+                '*', std::make_unique<FCNumberExprAST>(1),
+                std::make_unique<FCNumberExprAST>(2))->info();
+            std::make_unique<FCBinaryExprAST>(
+                '/', std::make_unique<FCNumberExprAST>(1),
+                std::make_unique<FCNumberExprAST>(2))->info();
+            std::make_unique<FCBinaryExprAST>(
+                '?', std::make_unique<FCNumberExprAST>(1),
+                std::make_unique<FCNumberExprAST>(2))->info();
 
             std::vector<std::unique_ptr<FCExprAST>> args;
             args.push_back(std::make_unique<FCNumberExprAST>(1));
@@ -1188,7 +1236,7 @@ private:
             proto->info();
 
             auto fn = std::make_unique<FCFunctionAST>(
-                std::move(proto), std::make_unique<FCNumberExprAST>(1), 1);
+                std::move(proto), std::make_unique<FCNumberExprAST>(1));
             fn->info();
 
             std::make_unique<FCIfExprAST>(
@@ -1263,8 +1311,8 @@ private:
         // 二元表达式
         {
             auto bin = std::make_unique<FCBinaryExprAST>(
-                '*', std::make_unique<FCNumberExprAST>(3), std::make_unique<FCNumberExprAST>(4));
-            expect(bin->getOperator() == '*', "token-api - binary operator");
+                FCBinaryOp::Mul, std::make_unique<FCNumberExprAST>(3), std::make_unique<FCNumberExprAST>(4));
+            expect(bin->getOperator() == FCBinaryOp::Mul, "token-api - binary operator");
             expect(bin->getLHS() != nullptr && bin->getRHS() != nullptr, "token-api - binary operands");
             expect(bin->type == FCTypeDescribe::BinaryExpr, "token-api - binary type");
         }
@@ -1297,11 +1345,10 @@ private:
         {
             auto fn = std::make_unique<FCFunctionAST>(
                 std::make_unique<FCPrototypeAST>("fn", std::vector<VarDeclPtr>{}),
-                std::make_unique<FCNumberExprAST>(9), 3);
+                std::make_unique<FCNumberExprAST>(9));
             expect(fn->getProtoName() == "fn", "token-api - function proto name");
             expect(fn->getBody() != nullptr, "token-api - function body");
             expect(fn->getProto()->getProtoName() == "fn", "token-api - function getProto");
-            expect(fn->getLocalCount() == 3, "token-api - function local count");
             expect(fn->type == FCTypeDescribe::Function, "token-api - function type");
         }
 
@@ -1404,6 +1451,127 @@ private:
             expect(static_cast<int>(FCTypeDescribe::CallExpr) == 5, "token-api - enum CallExpr");
             expect(static_cast<int>(FCTypeDescribe::Prototype) == 6, "token-api - enum Prototype");
             expect(static_cast<int>(FCTypeDescribe::Function) == 7, "token-api - enum Function");
+        }
+    }
+
+    // ==================== Lexer Tests ====================
+    // 独立词法单元测试：只实例化 FC::Lexer，不依赖 Parser/Semantic
+    void runLexerTests()
+    {
+        std::cout << "\n" << std::string(60, '=') << "\n";
+        std::cout << "LEXER TESTS\n";
+        std::cout << std::string(60, '=') << "\n";
+
+        // 关键字与标识符
+        {
+            FC::Lexer lexer("def if then else for in var abc123");
+            expect(lexer.nextToken().kind == static_cast<int>(FCToken::tok_def), "lexer - def keyword");
+            expect(lexer.nextToken().kind == static_cast<int>(FCToken::tok_if), "lexer - if keyword");
+            expect(lexer.nextToken().kind == static_cast<int>(FCToken::tok_then), "lexer - then keyword");
+            expect(lexer.nextToken().kind == static_cast<int>(FCToken::tok_else), "lexer - else keyword");
+            expect(lexer.nextToken().kind == static_cast<int>(FCToken::tok_for), "lexer - for keyword");
+            expect(lexer.nextToken().kind == static_cast<int>(FCToken::tok_in), "lexer - in keyword");
+            expect(lexer.nextToken().kind == static_cast<int>(FCToken::tok_var), "lexer - var keyword");
+
+            auto id = lexer.nextToken();
+            expect(id.kind == static_cast<int>(FCToken::tok_identifier) && id.lexeme == "abc123",
+                   "lexer - identifier lexeme");
+            expect(lexer.nextToken().kind == static_cast<int>(FCToken::tok_eof),
+                   "lexer - reaches eof after tokens");
+            expect(lexer.isAtEnd(), "lexer - isAtEnd at eof");
+        }
+
+        // 数字：整数与浮点数 lexeme
+        {
+            FC::Lexer lexer("123 3.14");
+            auto i = lexer.nextToken();
+            expect(i.kind == static_cast<int>(FCToken::tok_number) && i.lexeme == "123", "lexer - integer lexeme");
+            auto f = lexer.nextToken();
+            expect(f.kind == static_cast<int>(FCToken::tok_number) && f.lexeme == "3.14", "lexer - float lexeme");
+        }
+
+        // 字符串
+        {
+            FC::Lexer lexer("\"hello world\"");
+            auto s = lexer.nextToken();
+            expect(s.kind == static_cast<int>(FCToken::tok_string) && s.lexeme == "hello world",
+                   "lexer - string lexeme");
+        }
+
+        // 未闭合字符串直接返回 eof
+        {
+            FC::Lexer lexer("\"unterminated");
+            expect(lexer.nextToken().kind == static_cast<int>(FCToken::tok_eof),
+                   "lexer - unterminated string yields eof");
+        }
+
+        // 注释被跳过，注释后继续返回 token
+        {
+            FC::Lexer lexer("# comment only\n42");
+            auto t = lexer.nextToken();
+            expect(t.kind == static_cast<int>(FCToken::tok_number) && t.lexeme == "42",
+                   "lexer - comment skipped");
+        }
+
+        // 行号/列号追踪
+        {
+            FC::Lexer lexer("a\n  bc");
+            auto first = lexer.nextToken();
+            expect(first.line == 1 && first.lexeme == "a", "lexer - first token line");
+            auto second = lexer.nextToken();
+            expect(second.line == 2 && second.lexeme == "bc", "lexer - line advances on newline");
+        }
+
+        // 标点与运算符：kind 为枚举，binop 为统一枚举表示
+        {
+            FC::Lexer lexer("( ) { } , ; : = + - * / <");
+            expect(lexer.nextToken().kind == static_cast<int>(FCToken::tok_parenthes_open), "lexer - paren open");
+            expect(lexer.nextToken().kind == static_cast<int>(FCToken::tok_parenthes_close), "lexer - paren close");
+            expect(lexer.nextToken().kind == static_cast<int>(FCToken::tok_brace_open), "lexer - brace open");
+            expect(lexer.nextToken().kind == static_cast<int>(FCToken::tok_brace_close), "lexer - brace close");
+            expect(lexer.nextToken().kind == static_cast<int>(FCToken::tok_comma), "lexer - comma");
+            expect(lexer.nextToken().kind == static_cast<int>(FCToken::tok_semicolon), "lexer - semicolon");
+            expect(lexer.nextToken().kind == static_cast<int>(FCToken::tok_colon), "lexer - colon");
+            expect(lexer.nextToken().kind == static_cast<int>(FCToken::tok_assign), "lexer - assign kind");
+            expect(lexer.nextToken().binop == FCBinaryOp::Add, "lexer - binop add");
+            expect(lexer.nextToken().binop == FCBinaryOp::Sub, "lexer - binop sub");
+            expect(lexer.nextToken().binop == FCBinaryOp::Mul, "lexer - binop mul");
+            expect(lexer.nextToken().binop == FCBinaryOp::Div, "lexer - binop div");
+            expect(lexer.nextToken().binop == FCBinaryOp::Less, "lexer - binop less");
+        }
+
+        // binop 转换工具
+        {
+            expect(charToBinaryOp('=') == FCBinaryOp::Assign, "lexer - charToBinaryOp assign");
+            expect(charToBinaryOp('#') == FCBinaryOp::Unknown, "lexer - charToBinaryOp unknown");
+        }
+
+        // peek 不推进，current 返回最近消费的 token
+        {
+            FC::Lexer lexer("aa bb");
+            auto first = lexer.nextToken();
+            auto peeked = lexer.peekToken();
+            expect(peeked.lexeme == "bb", "lexer - peek returns next token");
+            expect(lexer.currentToken().lexeme == "aa", "lexer - current returns consumed token");
+            auto consumed = lexer.nextToken();
+            expect(consumed.lexeme == "bb" && consumed.kind == peeked.kind, "lexer - consume returns peeked token");
+        }
+
+        // reset 复用实例
+        {
+            FC::Lexer lexer("xyz");
+            lexer.nextToken();
+            lexer.reset("q1");
+            auto t = lexer.nextToken();
+            expect(t.kind == static_cast<int>(FCToken::tok_identifier) && t.lexeme == "q1",
+                   "lexer - reset reuses instance");
+        }
+
+        // 空输入立即 eof
+        {
+            FC::Lexer lexer("");
+            expect(lexer.nextToken().kind == static_cast<int>(FCToken::tok_eof), "lexer - empty input eof");
+            expect(lexer.isAtEnd(), "lexer - isAtEnd on empty");
         }
     }
 
@@ -1573,6 +1741,19 @@ private:
             expect(prog.globalSymbols[0]->slot == 0, "compiled - top-level block global slot");
         }
 
+        // 顶层括号序列内的 var 同样注册为全局（README:291，顶层任意位置）
+        {
+            FCScanner scanner;
+            auto ast = scanner.analysis("if 1 then (var g:int = 2; g) else 3; def f() { g }");
+            expect(ast != nullptr, "compiled - top-level paren-seq var scan ok");
+            const auto& sem = scanner.semanticContext();
+            const auto& prog = sem.getCompiledProgram();
+            expect(prog.globalSymbols.size() == 1, "compiled - top-level paren-seq global count");
+            expect(prog.globalSymbols[0]->runtime.frameIndex == -1,
+                   "compiled - top-level paren-seq var is global");
+            expect(prog.getFunction("f") != nullptr, "compiled - function referencing global g compiled");
+        }
+
         // 无局部变量的函数
         {
             FCScanner scanner;
@@ -1597,7 +1778,7 @@ private:
             FCSemanticContext ctx;
             auto fn = std::make_unique<FCFunctionAST>(
                 std::make_unique<FCPrototypeAST>("solo", std::vector<VarDeclPtr>{}),
-                std::make_unique<FCNumberExprAST>(1), 0);
+                std::make_unique<FCNumberExprAST>(1));
             expect(ctx.registerFunction("solo", fn.get()), "compiled - direct register");
             const auto* cf = ctx.getCompiledFunction("solo");
             expect(cf != nullptr && cf->ast == fn.get(), "compiled - direct registered ast");
@@ -1905,8 +2086,7 @@ private:
                         v.emplace_back(std::make_unique<FCVarDeclExprAST>(
                             std::make_shared<VarDecl>("local", "int"), nullptr));
                         return v;
-                    }()),
-                0);
+                    }()));
             expect(analyzer.analyze(fn.get()), "semantic-analyzer - function local");
 
             // 函数分析完成后，局部变量记录在 CompiledFunction::symbols 中，
@@ -1943,8 +2123,7 @@ private:
                                 return inner;
                             }()));
                         return v;
-                    }()),
-                0);
+                    }()));
             expect(analyzer.analyze(outer.get()), "semantic-analyzer - shadowing");
 
             auto globX = ctx.lookupGlobalVariable("x");
@@ -2001,8 +2180,7 @@ private:
                     std::make_unique<FCNumberExprAST>(0),
                     std::make_unique<FCNumberExprAST>(10),
                     std::make_unique<FCNumberExprAST>(1),
-                    std::make_unique<FCVariableExprAST>(std::string("i"))),
-                0);
+                    std::make_unique<FCVariableExprAST>(std::string("i"))));
             expect(analyzer.analyze(fLoop.get()), "semantic-analyzer - for loop");
 
             auto compiledLoop = ctx.getCompiledFunction("loopfn");
@@ -2172,14 +2350,32 @@ private:
             expect(ctx.callStack.size() == 1, "evaluator-error - call stack size after pop");
             expect(!ctx.callStack.empty(), "evaluator-error - global frame retained after pop");
 
-            // 注册一个带局部变量的函数后 pushFrame 会分配帧
-            auto fn = std::make_unique<FCFunctionAST>(
-                std::make_unique<FCPrototypeAST>("framed", std::vector<VarDeclPtr>{}),
-                std::make_unique<FCNumberExprAST>(1), 3);
-            ctx.functions.registerFunction(fn.get());
-            ctx.pushFrame("framed");
-            expect(ctx.currentFrame().locals.size() == 3, "evaluator-error - frame sized by local count");
-            ctx.popFrame();
+            // 注册一个带局部变量的函数后 pushFrame 会按语义期 frameSize 分配帧
+            {
+                // 语义期路径：declareVariable 分配 3 个帧槽 → registerFunction
+                // 记录 frameSize=3 → evaluator pushFrame 读取该值
+                FCSemanticContext semantic;
+                {
+                    FCSemanticContext::FunctionScopeGuard guard(semantic);
+                    semantic.declareVariable(std::make_shared<VarDecl>("fa", "int"));
+                    semantic.declareVariable(std::make_shared<VarDecl>("fb", "int"));
+                    semantic.declareVariable(std::make_shared<VarDecl>("fc", "int"));
+
+                    auto framed = std::make_unique<FCFunctionAST>(
+                        std::make_unique<FCPrototypeAST>("framed2", std::vector<VarDeclPtr>{}),
+                        std::make_unique<FCNumberExprAST>(1));
+                    semantic.registerFunction("framed2", framed.get());
+                }
+                const auto* compiled = semantic.getCompiledProgram().getFunction("framed2");
+                expect(compiled != nullptr && compiled->frameSize == 3,
+                       "evaluator-error - semantic frameSize recorded");
+
+                FCEvaluationContext sizedCtx(semantic.getCompiledProgram());
+                sizedCtx.pushFrame("framed2");
+                expect(sizedCtx.currentFrame().locals.size() == 3,
+                       "evaluator-error - frame sized by semantic frameSize");
+                sizedCtx.popFrame();
+            }
         }
     }
 
@@ -2334,4 +2530,5 @@ int main()
 
 
 }
+
 

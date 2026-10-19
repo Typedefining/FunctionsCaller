@@ -41,12 +41,6 @@ char Lexer::readChar() {
 	return ch;
 }
 
-void Lexer::skipWhitespace() {
-	while (m_lastChar != EOF && std::isspace(static_cast<unsigned char>(m_lastChar))) {
-		readChar();
-	}
-}
-
 Token Lexer::getTok() {
 	int startLine = m_curLine;
 	int startColumn = m_curColumn;
@@ -136,18 +130,27 @@ Token Lexer::getTok() {
 	// 其他值
 	int thisChar = m_lastChar;
 	m_lastChar = readChar();
-	if (thisChar == '(')
-		return { static_cast<int>(FCToken::tok_parenthes_open), "(", startLine, startColumn };
-	if (thisChar == ')')
-		return { static_cast<int>(FCToken::tok_parenthes_close), ")", startLine, startColumn };
-	if (thisChar == '{')
-		return { static_cast<int>(FCToken::tok_brace_open), "{", startLine, startColumn };
-	if (thisChar == '}')
-		return { static_cast<int>(FCToken::tok_brace_close), "}", startLine, startColumn };
-	if (thisChar == ',')
-		return { static_cast<int>(FCToken::tok_comma), ",", startLine, startColumn };
-
-	return { thisChar, std::string(1, static_cast<char>(thisChar)), startLine, startColumn };
+	switch (thisChar) {
+	case '(':
+		return { static_cast<int>(FCToken::tok_parenthes_open), "(", startLine, startColumn, FCMarks::FCBinaryOp::Unknown };
+	case ')':
+		return { static_cast<int>(FCToken::tok_parenthes_close), ")", startLine, startColumn, FCMarks::FCBinaryOp::Unknown };
+	case '{':
+		return { static_cast<int>(FCToken::tok_brace_open), "{", startLine, startColumn, FCMarks::FCBinaryOp::Unknown };
+	case '}':
+		return { static_cast<int>(FCToken::tok_brace_close), "}", startLine, startColumn, FCMarks::FCBinaryOp::Unknown };
+	case ',':
+		return { static_cast<int>(FCToken::tok_comma), ",", startLine, startColumn, FCMarks::FCBinaryOp::Unknown };
+	case '=':
+		return { static_cast<int>(FCToken::tok_assign), "=", startLine, startColumn, FCMarks::FCBinaryOp::Assign };
+	case ':':
+		return { static_cast<int>(FCToken::tok_colon), ":", startLine, startColumn, FCMarks::FCBinaryOp::Unknown };
+	case ';':
+		return { static_cast<int>(FCToken::tok_semicolon), ";", startLine, startColumn, FCMarks::FCBinaryOp::Unknown };
+	default:
+		return { thisChar, std::string(1, static_cast<char>(thisChar)), startLine, startColumn,
+			     FCMarks::charToBinaryOp(static_cast<char>(thisChar)) };
+	}
 }
 
 Token Lexer::nextToken() {
@@ -179,3 +182,4 @@ bool Lexer::isAtEnd() const {
 }
 
 } // namespace FC
+

@@ -20,6 +20,9 @@ public:
 	// 解析过程是否发生过错误
 	bool hadError() const { return m_hadError; }
 
+	// 重置解析器状态，以便复用同一 Parser 实例解析多段输入
+	void reset();
+
 private:
 	Lexer& m_lexer;
 	Token m_curTok;
@@ -27,7 +30,7 @@ private:
 
 	void advance();
 	bool check(int kind) const;
-	static int tokenPrecedence(int kind);
+	static int tokenPrecedence(FCMarks::FCBinaryOp op);
 
 	std::unique_ptr<FCExprClass::FCExprAST> logError(const char* msg);
 	std::unique_ptr<FCExprClass::FCPrototypeAST> logErrorP(const char* msg);

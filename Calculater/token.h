@@ -40,7 +40,34 @@ enum struct FCToken {
   tok_brace_close = 15,
   tok_comma = 16,
   tok_end,
+  tok_assign,
+  tok_colon,
+  tok_semicolon,
 };
+
+// 二元运算符的统一表示：Lexer/Parser/AST/后端全程使用，杜绝 ASCII 泄露
+enum struct FCBinaryOp {
+  Assign,   // =
+  Less,     // <
+  Add,      // +
+  Sub,      // -
+  Mul,      // *
+  Div,      // /
+  Unknown   // 非法运算符（错误路径）
+};
+
+// 词法层字符 → 枚举的唯一转换点；除 lexer.cc 外不得新增调用方
+inline FCBinaryOp charToBinaryOp(char c) {
+  switch (c) {
+  case '=': return FCBinaryOp::Assign;
+  case '<': return FCBinaryOp::Less;
+  case '+': return FCBinaryOp::Add;
+  case '-': return FCBinaryOp::Sub;
+  case '*': return FCBinaryOp::Mul;
+  case '/': return FCBinaryOp::Div;
+  default:  return FCBinaryOp::Unknown;
+  }
+}
 enum struct FCTypeDescribe {
   Expr,         // 抽象表达式
   NumberExpr,   // 数字字面量
@@ -198,15 +225,18 @@ public:
 
 /// FCBinaryExprAST - Expression struct for a binary operator.
 struct FCBinaryExprAST : public FCExprAST {
-  char m_Op;
+  FCBinaryOp m_Op;
   ::std::unique_ptr<FCExprAST> mup_LHS, mup_RHS;
 
 public:
+  FCBinaryExprAST(FCBinaryOp op, ::std::unique_ptr<FCExprAST> lhs,
+                  ::std::unique_ptr<FCExprAST> rhs);
+  // 过渡兼容构造：测试迁移完成后删除
   FCBinaryExprAST(char op, ::std::unique_ptr<FCExprAST> lhs,
                   ::std::unique_ptr<FCExprAST> rhs);
   FCTypeDescribe type = FCMarks::FCTypeDescribe::BinaryExpr;
   void info() override;
-  char getOperator() const { return m_Op; }
+  FCBinaryOp getOperator() const { return m_Op; }
   const FCExprAST *getLHS() const { return mup_LHS.get(); }
   const FCExprAST *getRHS() const { return mup_RHS.get(); }
 };
@@ -240,22 +270,21 @@ public:
   }
 };
 
-/// FCFunctionAST - This struct represents a function definition itself.
+/// FCFunctionAST - 纯语法节点：原型 + 函数体。帧布局（参数/局部计数）
+/// 是语义期产物，记录在 CompiledFunction::frameSize，不由 AST 携带。
 struct FCFunctionAST : public FCExprAST {
   std::unique_ptr<FCPrototypeAST> mup_funcProto;
   std::unique_ptr<FCExprAST> mup_funcBody;
-  int m_localCount = 0;
 
 public:
   FCFunctionAST(std::unique_ptr<FCPrototypeAST> proto,
-                std::unique_ptr<FCExprAST> body, int localCount);
+                std::unique_ptr<FCExprAST> body);
   FCTypeDescribe type = FCMarks::FCTypeDescribe::Function;
   ::std::string getProtoName() const;
   const FCExprAST *getBody() const;
   const std::unique_ptr<FCPrototypeAST> &getProto() const {
     return mup_funcProto;
   }
-  int getLocalCount() const { return m_localCount; }
   void info() override;
 };
 

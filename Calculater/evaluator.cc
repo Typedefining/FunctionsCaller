@@ -158,7 +158,7 @@ FCValue evaluateBinary(const FCBinaryExprAST *expression,
                        FCEvaluationContext &context) {
   const auto op = expression->getOperator();
 
-  if (op == '=') {
+  if (op == FCBinaryOp::Assign) {
     auto *variable =
         dynamic_cast<const FCVariableExprAST *>(expression->getLHS());
     if (variable == nullptr || variable->name.empty()) {
@@ -195,23 +195,23 @@ FCValue evaluateBinary(const FCBinaryExprAST *expression,
     FCValue result;
     result.type = FCValueCategory::Integer;
     switch (op) {
-    case '+':
+    case FCBinaryOp::Add:
       result.evaluteVal.intVal = lhs.evaluteVal.intVal + rhs.evaluteVal.intVal;
       break;
-    case '-':
+    case FCBinaryOp::Sub:
       result.evaluteVal.intVal = lhs.evaluteVal.intVal - rhs.evaluteVal.intVal;
       break;
-    case '*':
+    case FCBinaryOp::Mul:
       result.evaluteVal.intVal = lhs.evaluteVal.intVal * rhs.evaluteVal.intVal;
       break;
-    case '/':
+    case FCBinaryOp::Div:
       result.evaluteVal.intVal = lhs.evaluteVal.intVal / rhs.evaluteVal.intVal;
       break;
-    case '<':
+    case FCBinaryOp::Less:
       result.evaluteVal.intVal = lhs.evaluteVal.intVal < rhs.evaluteVal.intVal;
       break;
     default:
-      std::fprintf(stderr, "LogError: %c\n", op);
+      std::fprintf(stderr, "LogError: unknown binary operator\n");
       return makeDangleValue();
     }
     return result;
@@ -222,31 +222,31 @@ FCValue evaluateBinary(const FCBinaryExprAST *expression,
     FCValue result;
     result.type = FCValueCategory::Floating;
     switch (op) {
-    case '+':
+    case FCBinaryOp::Add:
       result.evaluteVal.doubleVal =
           lhs.evaluteVal.doubleVal + rhs.evaluteVal.doubleVal;
       break;
-    case '-':
+    case FCBinaryOp::Sub:
       result.evaluteVal.doubleVal =
           lhs.evaluteVal.doubleVal - rhs.evaluteVal.doubleVal;
       break;
-    case '*':
+    case FCBinaryOp::Mul:
       result.evaluteVal.doubleVal =
           lhs.evaluteVal.doubleVal * rhs.evaluteVal.doubleVal;
       break;
-    case '/':
+    case FCBinaryOp::Div:
       result.evaluteVal.doubleVal =
           lhs.evaluteVal.doubleVal / rhs.evaluteVal.doubleVal;
       break;
     default:
-      std::fprintf(stderr, "LogError: %c\n", op);
+      std::fprintf(stderr, "LogError: unknown binary operator\n");
       return makeDangleValue();
     }
     return result;
   }
 
   if (lhs.type == FCValueCategory::String &&
-      rhs.type == FCValueCategory::String && op == '+')
+      rhs.type == FCValueCategory::String && op == FCBinaryOp::Add)
     return makeStringValue(lhs.evaluteVal.charVal->str +
                            rhs.evaluteVal.charVal->str);
 
@@ -317,7 +317,6 @@ FCValue evaluateExpression(const FCExprAST *expression,
 
   if (auto *node = dynamic_cast<const FCVariableExprAST *>(expression))
     return evaluateVariable(node, context);
-
   if (auto *node = dynamic_cast<const FCBinaryExprAST *>(expression))
     return evaluateBinary(node, context);
 
@@ -402,8 +401,10 @@ FCEvaluationContext::FCEvaluationContext(const CompiledProgram &program)
 void FCEvaluationContext::pushFrame(const std::string &functionName) {
   Frame frame;
   frame.funcName = functionName;
-  if (const auto *function = functions.findFunction(functionName))
-    frame.locals.resize(function->getLocalCount());
+  // 帧大小是语义期输出：从 CompiledFunction::frameSize 读取
+  if (const auto *compiled = compiledProgram.getFunction(functionName)) {
+    frame.locals.resize(compiled->frameSize);
+  }
   callStack.push_back(std::move(frame));
 }
 

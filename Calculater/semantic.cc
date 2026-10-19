@@ -365,6 +365,7 @@ bool FCSemanticContext::SemanticAnalyzer::analyzeVarDecl(const FCExprClass::FCVa
   if (!symbol) {
     return false;
   }
+  m_ctx.bindVariable(node, symbol);
   if (node->initExpr) {
     return analyzeExpr(node->initExpr.get());
   }
@@ -387,6 +388,7 @@ bool FCSemanticContext::SemanticAnalyzer::analyzeFor(const FCExprClass::FCForExp
   if (!symbol) {
     return false;
   }
+  m_ctx.bindVariable(node, symbol);
 
   if (!analyzeExpr(node->getStart())) return false;
   if (!analyzeExpr(node->getEnd())) return false;
@@ -422,9 +424,7 @@ bool FCSemanticContext::SemanticAnalyzer::analyzeBinary(const FCExprClass::FCBin
 bool FCSemanticContext::SemanticAnalyzer::analyzeFunction(const FCExprClass::FCFunctionAST *node) {
   FCSemanticContext::FunctionScopeGuard guard(m_ctx);
 
-  // 注册函数，以便后续阶段（evaluator/codegen）可按名称查找
-  m_ctx.registerFunction(node->getProtoName(), node);
-
+  // 先声明参数，分配帧内槽位（slot 从 0 开始累加）
   for (const auto &arg : node->getProto()->getArgs()) {
     auto symbol = m_ctx.declareVariable(arg);
     if (!symbol) {
@@ -432,7 +432,20 @@ bool FCSemanticContext::SemanticAnalyzer::analyzeFunction(const FCExprClass::FCF
     }
   }
 
-  return analyzeExpr(node->getBody());
+  // 注册函数：此时 frameLayout 已反映参数个数，frameSize/parametersIdx 可正确填充
+  m_ctx.registerFunction(node->getProtoName(), node);
+
+  // 分析函数体，局部变量继续分配帧槽位
+  bool ok = analyzeExpr(node->getBody());
+
+  // 函数体分析完成后，回填最终的帧大小（参数 + 局部）
+  if (m_ctx.m_currentState.isActive && m_ctx.m_currentState.currentFunction) {
+    m_ctx.m_currentState.currentFunction->frameSize = m_ctx.m_frameLayout.frameSize();
+    m_ctx.m_currentState.currentFunction->maxTempSlots =
+        m_ctx.m_frameLayout.frameSize();
+  }
+
+  return ok;
 }
 
 bool FCSemanticContext::SemanticAnalyzer::analyzeNumber(const FCExprClass::FCNumberExprAST *) {

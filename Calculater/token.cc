@@ -42,15 +42,35 @@ void FCVariableExprAST::info()
 	::std::cout << "FCVariableExprAST Name: " << name << ::std::endl;
 }
 
-FCBinaryExprAST::FCBinaryExprAST(char op,
+FCBinaryExprAST::FCBinaryExprAST(FCBinaryOp op,
 	::std::unique_ptr<FCExprAST> lhs,
 	::std::unique_ptr<FCExprAST> rhs)
 	: m_Op(op), mup_LHS(::std::move(lhs)), mup_RHS(::std::move(rhs))
 {
 }
+
+FCBinaryExprAST::FCBinaryExprAST(char op,
+	::std::unique_ptr<FCExprAST> lhs,
+	::std::unique_ptr<FCExprAST> rhs)
+	: m_Op(charToBinaryOp(op)), mup_LHS(::std::move(lhs)), mup_RHS(::std::move(rhs))
+{
+}
+
+const char* binaryOpName(FCBinaryOp op) {
+	switch (op) {
+	case FCBinaryOp::Assign: return "=";
+	case FCBinaryOp::Less: return "<";
+	case FCBinaryOp::Add: return "+";
+	case FCBinaryOp::Sub: return "-";
+	case FCBinaryOp::Mul: return "*";
+	case FCBinaryOp::Div: return "/";
+	default: return "?";
+	}
+}
+
 void FCBinaryExprAST::info()
 {
-	::std::cout << "FCBinaryExprAST Op: " << m_Op << " LHS: ";
+	::std::cout << "FCBinaryExprAST Op: " << binaryOpName(m_Op) << " LHS: ";
 	mup_LHS->info();
 	::std::cout << " RHS: " << ::std::endl;
 	mup_RHS->info();
@@ -99,9 +119,8 @@ void FCPrototypeAST::info()
 	return m_funcName;
 }
 FCFunctionAST::FCFunctionAST(std::unique_ptr<FCPrototypeAST> proto,
-	std::unique_ptr<FCExprAST> body, int localCount)
-	: mup_funcProto(std::move(proto)), mup_funcBody(std::move(body)),
-	  m_localCount(localCount)
+	std::unique_ptr<FCExprAST> body)
+	: mup_funcProto(std::move(proto)), mup_funcBody(std::move(body))
 {
 }
 

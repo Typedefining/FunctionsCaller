@@ -12,6 +12,11 @@ Parser::Parser(Lexer& lexer)
 	advance();
 }
 
+void Parser::reset() {
+	m_hadError = false;
+	advance();
+}
+
 void Parser::advance() {
 	m_curTok = m_lexer.nextToken();
 }
@@ -21,20 +26,20 @@ bool Parser::check(int kind) const {
 }
 
 // 优先级表与 FCSemanticContext 的 m_binopPrecedence 保持一致
-int Parser::tokenPrecedence(int kind) {
-	switch (static_cast<char>(kind)) {
-	case '=':
+int Parser::tokenPrecedence(FCMarks::FCBinaryOp op) {
+	switch (op) {
+	case FCMarks::FCBinaryOp::Assign:
 		return 5;
-	case '<':
+	case FCMarks::FCBinaryOp::Less:
 		return 9;
-	case '+':
-	case '-':
+	case FCMarks::FCBinaryOp::Add:
+	case FCMarks::FCBinaryOp::Sub:
 		return 10;
-	case '*':
-	case '/':
+	case FCMarks::FCBinaryOp::Mul:
+	case FCMarks::FCBinaryOp::Div:
 		return 20;
 	default:
-		return 0;
+		return -1;
 	}
 }
 
@@ -59,7 +64,7 @@ std::unique_ptr<FCExprAST> Parser::parseProgram() {
 		case static_cast<int>(FCToken::tok_def):
 			stmt = parseDefinition();
 			break;
-		case ';':
+		case static_cast<int>(FCToken::tok_semicolon):
 			advance();
 			continue;
 		default:
@@ -106,26 +111,26 @@ std::unique_ptr<FCExprAST> Parser::parsePrimary() {
 std::unique_ptr<FCExprAST>
 Parser::parseBinOpRHS(int ExprPrec, std::unique_ptr<FCExprAST> LHS) {
 	while (true) {
-		int TokPrec = tokenPrecedence(m_curTok.kind);
+		FCMarks::FCBinaryOp op = m_curTok.binop;
+		int TokPrec = tokenPrecedence(op);
 
 		if (TokPrec < ExprPrec)
 			return LHS;
 
-		int Binop = m_curTok.kind;
 		advance();
 
 		auto RHS = parsePrimary();
 		if (!RHS)
 			return nullptr;
 
-		int NextPrec = tokenPrecedence(m_curTok.kind);
+		int NextPrec = tokenPrecedence(m_curTok.binop);
 		if (TokPrec < NextPrec) {
 			RHS = parseBinOpRHS(TokPrec + 1, std::move(RHS));
 			if (!RHS)
 				return nullptr;
 		}
 
-		LHS = std::make_unique<FCBinaryExprAST>(Binop, std::move(LHS), std::move(RHS));
+		LHS = std::make_unique<FCBinaryExprAST>(op, std::move(LHS), std::move(RHS));
 	}
 }
 
@@ -186,7 +191,7 @@ std::unique_ptr<FCExprAST> Parser::parseIdentifierExpr() {
 			funCallArgs.push_back(std::move(funCallArg));
 			if (m_curTok.kind == static_cast<int>(FCToken::tok_parenthes_close))
 				break;
-			if (m_curTok.kind != ',')
+			if (m_curTok.kind != static_cast<int>(FCToken::tok_comma))
 				return logError("Expected ')' or ',' in argument list");
 			advance();
 		}
@@ -215,7 +220,7 @@ std::unique_ptr<FCPrototypeAST> Parser::parsePrototype() {
 
 		std::string varName = m_curTok.lexeme;
 		advance();
-		if (m_curTok.kind != ':')
+		if (m_curTok.kind != static_cast<int>(FCToken::tok_colon))
 			return logErrorP("Expected ':' after parameter name");
 
 		advance();
@@ -229,7 +234,7 @@ std::unique_ptr<FCPrototypeAST> Parser::parsePrototype() {
 		advance();
 		if (m_curTok.kind == static_cast<int>(FCToken::tok_parenthes_close))
 			break;
-		if (m_curTok.kind != ',')
+		if (m_curTok.kind != static_cast<int>(FCToken::tok_comma))
 			return logErrorP("Expected ',' between parameters");
 		advance();
 		if (m_curTok.kind == static_cast<int>(FCToken::tok_parenthes_close))
@@ -267,9 +272,7 @@ std::unique_ptr<FCFunctionAST> Parser::parseDefinition() {
 		return nullptr;
 	}
 
-	// localCount 由语义期计算后回填
-	auto defFunc = std::make_unique<FCFunctionAST>(std::move(Proto), std::move(body), 0);
-	return defFunc;
+	return std::make_unique<FCFunctionAST>(std::move(Proto), std::move(body));
 }
 
 std::unique_ptr<FCExprAST> Parser::parseIfExpr() {
@@ -314,7 +317,7 @@ std::unique_ptr<FCExprAST> Parser::parseForExpr() {
 
 	VarDeclPtr decl = std::make_shared<VarDecl>(VarName, "int");
 
-	if (m_curTok.kind != '=')
+	if (m_curTok.kind != static_cast<int>(FCToken::tok_assign))
 		return logError("expected '=' after for variable");
 	advance();
 
@@ -322,7 +325,7 @@ std::unique_ptr<FCExprAST> Parser::parseForExpr() {
 	if (!Start)
 		return nullptr;
 
-	if (m_curTok.kind != ',')
+	if (m_curTok.kind != static_cast<int>(FCToken::tok_comma))
 		return logError("expected ',' after for start value");
 	advance();
 
@@ -331,7 +334,7 @@ std::unique_ptr<FCExprAST> Parser::parseForExpr() {
 		return nullptr;
 
 	std::unique_ptr<FCExprAST> Step;
-	if (m_curTok.kind == ',') {
+	if (m_curTok.kind == static_cast<int>(FCToken::tok_comma)) {
 		advance();
 		Step = parseExpression();
 		if (!Step)
@@ -357,7 +360,7 @@ std::unique_ptr<FCExprAST> Parser::parseVarDeclExpr() {
 	}
 	std::string varName = m_curTok.lexeme;
 	advance();
-	if (m_curTok.kind != ':') {
+	if (m_curTok.kind != static_cast<int>(FCToken::tok_colon)) {
 		return logError("expected ':' after var name");
 	}
 	advance();
@@ -369,7 +372,7 @@ std::unique_ptr<FCExprAST> Parser::parseVarDeclExpr() {
 		return logError("invalid type");
 	}
 	advance();
-	if (m_curTok.kind != '=') {
+	if (m_curTok.kind != static_cast<int>(FCToken::tok_assign)) {
 		return logError("expected '=' after type (initialization required)");
 	}
 	advance();
@@ -402,7 +405,7 @@ std::unique_ptr<FCExprAST> Parser::parseBlockExpr() {
 			return nullptr;
 		expressions.push_back(std::move(expr));
 
-		if (m_curTok.kind == ';') {
+		if (m_curTok.kind == static_cast<int>(FCToken::tok_semicolon)) {
 			advance();
 			if (m_curTok.kind == static_cast<int>(FCToken::tok_brace_close)) {
 				advance();
@@ -428,7 +431,7 @@ std::unique_ptr<FCExprAST> Parser::parseSeqExpr() {
 	std::vector<std::unique_ptr<FCExprAST>> exprList;
 	exprList.push_back(std::move(first));
 
-	while (m_curTok.kind == ';') {
+	while (m_curTok.kind == static_cast<int>(FCToken::tok_semicolon)) {
 		advance();
 		if (m_curTok.kind == static_cast<int>(FCToken::tok_eof) ||
 		    m_curTok.kind == static_cast<int>(FCToken::tok_def) ||

@@ -70,12 +70,12 @@ llvm::Type* inferExprType(const FCExprAST* expression,
 
 	if (auto* binary = dynamic_cast<const FCBinaryExprAST*>(expression))
 	{
-		if (binary->getOperator() == '=')
+		if (binary->getOperator() == FCBinaryOp::Assign)
 			return inferExprType(binary->getRHS(), context, visitingFunctions);
 
 		auto* lhsType = inferExprType(binary->getLHS(), context, visitingFunctions);
 		auto* rhsType = inferExprType(binary->getRHS(), context, visitingFunctions);
-		if (binary->getOperator() == '<')
+		if (binary->getOperator() == FCBinaryOp::Less)
 			return integerType(context);
 		if (lhsType->isDoubleTy() || rhsType->isDoubleTy())
 			return llvm::Type::getDoubleTy(context.llvmContext);
@@ -288,7 +288,7 @@ llvm::Value* codegenVariable(const FCVariableExprAST* expression,
 llvm::Value* codegenBinary(const FCBinaryExprAST* expression,
 	FCCodegenContext& context)
 {
-	if (expression->getOperator() == '=')
+	if (expression->getOperator() == FCBinaryOp::Assign)
 	{
 		auto* variable = dynamic_cast<const FCVariableExprAST*>(expression->getLHS());
 		auto lhsSymbol = context.boundSymbol(variable);
@@ -338,7 +338,7 @@ llvm::Value* codegenBinary(const FCBinaryExprAST* expression,
 
 	if (lhs->getType()->isPointerTy() || rhs->getType()->isPointerTy())
 	{
-		if (expression->getOperator() != '+' || !lhs->getType()->isPointerTy() ||
+		if (expression->getOperator() != FCBinaryOp::Add || !lhs->getType()->isPointerTy() ||
 			!rhs->getType()->isPointerTy())
 			return logCodegenError("only string concatenation is supported");
 
@@ -374,11 +374,11 @@ llvm::Value* codegenBinary(const FCBinaryExprAST* expression,
 
 		switch (expression->getOperator())
 		{
-		case '+': return context.builder.CreateFAdd(lhs, rhs, "addtmp");
-		case '-': return context.builder.CreateFSub(lhs, rhs, "subtmp");
-		case '*': return context.builder.CreateFMul(lhs, rhs, "multmp");
-		case '/': return context.builder.CreateFDiv(lhs, rhs, "divtmp");
-		case '<':
+		case FCBinaryOp::Add: return context.builder.CreateFAdd(lhs, rhs, "addtmp");
+		case FCBinaryOp::Sub: return context.builder.CreateFSub(lhs, rhs, "subtmp");
+		case FCBinaryOp::Mul: return context.builder.CreateFMul(lhs, rhs, "multmp");
+		case FCBinaryOp::Div: return context.builder.CreateFDiv(lhs, rhs, "divtmp");
+		case FCBinaryOp::Less:
 		{
 			auto* comparison = context.builder.CreateFCmpULT(lhs, rhs, "cmptmp");
 			return context.builder.CreateZExt(comparison,
@@ -397,11 +397,11 @@ llvm::Value* codegenBinary(const FCBinaryExprAST* expression,
 
 		switch (expression->getOperator())
 		{
-		case '+': return context.builder.CreateAdd(lhs, rhs, "addtmp");
-		case '-': return context.builder.CreateSub(lhs, rhs, "subtmp");
-		case '*': return context.builder.CreateMul(lhs, rhs, "multmp");
-		case '/': return context.builder.CreateSDiv(lhs, rhs, "divtmp");
-		case '<':
+		case FCBinaryOp::Add: return context.builder.CreateAdd(lhs, rhs, "addtmp");
+		case FCBinaryOp::Sub: return context.builder.CreateSub(lhs, rhs, "subtmp");
+		case FCBinaryOp::Mul: return context.builder.CreateMul(lhs, rhs, "multmp");
+		case FCBinaryOp::Div: return context.builder.CreateSDiv(lhs, rhs, "divtmp");
+		case FCBinaryOp::Less:
 		{
 			auto* comparison = context.builder.CreateICmpSLT(lhs, rhs, "cmptmp");
 			return context.builder.CreateZExt(comparison,

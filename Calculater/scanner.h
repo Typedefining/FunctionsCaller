@@ -1,50 +1,35 @@
-﻿#pragma once
+#pragma once
 
-#include "token.h"
+#include <memory>
+#include <string>
+
+#include "lexer.h"
+#include "parser.h"
 #include "semantic.h"
+#include "token.h"
 
+/// 扫描器 Facade：组合三个独立阶段
+///   1. Lexer   : 字符流 -> Token 流
+///   2. Parser  : Token 流 -> 纯语法 AST（不依赖 Semantic）
+///   3. SemanticAnalyzer: 纯语法 AST -> 语义绑定、frameIndex 赋值
+///
+/// 对外保持 analysis(std::string) 入口，兼容现有调用方。
 class FCScanner
 {
 public:
-	FCScanner();
-	void resetState();
-	::std::unique_ptr<FCExprClass::FCExprAST> analysis(const ::std::string &);
-	const FCMarks::FCSemanticContext& semanticContext() const { return m_semanticContext; }
+    FCScanner();
+    void resetState();
+    ::std::unique_ptr<FCExprClass::FCExprAST> analysis(const ::std::string &input);
+
+    const FCMarks::FCSemanticContext &semanticContext() const { return m_semanticContext; }
+    FCMarks::FCSemanticContext &semanticContextMutable() { return m_semanticContext; }
+
+    bool hadParseError() const { return m_parser.hadError(); }
+    bool hadSemanticError() const { return m_hadSemanticError; }
 
 private:
-	FCMarks::FCSemanticContext m_semanticContext;
-
-	int m_curTok;
-	int m_lastChar;
-	::std::string::iterator m_idx;
-
-	::std::string m_identifierStr;
-	::std::string m_stringLiteral;
-	bool m_curDouble;
-	int m_numIntgerVal;
-	double m_numFloatVal;
-	::std::string m_inputsBuffer;
-
-	private:
-	int getNextToken();
-	int getTok();
-	int getTokPrecedence();
-
-	::std::unique_ptr<FCExprClass::FCExprAST> logError(const char *Str);
-	::std::unique_ptr<FCExprClass::FCPrototypeAST> logErrorP(const char *Str);
-
-	::std::unique_ptr<FCExprClass::FCExprAST> parseExpression();
-	::std::unique_ptr<FCExprClass::FCExprAST> parseNumberExpr();
-	::std::unique_ptr<FCExprClass::FCExprAST> parseStringExpr();
-	::std::unique_ptr<FCExprClass::FCExprAST> parseParenExpr();
-	::std::unique_ptr<FCExprClass::FCExprAST> parseIdentifierExpr();
-	::std::unique_ptr<FCExprClass::FCExprAST> parsePrimary();
-	::std::unique_ptr<FCExprClass::FCExprAST> parseBinOpRHS(int ExprPrec, std::unique_ptr<FCExprClass::FCExprAST> LHS);
-	::std::unique_ptr<FCExprClass::FCPrototypeAST> parsePrototype();
-	::std::unique_ptr<FCExprClass::FCFunctionAST> parseDefinition();
-	::std::unique_ptr<FCExprClass::FCExprAST> parseSeqExpr();
-	::std::unique_ptr<FCExprClass::FCExprAST> ParseIfExpr();
-	::std::unique_ptr<FCExprClass::FCExprAST> ParseForExpr();
-	::std::unique_ptr<FCExprClass::FCExprAST> ParseVarExpr();
-	::std::unique_ptr<FCExprClass::FCExprAST> parseBlockExpr();
+    FC::Lexer m_lexer;
+    FC::Parser m_parser;
+    FCMarks::FCSemanticContext m_semanticContext;
+    bool m_hadSemanticError = false;
 };
