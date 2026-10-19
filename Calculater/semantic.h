@@ -117,9 +117,12 @@ public:
   std::shared_ptr<VariableSymbol> boundSymbol(const void* astNode) const;
   const SemanticBinding& semanticBinding() const;
 
-  const FrameLayout& currentFrameLayout() const { return m_frameLayout; }
+  // 帧布局查询：锚点帧大小 / <global> 帧大小（布局对象存于 vector，不外露引用）
   int currentFrameLayoutSize() const;
-  const GlobalLayout& currentGlobalLayout() const { return m_globalLayout; }
+  int currentGlobalLayoutSize() const;
+
+  // 兼容访问器：等价于 currentFrameLayoutSize（供旧测试断言 frameSize 数值）
+  int currentFrameLayoutFrameSize() const { return currentFrameLayoutSize(); }
 
   void dumpScopes() const;
   void dumpSymbolTable() const;
@@ -195,28 +198,37 @@ public:
 private:
   struct CurrentCompilationState {
     std::string functionName;
-    std::shared_ptr<CompiledFunction> currentFunction;
     bool isActive;
 
     CurrentCompilationState()
-      : currentFunction(nullptr)
-      , isActive(false) {}
+      : isActive(false) {}
   };
 
   CurrentCompilationState m_currentState;
 
   bool isInFunctionScope() const;
-  bool isGlobalScope() const;
+  bool isCurrentFrameGlobal() const;
+
+  // 当前帧锚点的编译记录（<global> 记录或当前函数）
+  CompiledFunction& currentFrameFunction() const;
+  // 当前帧记录指针（注册时移交用）
+  std::shared_ptr<CompiledFunction> currentFrameRecord() const;
 
 
 private:
   std::unordered_map<char, int> m_binopPrecedence;
-  std::vector<Scope> m_scopeStack;
+  std::vector<Scope> m_scopeStack;                                 // 可见性栈（块只动栈顶）
+  size_t m_frameAnchor = 0;                                        // 当前函数帧锚点（帧计数域）；0 = <global>
+  // 外层帧锚点与进入时作用域栈深（函数可在任意嵌套块位置定义；
+  // 帧下标走帧计数域，与作用域栈深度解耦，避免 block scope 参与帧寻址）
+  struct FrameAnchorEntry { size_t prevAnchor; size_t scopeDepthAtPush; };
+  std::vector<FrameAnchorEntry> m_frameAnchorStack;
+  std::vector<std::unique_ptr<FrameLayout>> m_frameLayouts;        // 每个函数帧一个布局
+  std::vector<std::shared_ptr<CompiledFunction>> m_frameRecords;    // 每帧一个编译记录；注册时移交 functions 表
   std::set<std::string> m_functionSet;
-  FrameLayout m_frameLayout;
-  GlobalLayout m_globalLayout;
 
   std::shared_ptr<CompiledProgram> m_compiledProgram = std::make_shared<CompiledProgram>();
 };
 
 } // namespace FCMarks
+

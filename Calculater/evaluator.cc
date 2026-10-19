@@ -288,6 +288,12 @@ FCValue evaluateCall(const FCCallExprAST *expression,
     }
 
     auto func = context.compiledProgram.getFunction(expression->getName());
+    if (func == nullptr) {
+      std::fprintf(stderr, "Error: no compiled record for '%s'\n",
+                   expression->getName().c_str());
+      context.popFrame();
+      return makeDangleValue();
+    }
     auto symbol = func->symbols.lookupShared(parameter->name);
     if (symbol == nullptr || symbol->slot < 0 ||
         symbol->slot >= static_cast<int>(frame.locals.size())) {

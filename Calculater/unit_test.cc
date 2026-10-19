@@ -1833,8 +1833,10 @@ private:
             expect(prog.globalSymbols.size() == 2, "compiled - only globals recorded");
             expect(prog.globalSymbols[0]->slot == 0, "compiled - global a slot");
             expect(prog.globalSymbols[1]->slot == 1, "compiled - global b slot");
-            expect(sem.currentGlobalLayout().globalSize() == 2, "compiled - global layout size");
-            expect(prog.functions.empty(), "compiled - no functions");
+            expect(sem.currentGlobalLayoutSize() == 2, "compiled - global layout size");
+            // <global> 帧记录常驻 functions 表；无用户函数时表长恒为 1
+            expect(prog.functions.size() == 1 && prog.getFunction("<global>") != nullptr,
+                   "compiled - no functions");
         }
 
         // 顶层块中的 var 必须注册为全局（README:291）
@@ -1906,7 +1908,7 @@ private:
             expect(!ctx.hasFunction("f"), "compiled - reset clears function set");
             expect(ctx.getCompiledFunction("f") == nullptr, "compiled - reset clears compiled functions");
             expect(ctx.lookupGlobalVariable("g") == nullptr, "compiled - reset clears scope");
-            expect(ctx.currentGlobalLayout().globalSize() == 0, "compiled - reset clears global layout");
+            expect(ctx.currentGlobalLayoutSize() == 0, "compiled - reset clears global layout");
             expect(ctx.currentFrameLayoutSize() == 0, "compiled - reset clears frame layout");
         }
     }
@@ -1998,7 +2000,7 @@ private:
 
                 expect(ctx.currentScopeDeclarations().size() == 1, "semantic-api - currentScopeDeclarations");
                 expect(ctx.currentFrameLayoutSize() == 1, "semantic-api - currentFrameLayoutSize");
-                expect(ctx.currentFrameLayout().frameSize() == 1, "semantic-api - currentFrameLayout");
+                expect(ctx.currentFrameLayoutFrameSize() == 1, "semantic-api - currentFrameLayout");
             }
 
             // 离开函数作用域后，局部变量消失
@@ -2111,7 +2113,7 @@ private:
             ctx.declareVariable(std::make_shared<VarDecl>("ga", "int"));
             ctx.declareVariable(std::make_shared<VarDecl>("gb", "double"));
             ctx.declareVariable(std::make_shared<VarDecl>("gc", "string"));
-            expect(ctx.currentGlobalLayout().globalSize() == 3, "semantic-api - global layout size");
+            expect(ctx.currentGlobalLayoutSize() == 3, "semantic-api - global layout size");
             expect(ctx.currentScopeDeclarations().size() == 3, "semantic-api - current scope declarations");
         }
 
@@ -2315,6 +2317,69 @@ private:
 
             expect(ctx.lookupGlobalVariable("branchVar") != nullptr,
                    "semantic-analyzer - branch var is global (top level)");
+        }
+
+        // ============================================================
+        // 帧锚点模型：函数定义可出现在任意嵌套块位置（不再 assert 位置约束），
+        // 且外层函数的局部对内层函数可见（作用域栈连续，帧布局按锚点切换）
+        // ============================================================
+        {
+            FCSemanticContext ctx;
+            FCSemanticContext::SemanticAnalyzer analyzer(ctx);
+
+            auto outerDecl = std::make_shared<VarDecl>("outerVar", "int");
+            auto innerFn = std::make_unique<FCFunctionAST>(
+                std::make_unique<FCPrototypeAST>("inner", std::vector<VarDeclPtr>{}),
+                std::make_unique<FCVariableExprAST>(std::string("outerVar")));
+            auto outerFn = std::make_unique<FCFunctionAST>(
+                std::make_unique<FCPrototypeAST>("outer", std::vector<VarDeclPtr>{}),
+                std::make_unique<FCBlockExprAST>(
+                    [] {
+                        std::vector<std::unique_ptr<FCExprAST>> v;
+                        v.emplace_back(std::make_unique<FCVarDeclExprAST>(
+                            std::make_shared<VarDecl>("outerVar", "int"), nullptr));
+                        v.emplace_back(std::make_unique<FCBlockExprAST>(
+                            [] {
+                                std::vector<std::unique_ptr<FCExprAST>> b;
+                                b.emplace_back(std::make_unique<FCFunctionAST>(
+                                    std::make_unique<FCPrototypeAST>("inner", std::vector<VarDeclPtr>{}),
+                                    std::make_unique<FCVariableExprAST>(std::string("outerVar"))));
+                                return b;
+                            }()));
+                        return v;
+                    }()));
+            expect(analyzer.analyze(outerFn.get()), "semantic-analyzer - nested function definition parses");
+
+            // 外层函数帧记录：outerVar 占据帧槽 0
+            auto* outerRecord = ctx.getCompiledFunction("outer");
+            expect(outerRecord != nullptr, "semantic-analyzer - outer function registered");
+            auto outerSym = outerRecord->symbols.lookupShared("outerVar");
+            expect(outerSym != nullptr && outerSym->runtime.frameIndex != -1,
+                   "semantic-analyzer - outer var is frame-local");
+
+            // 内层函数在嵌套块内成功注册，且引用外层局部（作用域栈连续可见）
+            auto* innerRecord = ctx.getCompiledFunction("inner");
+            expect(innerRecord != nullptr, "semantic-analyzer - nested function registered");
+            expect(innerRecord != outerRecord,
+                   "semantic-analyzer - nested function has distinct record");
+        }
+
+        // ============================================================
+        // 边界分支：null 根、同名参数重定义在参数声明期被拒
+        // ============================================================
+        {
+            FCSemanticContext ctx;
+            FCSemanticContext::SemanticAnalyzer analyzer(ctx);
+            expect(!analyzer.analyze(nullptr), "semantic-analyzer - null root rejected");
+
+            std::vector<VarDeclPtr> dupArgs;
+            dupArgs.push_back(std::make_shared<VarDecl>("a", "int"));
+            dupArgs.push_back(std::make_shared<VarDecl>("a", "int"));
+            auto dupFn = std::make_unique<FCFunctionAST>(
+                std::make_unique<FCPrototypeAST>("dup", std::move(dupArgs)),
+                std::make_unique<FCNumberExprAST>(1));
+            expect(!analyzer.analyze(dupFn.get()),
+                   "semantic-analyzer - duplicate parameter rejected at declaration");
         }
     }
 
@@ -2639,5 +2704,6 @@ int main()
 
 
 }
+
 
 

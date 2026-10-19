@@ -9,26 +9,29 @@ namespace FCMarks {
 
 FCSemanticContext::FCSemanticContext() {
   reset();
-  m_scopeStack.emplace_back(); // Global scope
 }
 
-FCSemanticContext::~FCSemanticContext() {
-  if (!m_scopeStack.empty())
-    m_scopeStack.pop_back();
-} // Ensure the global scope is cleaned up
+FCSemanticContext::~FCSemanticContext() = default;
 
 void FCSemanticContext::reset() {
   m_binopPrecedence = {{'=', 5},  {'<', 9},  {'+', 10},
                        {'-', 10}, {'*', 20}, {'/', 20}};
   m_scopeStack.clear();
   m_functionSet.clear();
-  m_frameLayout.reset();
-  m_globalLayout.reset();
+  m_frameAnchor = 0;
+  m_frameLayouts.clear();
+  m_frameRecords.clear();
+  m_frameAnchorStack.clear();
 
   m_compiledProgram = std::make_shared<CompiledProgram>();
   m_currentState = CurrentCompilationState();
 
-  m_currentState.isActive = false;
+  // <global> 帧是作用域栈的普通成员（栈底），拥有自己的布局与编译记录；
+  // 其记录同时登记进 functions 表，作为函数/全局归一后的单一存放地
+  m_scopeStack.emplace_back();
+  m_frameLayouts.push_back(std::make_unique<FrameLayout>());
+  m_frameRecords.push_back(std::make_shared<CompiledFunction>());
+  m_compiledProgram->functions["<global>"] = m_frameRecords[0];
 }
 
 int FCSemanticContext::getOperatorPrecedence(char op) const {
@@ -42,38 +45,55 @@ void FCSemanticContext::pushScope() {
 }
 
 void FCSemanticContext::popScope() {
-  assert(m_scopeStack.size() > 1);
+  assert(!m_scopeStack.empty());
   m_scopeStack.pop_back();
 }
 
 void FCSemanticContext::pushFunctionScope() {
-  assert(m_scopeStack.size() == 1);
+  // 帧锚点走帧计数域（layout/records 的下标），与作用域栈深度解耦；
+  // 函数体自带的作用域压在记录的 scopeDepthAtPush+1 位置
+  const size_t scopeDepthAtPush = m_scopeStack.size();
+  m_frameAnchorStack.push_back({m_frameAnchor, scopeDepthAtPush});
+  m_frameAnchor = m_frameRecords.size();
 
   m_scopeStack.emplace_back();
-  m_frameLayout.reset();
+  m_frameLayouts.push_back(std::make_unique<FrameLayout>());
+  m_frameRecords.push_back(std::make_shared<CompiledFunction>());
 
-  m_currentState.currentFunction = std::make_shared<CompiledFunction>();
   m_currentState.isActive = true;
 }
 
 void FCSemanticContext::popFunctionScope() {
-  assert(m_scopeStack.size() > 1);
+  assert(m_frameRecords.size() == m_frameAnchor + 1);
+  assert(m_frameAnchorStack.size() >= 1);
+  // 弹出本帧：作用域栈裁回进入前深度，帧级向量裁到锚点（本帧条目移除），
+  // 再从锚点栈恢复外层帧锚点（嵌套函数定义由此支持）
+  const auto entry = m_frameAnchorStack.back();
+  m_frameAnchorStack.pop_back();
+  m_scopeStack.resize(entry.scopeDepthAtPush);
+  m_frameLayouts.resize(m_frameAnchor);
+  m_frameRecords.resize(m_frameAnchor);
+  m_frameAnchor = entry.prevAnchor;
 
-  m_scopeStack.resize(1);
-
-  m_currentState.currentFunction = nullptr;
-  m_currentState.isActive = false;
-
-  m_frameLayout.reset();
+  m_currentState.isActive = (m_frameAnchor != 0);
 }
 
 bool FCSemanticContext::isInFunctionScope() const {
   return m_currentState.isActive;
 }
 
-bool FCSemanticContext::isGlobalScope() const {
-  // 只要当前不在函数体内，顶层作用域（含顶层块、顶层分支）中的声明都是全局变量
-  return !m_currentState.isActive;
+bool FCSemanticContext::isCurrentFrameGlobal() const {
+  // 肯定式谓词：锚点即 <global> 帧
+  return m_frameAnchor == 0;
+}
+
+CompiledFunction &FCSemanticContext::currentFrameFunction() const {
+  return *m_frameRecords[m_frameAnchor];
+}
+
+std::shared_ptr<CompiledFunction>
+FCSemanticContext::currentFrameRecord() const {
+  return m_frameRecords[m_frameAnchor];
 }
 
 std::shared_ptr<VariableSymbol>
@@ -116,10 +136,7 @@ FCSemanticContext::declareVariable(VarDeclPtr declaration) {
   assert(declaration != nullptr);
   assert(!m_scopeStack.empty());
 
-  // 变量始终记录在当前作用域（栈顶），保持块作用域 RAII 语义：
-  // pushScope/ popScope 后，局部声明随块消失。
-  // 全局变量（isGlobalScope() 为 true）同时已在 declareVariable 末尾
-  // 加入 m_compiledProgram->globalSymbols，供 lookupGlobalVariable 查找。
+  // 变量记录在当前作用域（栈顶），保持块作用域 RAII 语义
   Scope &scope = m_scopeStack.back();
 
   if (scope.variables.find(declaration->name) != scope.variables.end()) {
@@ -128,21 +145,21 @@ FCSemanticContext::declareVariable(VarDeclPtr declaration) {
     return nullptr;
   }
 
-  // 变量在声明时取得所属布局内的槽位：全局符号表的下标，或函数帧内的下标
-  const int slot = isGlobalScope() ? m_globalLayout.allocateSlot()
-                                   : m_frameLayout.allocateSlot();
+  // 唯一分配路径：从当前帧锚点的布局分配槽位（<global> 帧也是普通布局）
+  const int slot = m_frameLayouts[m_frameAnchor]->allocateSlot();
 
   const std::string name = declaration->name;
   auto symbol = std::make_shared<VariableSymbol>(std::move(declaration), slot,
                                                  scope.depth);
-  symbol->runtime.frameIndex = isGlobalScope() ? -1 : 0;
+  symbol->runtime.frameIndex = isCurrentFrameGlobal() ? -1 : 0;
   scope.variables.emplace(name, symbol);
 
-  if (m_currentState.isActive && m_currentState.currentFunction) {
-    m_currentState.currentFunction->symbols.addSymbol(name, symbol);
-  } else if (isGlobalScope()) {
+  // 唯一登记路径：登记进当前帧的编译记录（<global> 记录也存 functions 表）
+  currentFrameFunction().symbols.addSymbol(name, symbol);
+  if (isCurrentFrameGlobal()) {
     m_compiledProgram->globalSymbols.push_back(symbol);
   }
+
 
   return symbol;
 }
@@ -159,29 +176,26 @@ bool FCSemanticContext::registerFunction(const std::string &functionName,
     return false;
   }
 
-  auto compiledFunc = std::make_shared<CompiledFunction>();
+  // 锚点帧记录（含已声明的参数符号）整体移交给 functions 表：
+  // shared_ptr 同一对象，declareVariable 的登记与后端消费天然一致
+  auto compiledFunc = currentFrameRecord();
   compiledFunc->ast = const_cast<FCFunctionAST *>(function);
+  m_compiledProgram->functions[functionName] = compiledFunc;
 
-  if (m_currentState.isActive && m_currentState.currentFunction) {
-    compiledFunc->symbols = std::move(m_currentState.currentFunction->symbols);
-    compiledFunc->frameSize = m_frameLayout.frameSize();
-    compiledFunc->maxTempSlots =
-        m_frameLayout.frameSize(); // Assuming maxTempSlots is the same as frame
-                                   // size for now
+  // 布局快照：注册时刻的参数槽位数；函数体分析结束后由
+  // SemanticAnalyzer::analyzeFunction 回填最终 frameSize
+  compiledFunc->frameSize = m_frameLayouts[m_frameAnchor]->frameSize();
+  compiledFunc->maxTempSlots =
+      m_frameLayouts[m_frameAnchor]->frameSize(); // 暂与 frameSize 相同
 
-    // 按原型声明顺序记录形参槽位，调用期据此把实参写入帧的固定位置
+  // 按原型声明顺序记录形参槽位，调用期据此把实参写入帧的固定位置
+  if (function != nullptr) {
     for (const auto &varDecl : function->getProto()->getArgs()) {
       auto param = compiledFunc->symbols.lookupShared(varDecl->name);
       if (param) {
         compiledFunc->parametersIdx.push_back(param->slot);
       }
     }
-  }
-
-  m_compiledProgram->functions[functionName] = std::move(compiledFunc);
-
-  if (m_currentState.isActive && m_currentState.currentFunction) {
-    m_currentState.currentFunction = m_compiledProgram->functions[functionName];
   }
 
   m_functionSet.insert(functionName);
@@ -194,7 +208,11 @@ FCSemanticContext::currentScopeDeclarations() const {
 }
 
 int FCSemanticContext::currentFrameLayoutSize() const {
-  return m_frameLayout.frameSize();
+  return m_frameLayouts[m_frameAnchor]->frameSize();
+}
+
+int FCSemanticContext::currentGlobalLayoutSize() const {
+  return m_frameLayouts[0]->frameSize();
 }
 
 const CompiledProgram &FCSemanticContext::getCompiledProgram() const {
@@ -209,8 +227,8 @@ FCSemanticContext::getCompiledFunction(const std::string &name) const {
 void FCSemanticContext::dumpScopes() const {
   printf("=== Scope Debug Info ===\n");
   printf("Scope depth: %zu\n", m_scopeStack.size());
-  printf("Current function frame size: %d\n", m_frameLayout.frameSize());
-  printf("Current global layout size: %d\n", m_globalLayout.globalSize());
+  printf("Current function frame size: %d\n", m_frameLayouts[m_frameAnchor]->frameSize());
+  printf("Current global layout size: %d\n", m_frameLayouts[0]->frameSize());
 
   for (size_t i = 0; i < m_scopeStack.size(); ++i) {
     const auto &scope = m_scopeStack[i];
@@ -439,10 +457,10 @@ bool FCSemanticContext::SemanticAnalyzer::analyzeFunction(const FCExprClass::FCF
   bool ok = analyzeExpr(node->getBody());
 
   // 函数体分析完成后，回填最终的帧大小（参数 + 局部）
-  if (m_ctx.m_currentState.isActive && m_ctx.m_currentState.currentFunction) {
-    m_ctx.m_currentState.currentFunction->frameSize = m_ctx.m_frameLayout.frameSize();
-    m_ctx.m_currentState.currentFunction->maxTempSlots =
-        m_ctx.m_frameLayout.frameSize();
+  {
+    auto &fn = m_ctx.currentFrameFunction();
+    fn.frameSize = m_ctx.m_frameLayouts[m_ctx.m_frameAnchor]->frameSize();
+    fn.maxTempSlots = fn.frameSize;
   }
 
   return ok;
@@ -467,4 +485,6 @@ FCSemanticContext::semanticBinding() const {
 }
 
 } // namespace FCMarks
+
+
 
