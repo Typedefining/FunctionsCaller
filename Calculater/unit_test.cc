@@ -105,6 +105,9 @@ public:
         // ============ Lexer Tests (独立词法测试，不依赖 Parser/Semantic) ============
         runLexerTests();
 
+        // ============ Parser Tests (独立语法测试，只组 Lexer，不依赖 Semantic) ============
+        runParserTests();
+
         // ============ Symbol Table Tests ============
         runSymbolTableTests();
 
@@ -1572,6 +1575,112 @@ private:
             FC::Lexer lexer("");
             expect(lexer.nextToken().kind == static_cast<int>(FCToken::tok_eof), "lexer - empty input eof");
             expect(lexer.isAtEnd(), "lexer - isAtEnd on empty");
+        }
+    }
+
+    // ==================== Parser Tests ====================
+    // 独立语法单元测试：只组合 Lexer -> Parser，产出纯语法 AST，
+    // 不触及 FCSemanticContext / SemanticBinding / frameIndex
+    void runParserTests()
+    {
+        std::cout << "\n" << std::string(60, '=') << "\n";
+        std::cout << "PARSER TESTS\n";
+        std::cout << std::string(60, '=') << "\n";
+
+        // 算术优先级构建正确的子树：x + 1 * 2 -> x + (1 * 2)
+        {
+            FC::Lexer lexer("x + 1 * 2");
+            FC::Parser parser(lexer);
+            auto ast = parser.parseProgram();
+            expect(ast != nullptr, "parser - precedence expression parses");
+            auto* bin = dynamic_cast<FCBinaryExprAST*>(ast.get());
+            expect(bin != nullptr && bin->getOperator() == FCBinaryOp::Add,
+                   "parser - root is add");
+            auto* rhs = dynamic_cast<const FCBinaryExprAST*>(bin->getRHS());
+            expect(rhs != nullptr && rhs->getOperator() == FCBinaryOp::Mul,
+                   "parser - mul binds tighter than add");
+            auto* lhs = dynamic_cast<const FCVariableExprAST*>(bin->getLHS());
+            expect(lhs != nullptr && lhs->name == "x",
+                   "parser - variable node keeps name only");
+        }
+
+        // 变量引用是纯语法节点：不含符号，语义绑定留给 SemanticAnalyzer
+        {
+            FC::Lexer lexer("y");
+            FC::Parser parser(lexer);
+            auto ast = parser.parseProgram();
+            expect(ast != nullptr, "parser - bare variable parses");
+            auto* var = dynamic_cast<FCVariableExprAST*>(ast.get());
+            expect(var != nullptr && var->name == "y",
+                   "parser - variable node is pure syntax");
+        }
+
+        // 函数定义：原型 + 块体，无语义副作用
+        {
+            FC::Lexer lexer("def add(a:int, b:int) { a + b }");
+            FC::Parser parser(lexer);
+            auto ast = parser.parseProgram();
+            expect(ast != nullptr, "parser - function definition parses");
+            auto* fn = dynamic_cast<FCFunctionAST*>(ast.get());
+            expect(fn != nullptr && fn->getProtoName() == "add",
+                   "parser - function proto name");
+            expect(fn->getProto()->getArgs().size() == 2,
+                   "parser - proto arg count");
+            auto* body = dynamic_cast<const FCBlockExprAST*>(fn->getBody());
+            expect(body != nullptr && body->getExpressions().size() == 1,
+                   "parser - block body parsed");
+        }
+
+        // for 语法结构完整（start/end/step/body）
+        {
+            FC::Lexer lexer("for i = 0, i < 10, 1 in i");
+            FC::Parser parser(lexer);
+            auto ast = parser.parseProgram();
+            expect(ast != nullptr, "parser - for expression parses");
+            auto* loop = dynamic_cast<FCForExprAST*>(ast.get());
+            expect(loop != nullptr && loop->getDecl() && loop->getDecl()->name == "i",
+                   "parser - for variable decl");
+            expect(loop->getStart() && loop->getEnd() && loop->getStep() && loop->getBody(),
+                   "parser - for parts present");
+        }
+
+        // 语法错误路径：hadError 标记 + 返回 null（不接触语义）
+        {
+            FC::Lexer lexer("1 +");
+            FC::Parser parser(lexer);
+            auto ast = parser.parseProgram();
+            expect(ast == nullptr || parser.hadError(),
+                   "parser - dangling operator flags error");
+        }
+
+        {
+            FC::Lexer lexer("if 1 then 2");
+            FC::Parser parser(lexer);
+            auto ast = parser.parseProgram();
+            expect(ast == nullptr || parser.hadError(),
+                   "parser - if missing else flags error");
+        }
+
+        // 多语句输入：顶层分号折叠为一个 Seq（单条时不额外包 Program）
+        {
+            FC::Lexer lexer("var a:int = 1; a + 1");
+            FC::Parser parser(lexer);
+            auto ast = parser.parseProgram();
+            expect(ast != nullptr, "parser - multi statement program parses");
+            auto* seq = dynamic_cast<FCSeqExprAST*>(ast.get());
+            expect(seq != nullptr && seq->getExpressions().size() == 2,
+                   "parser - top-level folds into sequence");
+        }
+
+        // 多条独立语句（含函数定义）才包装 FCProgramAST
+        {
+            FC::Lexer lexer("def f() { 1 }; 2");
+            FC::Parser parser(lexer);
+            auto ast = parser.parseProgram();
+            expect(ast != nullptr, "parser - program with function parses");
+            auto* program = dynamic_cast<FCProgramAST*>(ast.get());
+            expect(program != nullptr && program->getStatements().size() == 2,
+                   "parser - program wraps function and expr");
         }
     }
 
