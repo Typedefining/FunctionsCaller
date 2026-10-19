@@ -4,6 +4,7 @@
 #include "semantic.h"
 #include "lexer.h"
 #include "parser.h"
+#include "llvm/IR/Verifier.h"
 #include <chrono>
 #include <iomanip>
 #include <iostream>
@@ -1201,8 +1202,7 @@ private:
             std::make_unique<FCNumberExprAST>(3.14)->info();
             std::make_unique<FCStringExprAST>("hello")->info();
 
-            auto decl = std::make_shared<VarDecl>("v", "int");
-            std::make_unique<FCVariableExprAST>(decl)->info();
+            std::make_unique<FCVariableExprAST>(std::string("v"))->info();
             std::make_unique<FCBinaryExprAST>(
                 '+', std::make_unique<FCNumberExprAST>(1),
                 std::make_unique<FCNumberExprAST>(2))->info();
@@ -1302,7 +1302,7 @@ private:
         // 变量表达式
         {
             auto decl = std::make_shared<VarDecl>("v", "double");
-            FCVariableExprAST v(decl);
+            FCVariableExprAST v(std::string("v"));
             expect(v.name == decl->name, "token-api - variable name");
             expect(v.type == FCTypeDescribe::VariableExpr, "token-api - variable type");
             expect(decl->name == "v" && decl->typeName == "double", "token-api - VarDecl fields");

@@ -32,11 +32,6 @@ FCVariableExprAST::FCVariableExprAST(std::string varName) : name(std::move(varNa
 {
 }
 
-FCVariableExprAST::FCVariableExprAST(VarDeclPtr v)
-	: name(v ? v->name : std::string())
-{
-}
-
 void FCVariableExprAST::info()
 {
 	::std::cout << "FCVariableExprAST Name: " << name << ::std::endl;

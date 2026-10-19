@@ -1,5 +1,9 @@
 #include "codegen.h"
 #include <unordered_set>
+#include "llvm/IR/BasicBlock.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/Verifier.h"
 #include "llvm/Support/raw_ostream.h"
 
 using namespace FCExprClass;

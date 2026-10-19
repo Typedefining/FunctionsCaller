@@ -4,9 +4,8 @@
 
 #include "token.h"
 
-#include "llvm/IR/BasicBlock.h"
-#include "llvm/IR/Constants.h"
-#include "llvm/IR/DerivedTypes.h"
+// 头文件只包含自身直接使用的 LLVM 组件；
+// BasicBlock/Constants/DerivedTypes/Verifier 由 codegen.cc 按需包含
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/IRBuilder.h"
@@ -15,7 +14,6 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
-#include "llvm/IR/Verifier.h"
 
 namespace FCExprClass
 {

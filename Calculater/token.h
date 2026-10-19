@@ -217,8 +217,6 @@ struct FCVariableExprAST : public FCExprAST {
 
 public:
   explicit FCVariableExprAST(std::string varName);
-  // 兼容构造：从 VarDecl 提取变量名（过渡期使用，步骤4 scanner 改为 Facade 后可移除）
-  explicit FCVariableExprAST(VarDeclPtr v);
   FCTypeDescribe type = FCMarks::FCTypeDescribe::VariableExpr;
   void info() override;
 };
