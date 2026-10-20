@@ -778,6 +778,40 @@ private:
             expect(result.type == FCValueCategory::Dangle,
                    "evaluator - unresolved parameter symbol returns dangle");
         }
+
+        // 7. 嵌套定义：前端允许（开关打开）时，求值器仍拒绝执行
+        if constexpr (FCMarks::kNestedFunctionDefinitions)
+        {
+            FCSemanticContext sem;
+            std::vector<std::unique_ptr<FCExprAST>> body;
+            body.emplace_back(std::make_unique<FCFunctionAST>(
+                std::make_unique<FCPrototypeAST>("inner", std::vector<VarDeclPtr>{}),
+                std::make_unique<FCNumberExprAST>(1)));
+            body.emplace_back(std::make_unique<FCNumberExprAST>(2));
+            auto outerFn = std::make_unique<FCFunctionAST>(
+                std::make_unique<FCPrototypeAST>("outer", std::vector<VarDeclPtr>{}),
+                std::make_unique<FCBlockExprAST>(std::move(body)));
+
+            {
+                FCSemanticContext::SemanticAnalyzer analyzer(sem);
+                expect(analyzer.analyze(outerFn.get()),
+                       "evaluator - nested definition passes semantic when enabled");
+            }
+
+            FCEvaluationContext ctx(sem.getCompiledProgram());
+            FCFunctionAST *outerRaw = outerFn.get();
+            ctx.functions.registerFunction(outerRaw);
+
+            // 顶层（无活动帧）仍走登记路径：兼容手工构造 AST 的用法
+            expect(evaluate(outerFn.get(), ctx).type == FCValueCategory::Dangle,
+                   "evaluator - top-level definition still registers");
+
+            // 进入函数体后遇到嵌套定义：明确拒绝，而不是静默沿用 Dangle 语义
+            std::vector<std::unique_ptr<FCExprAST>> callArgs;
+            auto call = std::make_unique<FCCallExprAST>("outer", std::move(callArgs));
+            expect(evaluate(call.get(), ctx).type == FCValueCategory::Dangle,
+                   "evaluator - nested definition rejected inside a frame");
+        }
     }
 
     // ==================== Registry Tests ====================

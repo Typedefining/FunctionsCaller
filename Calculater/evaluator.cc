@@ -351,6 +351,14 @@ FCValue evaluateExpression(const FCExprAST *expression,
     return evaluateProgram(node, context);
 
   if (auto *node = dynamic_cast<const FCFunctionAST *>(expression)) {
+    // callStack 栈底恒为 <global> 帧，故“多于一帧”才说明正处于函数调用中
+    if (context.callStack.size() > 1) {
+      fprintf(stderr,
+              "Error: nested function definition '%s' is not supported by the "
+              "evaluator\n",
+              node->getProtoName().c_str());
+      return makeDangleValue();
+    }
     context.functions.registerFunction(const_cast<FCFunctionAST *>(node));
     return makeDangleValue();
   }
