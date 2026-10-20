@@ -1762,6 +1762,21 @@ private:
             expect(consumed.lexeme == "bb" && consumed.kind == peeked.kind, "lexer - consume returns peeked token");
         }
 
+        // peek 在游标副本上识别：重复 peek 稳定，且不移动主游标（跨注释、跨行）
+        {
+            FC::Lexer lexer("# comment\n42");
+            auto peeked1 = lexer.peekToken();
+            auto peeked2 = lexer.peekToken();
+            expect(peeked1.kind == static_cast<int>(FCToken::tok_number) && peeked1.lexeme == "42",
+                   "lexer - peek scans past comment without consuming");
+            expect(peeked2.kind == peeked1.kind && peeked2.lexeme == peeked1.lexeme &&
+                       peeked2.line == peeked1.line && peeked2.column == peeked1.column,
+                   "lexer - repeated peek is stable");
+            auto consumed = lexer.nextToken();
+            expect(consumed.lexeme == "42" && consumed.line == 2 && consumed.column == 1,
+                   "lexer - peek leaves cursor at same position");
+        }
+
         // reset 复用实例
         {
             FC::Lexer lexer("xyz");
