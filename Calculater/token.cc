@@ -44,13 +44,6 @@ FCBinaryExprAST::FCBinaryExprAST(FCBinaryOp op,
 {
 }
 
-FCBinaryExprAST::FCBinaryExprAST(char op,
-	::std::unique_ptr<FCExprAST> lhs,
-	::std::unique_ptr<FCExprAST> rhs)
-	: m_Op(charToBinaryOp(op)), mup_LHS(::std::move(lhs)), mup_RHS(::std::move(rhs))
-{
-}
-
 const char* binaryOpName(FCBinaryOp op) {
 	switch (op) {
 	case FCBinaryOp::Assign: return "=";

@@ -126,31 +126,31 @@ Token Lexer::Cursor::getTok(const std::string& input) {
 	lastChar = readChar(input);
 	switch (thisChar) {
 	case '(':
-		return { static_cast<int>(FCToken::tok_parenthes_open), "(", startLine, startColumn, FCMarks::FCBinaryOp::Unknown };
+		return { static_cast<int>(FCToken::tok_parenthes_open), "(", startLine, startColumn };
 	case ')':
-		return { static_cast<int>(FCToken::tok_parenthes_close), ")", startLine, startColumn, FCMarks::FCBinaryOp::Unknown };
+		return { static_cast<int>(FCToken::tok_parenthes_close), ")", startLine, startColumn };
 	case '{':
-		return { static_cast<int>(FCToken::tok_brace_open), "{", startLine, startColumn, FCMarks::FCBinaryOp::Unknown };
+		return { static_cast<int>(FCToken::tok_brace_open), "{", startLine, startColumn };
 	case '}':
-		return { static_cast<int>(FCToken::tok_brace_close), "}", startLine, startColumn, FCMarks::FCBinaryOp::Unknown };
+		return { static_cast<int>(FCToken::tok_brace_close), "}", startLine, startColumn };
 	case ',':
-		return { static_cast<int>(FCToken::tok_comma), ",", startLine, startColumn, FCMarks::FCBinaryOp::Unknown };
+		return { static_cast<int>(FCToken::tok_comma), ",", startLine, startColumn };
 	case '=':
-		return { static_cast<int>(FCToken::tok_assign), "=", startLine, startColumn, FCMarks::FCBinaryOp::Assign };
+		return { static_cast<int>(FCToken::tok_assign), "=", startLine, startColumn };
 	case ':':
-		return { static_cast<int>(FCToken::tok_colon), ":", startLine, startColumn, FCMarks::FCBinaryOp::Unknown };
+		return { static_cast<int>(FCToken::tok_colon), ":", startLine, startColumn };
 	case ';':
-		return { static_cast<int>(FCToken::tok_semicolon), ";", startLine, startColumn, FCMarks::FCBinaryOp::Unknown };
+		return { static_cast<int>(FCToken::tok_semicolon), ";", startLine, startColumn };
 	case '<':
-		return { static_cast<int>(FCToken::tok_less), "<", startLine, startColumn, FCMarks::FCBinaryOp::Less };
+		return { static_cast<int>(FCToken::tok_less), "<", startLine, startColumn };
 	case '+':
-		return { static_cast<int>(FCToken::tok_plus), "+", startLine, startColumn, FCMarks::FCBinaryOp::Add };
+		return { static_cast<int>(FCToken::tok_plus), "+", startLine, startColumn };
 	case '-':
-		return { static_cast<int>(FCToken::tok_minus), "-", startLine, startColumn, FCMarks::FCBinaryOp::Sub };
+		return { static_cast<int>(FCToken::tok_minus), "-", startLine, startColumn };
 	case '*':
-		return { static_cast<int>(FCToken::tok_star), "*", startLine, startColumn, FCMarks::FCBinaryOp::Mul };
+		return { static_cast<int>(FCToken::tok_star), "*", startLine, startColumn };
 	case '/':
-		return { static_cast<int>(FCToken::tok_slash), "/", startLine, startColumn, FCMarks::FCBinaryOp::Div };
+		return { static_cast<int>(FCToken::tok_slash), "/", startLine, startColumn };
 	default:
 		// 未识别字符是词法错误；lexeme 携带错误说明，供 Parser 直接展示
 		return { static_cast<int>(FCToken::tok_error),
@@ -162,9 +162,8 @@ Token Lexer::Cursor::getTok(const std::string& input) {
 Token Lexer::nextToken() {
 	m_curToken = m_cursor.getTok(m_input);
 	if (traceEnabled("lexer")) {
-		fprintf(stderr, "[lexer] kind=%d lexeme='%s' binop=%d @%d:%d\n", m_curToken.kind,
-		        m_curToken.lexeme.c_str(), static_cast<int>(m_curToken.binop),
-		        m_curToken.line, m_curToken.column);
+		fprintf(stderr, "[lexer] kind=%d lexeme='%s' @%d:%d\n", m_curToken.kind,
+		        m_curToken.lexeme.c_str(), m_curToken.line, m_curToken.column);
 	}
 	return m_curToken;
 }

@@ -148,7 +148,7 @@ std::unique_ptr<FCExprAST> Parser::parsePrimary() {
 std::unique_ptr<FCExprAST>
 Parser::parseBinOpRHS(int ExprPrec, std::unique_ptr<FCExprAST> LHS) {
 	while (true) {
-		FCMarks::FCBinaryOp op = m_curTok.binop;
+		FCMarks::FCBinaryOp op = FCMarks::binaryOpOf(static_cast<FCMarks::FCToken>(m_curTok.kind));
 		int TokPrec = tokenPrecedence(op);
 
 		if (TokPrec < ExprPrec)
@@ -160,7 +160,7 @@ Parser::parseBinOpRHS(int ExprPrec, std::unique_ptr<FCExprAST> LHS) {
 		if (!RHS)
 			return nullptr;
 
-		int NextPrec = tokenPrecedence(m_curTok.binop);
+		int NextPrec = tokenPrecedence(FCMarks::binaryOpOf(static_cast<FCMarks::FCToken>(m_curTok.kind)));
 		if (TokPrec < NextPrec) {
 			RHS = parseBinOpRHS(TokPrec + 1, std::move(RHS));
 			if (!RHS)

@@ -52,7 +52,7 @@ enum struct FCToken {
   tok_error,
 };
 
-// 二元运算符的统一表示：Lexer/Parser/AST/后端全程使用，杜绝 ASCII 泄露
+// 二元运算符的统一表示：Parser 依据 FCToken 映射后写入 AST，后端全程使用，杜绝 ASCII 泄露
 enum struct FCBinaryOp {
   Assign,   // =
   Less,     // <
@@ -63,16 +63,16 @@ enum struct FCBinaryOp {
   Unknown   // 非法运算符（错误路径）
 };
 
-// 词法层字符 → 枚举的唯一转换点；除 lexer.cc 外不得新增调用方
-inline FCBinaryOp charToBinaryOp(char c) {
-  switch (c) {
-  case '=': return FCBinaryOp::Assign;
-  case '<': return FCBinaryOp::Less;
-  case '+': return FCBinaryOp::Add;
-  case '-': return FCBinaryOp::Sub;
-  case '*': return FCBinaryOp::Mul;
-  case '/': return FCBinaryOp::Div;
-  default:  return FCBinaryOp::Unknown;
+// kind → 运算符的唯一映射点：Token 只表达词法类别，运算符含义由解析层从 kind 推得
+inline FCBinaryOp binaryOpOf(FCToken kind) {
+  switch (kind) {
+  case FCToken::tok_assign: return FCBinaryOp::Assign;
+  case FCToken::tok_less:   return FCBinaryOp::Less;
+  case FCToken::tok_plus:   return FCBinaryOp::Add;
+  case FCToken::tok_minus:  return FCBinaryOp::Sub;
+  case FCToken::tok_star:   return FCBinaryOp::Mul;
+  case FCToken::tok_slash:  return FCBinaryOp::Div;
+  default:                  return FCBinaryOp::Unknown;
   }
 }
 enum struct FCTypeDescribe {
@@ -235,9 +235,6 @@ struct FCBinaryExprAST : public FCExprAST {
 
 public:
   FCBinaryExprAST(FCBinaryOp op, ::std::unique_ptr<FCExprAST> lhs,
-                  ::std::unique_ptr<FCExprAST> rhs);
-  // 过渡兼容构造：测试迁移完成后删除
-  FCBinaryExprAST(char op, ::std::unique_ptr<FCExprAST> lhs,
                   ::std::unique_ptr<FCExprAST> rhs);
   FCTypeDescribe type = FCMarks::FCTypeDescribe::BinaryExpr;
   void info() override;

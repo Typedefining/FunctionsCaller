@@ -11,7 +11,6 @@ struct Token {
 	std::string lexeme; // 原始文本
 	int line;
 	int column;
-	FCMarks::FCBinaryOp binop = FCMarks::FCBinaryOp::Unknown; // 运算符 token 的统一表示
 };
 
 /// 词法分析器：字符流 -> Token 流

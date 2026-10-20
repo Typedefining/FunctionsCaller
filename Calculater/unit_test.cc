@@ -659,7 +659,7 @@ private:
                 // 构造一个未绑定符号的变量表达式作为赋值 LHS
                 auto unboundVar = std::make_unique<FCVariableExprAST>(std::string("unbound"));
                 auto rhs = std::make_unique<FCNumberExprAST>(42);
-                auto assign = std::make_unique<FCBinaryExprAST>('=', std::move(unboundVar), std::move(rhs));
+                auto assign = std::make_unique<FCBinaryExprAST>(FCBinaryOp::Assign, std::move(unboundVar), std::move(rhs));
                 auto result = evaluate(assign.get(), ctx);
                 expect(result.type == FCValueCategory::Dangle, "evaluator - assignment unbound symbol returns dangle");
             }
@@ -686,7 +686,7 @@ private:
                 auto badVar = std::make_unique<FCVariableExprAST>(std::string("badslot"));
                 ctx.bindNode(badVar.get(), badSymbol);
                 auto rhs = std::make_unique<FCNumberExprAST>(42);
-                auto assign = std::make_unique<FCBinaryExprAST>('=', std::move(badVar), std::move(rhs));
+                auto assign = std::make_unique<FCBinaryExprAST>(FCBinaryOp::Assign, std::move(badVar), std::move(rhs));
                 auto result = evaluate(assign.get(), ctx);
                 expect(result.type == FCValueCategory::Dangle, "evaluator - assignment invalid slot returns dangle");
             }
@@ -707,7 +707,7 @@ private:
                 // 构造一个带未知操作符的二元表达式
                 auto lhs = std::make_unique<FCNumberExprAST>(1);
                 auto rhs = std::make_unique<FCNumberExprAST>(2);
-                auto binop = std::make_unique<FCBinaryExprAST>('?', std::move(lhs), std::move(rhs));
+                auto binop = std::make_unique<FCBinaryExprAST>(FCBinaryOp::Unknown, std::move(lhs), std::move(rhs));
                 auto result = evaluate(binop.get(), ctx);
                 expect(result.type == FCValueCategory::Dangle, "evaluator - unknown operator returns dangle");
             }
@@ -1262,12 +1262,12 @@ private:
             expect(sv != nullptr && sv->getType()->isPointerTy(), "codegen-api - string literal");
 
             auto bin = std::make_unique<FCBinaryExprAST>(
-                '+', std::make_unique<FCNumberExprAST>(1), std::make_unique<FCNumberExprAST>(2));
+                FCBinaryOp::Add, std::make_unique<FCNumberExprAST>(1), std::make_unique<FCNumberExprAST>(2));
             auto* bv = codegen(bin.get(), cc);
             expect(bv != nullptr, "codegen-api - binary add");
 
             auto cmp = std::make_unique<FCBinaryExprAST>(
-                '<', std::make_unique<FCNumberExprAST>(1), std::make_unique<FCNumberExprAST>(2));
+                FCBinaryOp::Less, std::make_unique<FCNumberExprAST>(1), std::make_unique<FCNumberExprAST>(2));
             auto* cv = codegen(cmp.get(), cc);
             expect(cv != nullptr, "codegen-api - binary compare");
 
@@ -1291,7 +1291,7 @@ private:
             auto assignLHS = std::make_unique<FCVariableExprAST>(std::string("loc"));
             cc.semanticBinding().bind(assignLHS.get(), sym);
             auto assign = std::make_unique<FCBinaryExprAST>(
-                '=', std::move(assignLHS), std::make_unique<FCNumberExprAST>(5));
+                FCBinaryOp::Assign, std::move(assignLHS), std::make_unique<FCNumberExprAST>(5));
             auto* av = codegen(assign.get(), cc);
             expect(av != nullptr, "codegen-api - local assignment");
 
@@ -1341,26 +1341,26 @@ private:
 
             std::make_unique<FCVariableExprAST>(std::string("v"))->info();
             std::make_unique<FCBinaryExprAST>(
-                '+', std::make_unique<FCNumberExprAST>(1),
+                FCBinaryOp::Add, std::make_unique<FCNumberExprAST>(1),
                 std::make_unique<FCNumberExprAST>(2))->info();
             // 覆盖 binaryOpName 全部名称分支
             std::make_unique<FCBinaryExprAST>(
-                '=', std::make_unique<FCNumberExprAST>(1),
+                FCBinaryOp::Assign, std::make_unique<FCNumberExprAST>(1),
                 std::make_unique<FCNumberExprAST>(2))->info();
             std::make_unique<FCBinaryExprAST>(
-                '<', std::make_unique<FCNumberExprAST>(1),
+                FCBinaryOp::Less, std::make_unique<FCNumberExprAST>(1),
                 std::make_unique<FCNumberExprAST>(2))->info();
             std::make_unique<FCBinaryExprAST>(
-                '-', std::make_unique<FCNumberExprAST>(1),
+                FCBinaryOp::Sub, std::make_unique<FCNumberExprAST>(1),
                 std::make_unique<FCNumberExprAST>(2))->info();
             std::make_unique<FCBinaryExprAST>(
-                '*', std::make_unique<FCNumberExprAST>(1),
+                FCBinaryOp::Mul, std::make_unique<FCNumberExprAST>(1),
                 std::make_unique<FCNumberExprAST>(2))->info();
             std::make_unique<FCBinaryExprAST>(
-                '/', std::make_unique<FCNumberExprAST>(1),
+                FCBinaryOp::Div, std::make_unique<FCNumberExprAST>(1),
                 std::make_unique<FCNumberExprAST>(2))->info();
             std::make_unique<FCBinaryExprAST>(
-                '?', std::make_unique<FCNumberExprAST>(1),
+                FCBinaryOp::Unknown, std::make_unique<FCNumberExprAST>(1),
                 std::make_unique<FCNumberExprAST>(2))->info();
 
             std::vector<std::unique_ptr<FCExprAST>> args;
@@ -1683,7 +1683,7 @@ private:
             expect(spaced.nextToken().column == 10, "lexer - eof sits after last character");
         }
 
-        // 标点与运算符：kind 与 binop 都是枚举，Token::kind 不携带 ASCII 码
+        // 标点与运算符：Token 只携带词法类别，运算符含义由 binaryOpOf(kind) 在解析层推得
         {
             FC::Lexer lexer("( ) { } , ; : = + - * / <");
             expect(lexer.nextToken().kind == static_cast<int>(FCToken::tok_parenthes_open), "lexer - paren open");
@@ -1696,27 +1696,27 @@ private:
 
             auto assign = lexer.nextToken();
             expect(assign.kind == static_cast<int>(FCToken::tok_assign), "lexer - assign kind");
-            expect(assign.binop == FCBinaryOp::Assign, "lexer - assign binop");
+            expect(binaryOpOf(FCToken::tok_assign) == FCBinaryOp::Assign, "lexer - assign maps to Assign");
 
             auto plus = lexer.nextToken();
             expect(plus.kind == static_cast<int>(FCToken::tok_plus), "lexer - plus kind is enum");
-            expect(plus.binop == FCBinaryOp::Add, "lexer - binop add");
+            expect(binaryOpOf(FCToken::tok_plus) == FCBinaryOp::Add, "lexer - plus maps to Add");
 
             auto minus = lexer.nextToken();
             expect(minus.kind == static_cast<int>(FCToken::tok_minus), "lexer - minus kind is enum");
-            expect(minus.binop == FCBinaryOp::Sub, "lexer - binop sub");
+            expect(binaryOpOf(FCToken::tok_minus) == FCBinaryOp::Sub, "lexer - minus maps to Sub");
 
             auto star = lexer.nextToken();
             expect(star.kind == static_cast<int>(FCToken::tok_star), "lexer - star kind is enum");
-            expect(star.binop == FCBinaryOp::Mul, "lexer - binop mul");
+            expect(binaryOpOf(FCToken::tok_star) == FCBinaryOp::Mul, "lexer - star maps to Mul");
 
             auto slash = lexer.nextToken();
             expect(slash.kind == static_cast<int>(FCToken::tok_slash), "lexer - slash kind is enum");
-            expect(slash.binop == FCBinaryOp::Div, "lexer - binop div");
+            expect(binaryOpOf(FCToken::tok_slash) == FCBinaryOp::Div, "lexer - slash maps to Div");
 
             auto less = lexer.nextToken();
             expect(less.kind == static_cast<int>(FCToken::tok_less), "lexer - less kind is enum");
-            expect(less.binop == FCBinaryOp::Less, "lexer - binop less");
+            expect(binaryOpOf(FCToken::tok_less) == FCBinaryOp::Less, "lexer - less maps to Less");
         }
 
         // 诊断输出开关：按阶段匹配逗号分隔列表
@@ -1745,10 +1745,11 @@ private:
             FC::setTraceStagesForTesting("");
         }
 
-        // binop 转换工具
+        // kind → 运算符映射：非运算符 kind 一律 Unknown
         {
-            expect(charToBinaryOp('=') == FCBinaryOp::Assign, "lexer - charToBinaryOp assign");
-            expect(charToBinaryOp('#') == FCBinaryOp::Unknown, "lexer - charToBinaryOp unknown");
+            expect(binaryOpOf(FCToken::tok_identifier) == FCBinaryOp::Unknown, "lexer - identifier has no binary op");
+            expect(binaryOpOf(FCToken::tok_eof) == FCBinaryOp::Unknown, "lexer - eof has no binary op");
+            expect(binaryOpOf(FCToken::tok_semicolon) == FCBinaryOp::Unknown, "lexer - semicolon has no binary op");
         }
 
         // peek 不推进，current 返回最近消费的 token
