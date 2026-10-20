@@ -2499,6 +2499,38 @@ private:
                 // 内层帧独立：外层帧只含 outerVar
                 expect(outerRecord->frameSize == 1,
                        "semantic-analyzer - nested frame does not inflate outer frame");
+
+                // 捕获外层局部：跨帧引用没有运行时载体（frameIndex 只有 -1/0），
+                // 语义期必须拒绝，否则会静默读到当前帧的同名槽位
+                {
+                    FCSemanticContext captureCtx;
+                    FCSemanticContext::SemanticAnalyzer captureAnalyzer(captureCtx);
+                    auto captureFn = buildNested(true);
+                    expect(!captureAnalyzer.analyze(captureFn.get()),
+                           "semantic-analyzer - nested capture rejected when enabled");
+                    expect(captureCtx.getCompiledFunction("inner") == nullptr,
+                           "semantic-analyzer - captured nested definition leaves no record");
+                }
+
+                // 同帧跨块仍可见：帧归属判定只在跨帧时生效
+                {
+                    FCSemanticContext sameCtx;
+                    FCSemanticContext::SemanticAnalyzer sameAnalyzer(sameCtx);
+                    std::vector<std::unique_ptr<FCExprAST>> outerBlock;
+                    outerBlock.emplace_back(std::make_unique<FCVarDeclExprAST>(
+                        std::make_shared<VarDecl>("blockVar", "int"), nullptr));
+                    std::vector<std::unique_ptr<FCExprAST>> innerBlock;
+                    innerBlock.emplace_back(
+                        std::make_unique<FCVariableExprAST>(std::string("blockVar")));
+                    outerBlock.emplace_back(
+                        std::make_unique<FCBlockExprAST>(std::move(innerBlock)));
+                    auto sameFn = std::make_unique<FCFunctionAST>(
+                        std::make_unique<FCPrototypeAST>("sameFrameBlock",
+                                                         std::vector<VarDeclPtr>{}),
+                        std::make_unique<FCBlockExprAST>(std::move(outerBlock)));
+                    expect(sameAnalyzer.analyze(sameFn.get()),
+                           "semantic-analyzer - same-frame block visibility kept");
+                }
             }
             else
             {
@@ -2510,8 +2542,9 @@ private:
                        "semantic-analyzer - nested definition rejected when disabled");
                 expect(ctx.getCompiledFunction("inner") == nullptr,
                        "semantic-analyzer - rejected nested definition leaves no record");
-                expect(ctx.getCompiledFunction("outer") != nullptr,
-                       "semantic-analyzer - enclosing function record survives rejection");
+                // 外层函数体分析同样失败：其记录一并撤销，函数表里不留半成品
+                expect(ctx.getCompiledFunction("outer") == nullptr,
+                       "semantic-analyzer - failed enclosing function leaves no record");
 
                 // 守卫在压帧之前生效：拒绝后帧栈已回退，后续顶层定义仍可分析
                 auto afterFn = std::make_unique<FCFunctionAST>(

@@ -23,6 +23,7 @@ void FCSemanticContext::reset() {
   m_frameLayouts.clear();
   m_frameRecords.clear();
   m_frameAnchorStack.clear();
+  m_symbolOwnerFrame.clear();
 
   m_compiledProgram = std::make_shared<CompiledProgram>();
   m_currentState = CurrentCompilationState();
@@ -101,6 +102,11 @@ FCSemanticContext::currentFrameRecord() const {
   return m_frameRecords[m_frameAnchor];
 }
 
+void FCSemanticContext::discardFunction(const std::string &functionName) {
+  m_compiledProgram->functions.erase(functionName);
+  m_functionSet.erase(functionName);
+}
+
 std::shared_ptr<VariableSymbol>
 FCSemanticContext::lookupVariableShared(const std::string &name) const {
   for (auto it = m_scopeStack.rbegin(); it != m_scopeStack.rend(); ++it) {
@@ -157,6 +163,7 @@ FCSemanticContext::declareVariable(VarDeclPtr declaration) {
   auto symbol = std::make_shared<VariableSymbol>(std::move(declaration), slot,
                                                  scope.depth);
   symbol->runtime.frameIndex = isCurrentFrameGlobal() ? -1 : 0;
+  m_symbolOwnerFrame[symbol.get()] = m_frameAnchor;
   scope.variables.emplace(name, symbol);
 
   // 唯一登记路径：登记进当前帧的编译记录（<global> 记录也存 functions 表）
@@ -470,7 +477,9 @@ bool FCSemanticContext::SemanticAnalyzer::analyzeFunction(const FCExprClass::FCF
   }
 
   // 注册函数：此时 frameLayout 已反映参数个数，frameSize/parametersIdx 可正确填充
-  m_ctx.registerFunction(node->getProtoName(), node);
+  if (!m_ctx.registerFunction(node->getProtoName(), node)) {
+    return false;
+  }
 
   // 分析函数体，局部变量继续分配帧槽位
   bool ok = analyzeExpr(node->getBody());
@@ -482,7 +491,13 @@ bool FCSemanticContext::SemanticAnalyzer::analyzeFunction(const FCExprClass::FCF
     fn.maxTempSlots = fn.frameSize;
   }
 
-  return ok;
+  if (!ok) {
+    // 半成品记录会被后端当成完整函数消费，失败即撤销
+    m_ctx.discardFunction(node->getProtoName());
+    return false;
+  }
+
+  return true;
 }
 
 bool FCSemanticContext::SemanticAnalyzer::analyzeNumber(const FCExprClass::FCNumberExprAST *) {
@@ -495,7 +510,24 @@ bool FCSemanticContext::SemanticAnalyzer::analyzeString(const FCExprClass::FCStr
 
 std::shared_ptr<VariableSymbol>
 FCSemanticContext::SemanticAnalyzer::resolveVariable(const std::string &name) {
-  return m_ctx.lookupVariableShared(name);
+  auto symbol = m_ctx.lookupVariableShared(name);
+  if (!symbol) {
+    return nullptr;
+  }
+
+  // 可见性可跨越外层函数帧（作用域栈连续），但捕获外层局部没有运行时载体：
+  // 帧内符号的 frameIndex 只有 -1/0 两值，跨帧引用会读到当前帧的同名槽位
+  const auto it = m_ctx.m_symbolOwnerFrame.find(symbol.get());
+  if (it != m_ctx.m_symbolOwnerFrame.end() && it->second != 0 &&
+      it->second != m_ctx.m_frameAnchor) {
+    fprintf(stderr,
+            "Error: nested function cannot capture enclosing local '%s' "
+            "(closures are not supported)\n",
+            name.c_str());
+    return nullptr;
+  }
+
+  return symbol;
 }
 
 const SemanticBinding &
