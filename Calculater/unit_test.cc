@@ -284,6 +284,13 @@ private:
             expect(!semErr.hadParseError() && !semErr.hadSemanticError(),
                    "scanner-facade - flags cleared after reset");
 
+            // resetState 同时复位 Parser：此前的解析错误不得跨复位存活
+            parseErr.resetState();
+            expect(!parseErr.hadParseError(),
+                   "scanner-facade - resetState clears parse error flag");
+            expect(parseErr.analysis("1 + 2") != nullptr,
+                   "scanner-facade - parses after clearing parse error");
+
             // 分隔符统一规则：顶层裸 ';' 是空语句，非法
             FCScanner bareSemi;
             expect(bareSemi.analysis("; 1") == nullptr,
@@ -1808,6 +1815,32 @@ private:
             auto* var = dynamic_cast<FCVariableExprAST*>(ast.get());
             expect(var != nullptr && var->name == "y",
                    "parser - variable node is pure syntax");
+        }
+
+        // 构造不读取 token：解析阶段开始前不持有 token，首 token 不被吞掉
+        {
+            FC::Lexer lexer("1");
+            FC::Parser parser(lexer);
+            expect(!parser.started(), "parser - constructor stays outside parse phase");
+            auto ast = parser.parseProgram();
+            expect(dynamic_cast<FCNumberExprAST*>(ast.get()) != nullptr,
+                   "parser - constructor does not consume the first token");
+            expect(parser.started(), "parser - parseProgram enters parse phase");
+        }
+
+        // reset() 复位解析阶段与错误标记，同一实例可解析第二段输入
+        {
+            FC::Lexer lexer("1");
+            FC::Parser parser(lexer);
+            expect(parser.parseProgram() != nullptr, "parser - first program parses");
+
+            lexer.reset("2");
+            parser.reset();
+            expect(!parser.started() && !parser.hadError(),
+                   "parser - reset clears phase and error flag");
+            auto second = parser.parseProgram();
+            auto* number = dynamic_cast<FCNumberExprAST*>(second.get());
+            expect(number != nullptr, "parser - second program parses after reset");
         }
 
         // 函数定义：原型 + 块体，无语义副作用

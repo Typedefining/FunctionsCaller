@@ -33,6 +33,7 @@ FCScanner::analysis(const ::std::string &inputStr) {
 
 void FCScanner::resetState() {
     m_lexer.reset("");
+    m_parser.reset();
     m_semanticContext.reset();
     m_hadSemanticError = false;
 }

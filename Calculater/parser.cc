@@ -1,4 +1,5 @@
 #include "parser.h"
+#include <cassert>
 #include <cctype>
 #include <cstdio>
 #include <tuple>
@@ -9,19 +10,26 @@ namespace FC {
 
 Parser::Parser(Lexer& lexer)
 	: m_lexer(lexer) {
-	advance();
 }
 
 void Parser::reset() {
 	m_hadError = false;
+	m_started = false;
+}
+
+// 进入解析阶段：此后 m_curTok 始终是下一个待消费的 token。
+void Parser::begin() {
+	m_started = true;
 	advance();
 }
 
 void Parser::advance() {
+	assert(m_started && "advance() 只能在解析阶段内调用");
 	m_curTok = m_lexer.nextToken();
 }
 
 bool Parser::check(int kind) const {
+	assert(m_started && "check() 只能在解析阶段内调用");
 	return m_curTok.kind == kind;
 }
 
@@ -76,6 +84,8 @@ std::unique_ptr<FCPrototypeAST> Parser::logErrorP(const char* msg) {
 std::unique_ptr<FCExprAST> Parser::parseProgram() {
 	std::vector<std::unique_ptr<FCExprAST>> statements;
 
+	assert(!m_started && "parseProgram() 前必须 reset()");
+	begin();
 	while (m_curTok.kind != static_cast<int>(FCToken::tok_eof)) {
 		// def 是语句而非表达式：交回 parseDefinition；
 		// def 块的 '}' 之后允许一个收尾 ';'（惯例写法 "def ...}; expr"）

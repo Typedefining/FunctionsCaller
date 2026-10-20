@@ -14,20 +14,27 @@ class Parser {
 public:
 	explicit Parser(Lexer& lexer);
 
-	// 解析完整程序，返回语法树（FCProgramAST 或单个表达式）
+	// 解析完整程序，返回语法树（FCProgramAST 或单个表达式）。
+	// 进入解析阶段并读取第一个 token；此前 Parser 不持有有效 token。
 	std::unique_ptr<FCExprClass::FCExprAST> parseProgram();
 
 	// 解析过程是否发生过错误
 	bool hadError() const { return m_hadError; }
 
-	// 重置解析器状态，以便复用同一 Parser 实例解析多段输入
+	// 重置解析器状态，以便复用同一 Parser 实例解析多段输入。
+	// 复位后 m_curTok 不再有效，需由下一次 parseProgram() 重新读取。
 	void reset();
+
+	// 是否已进入解析阶段（构造后、parseProgram() 之前为 false）
+	bool started() const { return m_started; }
 
 private:
 	Lexer& m_lexer;
 	Token m_curTok;
 	bool m_hadError = false;
+	bool m_started = false;
 
+	void begin();
 	void advance();
 	bool check(int kind) const;
 	static int tokenPrecedence(FCMarks::FCBinaryOp op);
