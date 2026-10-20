@@ -10,6 +10,12 @@ separate_arguments(
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# 语言特性开关：函数体内能否定义函数（默认关闭）。
+# 语义库是该判定的唯一所有者，其余目标通过 PUBLIC 定义继承同一取值。
+option(FC_ENABLE_NESTED_FUNCTIONS
+	"Allow function definitions inside function bodies (frontend only)"
+	OFF)
+
 if (MSVC)
 	add_compile_options(/utf-8)
 endif()
@@ -41,9 +47,12 @@ target_include_directories(FunctionsEvaluator PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
 add_library(FunctionsSemantic STATIC
 	semantic.h
 	semantic.cc
+	language_options.h
 )
 target_link_libraries(FunctionsSemantic PRIVATE FunctionsCore)
 target_include_directories(FunctionsSemantic PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(FunctionsSemantic PUBLIC
+	$<$<BOOL:${FC_ENABLE_NESTED_FUNCTIONS}>:FC_ENABLE_NESTED_FUNCTIONS=1>)
 
 add_library(FunctionsCodegen STATIC
 	codegen.h
