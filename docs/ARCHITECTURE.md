@@ -2,7 +2,7 @@
 
 > 基准分支：`refactor/var-symbol-binding`  
 > 文档日期：2026-10-20  
-> 当前状态：词法/语法/语义三阶段解耦完成；默认配置 762/762 断言通过，嵌套函数开关打开时 766/766；生产代码行覆盖率 95.29%  
+> 当前状态：词法/语法/语义三阶段解耦完成；默认配置 763/763 断言通过，嵌套函数开关打开时 767/767；生产代码行覆盖率 95.28%  
 > 语言标准：C++20（CMake 设定），LLVM 18.1.6（vcpkg），Windows + MSVC  
 > 关联文档：`docs/superpowers/plans/2025-06-20-lexer-parser-semantic-decoupling.md`（解耦方案）、`docs/superpowers/specs/2026-10-20-nested-functions-opt-in-design.md`（嵌套函数开关设计）、`docs/postmortems/2026-10-20-frame-anchor-and-separator-bugs.md`（三处设计缺陷复盘）
 
@@ -38,7 +38,7 @@
 ```
 ┌────────────────────────────────────────────────────────────────┐
 │  可执行目标                                                      │
-│  main.cc（最小入口）  unit_test.cc（762 断言测试）  shadow_repro  │
+│  main.cc（最小入口）  unit_test.cc（763 断言测试）  shadow_repro  │
 ├────────────────────────────────────────────────────────────────┤
 │  Facade 层                                                      │
 │  scanner.h/cc (30/29 行) — FCScanner                            │
@@ -47,7 +47,7 @@
 ├──────────────────────┬─────────────────────┬───────────────────┤
 │  前端三阶段（独立）    │  语义核心            │  后端（双实现）      │
 │                      │                     │                   │
-│  lexer.h/cc (53/187) │  semantic.h/cc      │  evaluator.h/cc   │
+│  lexer.h/cc (52/186)  │  semantic.h/cc      │  evaluator.h/cc   │
 │  FC::Lexer           │  (174/379)          │  (50/362)         │
 │  字符流→Token流        │  FCSemanticContext  │  FCEvaluationCtx  │
 │                      │  SemanticAnalyzer   │  树遍历求值         │
@@ -84,8 +84,8 @@ runtime.h → token.h → lexer.h → parser.h
 | 模块 | 文件（行数） | CMake 目标 | 核心职责 |
 |------|------------|-----------|---------|
 | **Runtime** | `runtime.h` (37) | — | `FCValue`（Integer/Floating/String/Dangle 联合体）、`Frame`（funcName + locals 槽位向量）、`VariableRuntimeInfo::frameIndex`（-1=全局，≥0=帧下标） |
-| **Token** | `token.h/cc` (323/142) | FunctionsCore | AST 节点族（13 种）；`FCToken`/`FCBinaryOp` 枚举；`charToBinaryOp` 唯一字符转换点；`VariableSymbol`（declaration/slot/scopeDepth/runtime）；`SemanticBinding`（AST节点→符号身份绑定表）；`SymbolTable`；`CompiledFunction`/`CompiledProgram` |
-| **Lexer** | `lexer.h/cc` (53/187) | FunctionsCore | `FC::Lexer`：字符流→Token 流；Token 携带 `kind/lexeme/line/column/binop`；读取位置与识别逻辑封装在可复制的 `Cursor` 中，`peekToken()` 在游标副本上识别、不推进主游标（无 `mutable`/缓存）；`nextToken/peekToken/currentToken/isAtEnd/reset`；标识符/关键字/数字/字符串/注释/标点全路径；词法错误返回 `tok_error`；**100% 行覆盖** |
+| **Token** | `token.h/cc` (387/153) | FunctionsCore | AST 节点族（13 种）；`FCToken`/`FCBinaryOp` 枚举；`binaryOpOf` 为 kind→运算符唯一映射点（替代已删除的 `charToBinaryOp` 与 `Token::binop`）；`VariableSymbol`（declaration/slot/scopeDepth/runtime）；`SemanticBinding`（AST节点→符号身份绑定表）；`SymbolTable`；`CompiledFunction`/`CompiledProgram` |
+| **Lexer** | `lexer.h/cc` (52/186) | FunctionsCore | `FC::Lexer`：字符流→Token 流；Token 只携带 `kind/lexeme/line/column`（词法类别与位置；运算符种类由解析层推得）；读取位置与识别逻辑封装在可复制的 `Cursor` 中，`peekToken()` 在游标副本上识别、不推进主游标（无 `mutable`/缓存）；`nextToken/peekToken/currentToken/isAtEnd/reset`；标识符/关键字/数字/字符串/注释/标点全路径；词法错误返回 `tok_error`；**100% 行覆盖** |
 | **Trace** | `trace.h/cc` (16/56) | FunctionsCore | `traceEnabled(stage)`：按环境变量 `FC_TRACE` 的逗号分隔阶段列表判断是否输出诊断；各阶段只在入口/出口调用，业务分支不含打印；**100% 行覆盖** |
 | **Parser** | `parser.h/cc` (63/485) | FunctionsCore | `FC::Parser`：Token 流→纯语法 AST；递归下降 + 优先级爬升（`tokenPrecedence` 按 `FCBinaryOp`，非运算符返回 -1）；错误恢复返回 nullptr + `hadError()`；`tok_error` 的说明直接作为错误信息；构造不读取 token，`parseProgram()` 入口才进入解析阶段（`begin()`），`reset()` 复位阶段与错误标记，`started()` 可判定当前阶段；**零语义副作用** |
 | **Semantic** | `semantic.h/cc` (174/379) | FunctionsSemantic | `FCSemanticContext`：作用域栈（RAII `ScopeGuard`/`FunctionScopeGuard`）、`declareVariable`（分配 slot + frameIndex）、`registerFunction`、`bindVariable/boundSymbol`；`SemanticAnalyzer`：AST 遍历分派（12 种节点），**帧布局唯一生产者**（CompiledFunction::frameSize/parametersIdx） |
@@ -112,8 +112,8 @@ FunctionsUnitTest  ← Frontend + Evaluator + Codegen
 源代码字符串
     │
     ▼ ①  FC::Lexer::nextToken（内部 Cursor::getTok；peekToken 在游标副本上识别）
-Token 流 {kind, lexeme, line, column, binop}
-    │      标点/关键字 → FCToken 枚举；运算符 → FCBinaryOp 枚举
+Token 流 {kind, lexeme, line, column}
+    │      标点/关键字/运算符 → 统一 FCToken 枚举，Token 不携带运算符种类
     ▼ ②  FC::Parser::parseProgram
 纯语法 AST（FCProgramAST / FCExprAST 族）
     │      FCVariableExprAST 只含 name；FCBinaryExprAST 只含 FCBinaryOp
@@ -172,14 +172,14 @@ struct SemanticBinding {
 ### 5.3 运算符全管线枚举化（FCBinaryOp）
 
 ```
-Lexer: charToBinaryOp（唯一转换点）→ Token.binop
+Parser: binaryOpOf(FCToken kind)（唯一转换点）→ FCBinaryOp
 Parser: tokenPrecedence(FCBinaryOp) → FCBinaryExprAST(FCBinaryOp)
 Evaluator/Codegen: switch (FCBinaryOp) 分派
 ```
 
-- ASCII 字符只存在于 Lexer 词法识别与 `charToBinaryOp` 一处
+- ASCII 字符只存在于 Lexer 的词法识别分支（`charToBinaryOp` 与 `Token::binop` 已删除，运算符种类只由 `kind` 决定）
 - 非运算符 token 优先级返回 -1，自然终止二元表达式解析
-- 旧 `tok_assign` 枚举仅用于 Parser 分支判断，语义由 `binop` 承载
+- 运算符种类在解析层从 `kind` 推得一次（`parser.cc:151`、`163`），`Token` 不再保存第二份表示
 
 ### 5.4 帧布局单一权威（AST 不携带语义数据）
 
@@ -203,7 +203,7 @@ Evaluator/Codegen: switch (FCBinaryOp) 分派
 
 | 套件 | 测试组 | 隔离性 | 覆盖要点 |
 |------|--------|--------|---------|
-| `runLexerTests` | 65 断言 | 仅 `FC::Lexer`，零依赖 | 关键字/标识符/数字/字符串/未闭合串与未识别字符的 `tok_error`/注释跳过/行列号（含列号边界）/标点与运算符枚举/binop 字段/trace 开关匹配/peek 的游标副本（跨注释跨行、重复 peek 稳定）/reset/空输入 |
+| `runLexerTests` | 66 断言 | 仅 `FC::Lexer`，零依赖 | 关键字/标识符/数字/字符串/未闭合串与未识别字符的 `tok_error`/注释跳过/行列号（含列号边界）/标点与运算符枚举/binop 字段/trace 开关匹配/peek 的游标副本（跨注释跨行、重复 peek 稳定）/reset/空输入 |
 | `runParserTests` | 17 断言 | 仅 Lexer→Parser，零语义 | 优先级子树（`x+(1*2)`）/纯语法变量节点/函数原型+块体/for 四元组/错误路径 hadError/顶层序列折叠 vs Program 包装 |
 | `runSemanticAnalyzerTests` | 22 断言 | 手工构造 AST → analyze | 全局/顶层块/括号序列 var 均为 frameIndex=-1；函数局部 frameIndex≥0；shadowing 双符号；未声明变量拒绝；for 变量局部；if 分支声明 |
 | `runScannerFacade`（scanner 组内） | 7 断言 | Facade 级 | hadParseError/hadSemanticError 互斥标记；resetState 复用与解析错误标记复位 |
@@ -218,17 +218,17 @@ Evaluator/Codegen: switch (FCBinaryOp) 分派
 |------|---------|------|
 | lexer.cc | 100.00% | 独立套件全覆盖（42/42，游标切分后行数减少） |
 | scanner.cc | 100.00% | Facade 全路径 |
-| token.cc | 100.00% | 含 binaryOpName 全分支 |
+| token.cc | 100.00% | 含 binaryOpName 全分支（103/103） |
 | trace.cc | 100.00% | 阶段匹配全分支 |
 | parser.cc | 97.50% | 剩余为不可达防御分支 |
 | semantic.cc | 96.21% | SemanticAnalyzer + 上下文 |
 | evaluator.cc | 97.32% | 错误分支经边界用例覆盖 |
 | codegen.cc | 90.97% | LLVM 错误注入路径为主 |
-| **Overall** | **95.29%** | **≥95% 门禁达标（默认配置）** |
+| **Overall** | **95.28%** | **≥95% 门禁达标（默认配置）** |
 
 统计口径：`pwsh -NoProfile -File tools/coverage.ps1 -BuildDir build-strict`（Microsoft.CodeCoverage.Console），排除 `unit_test.cc/main.cc`。
 
-测试总量：**762 断言，0 失败**（默认配置）；`-DFC_ENABLE_NESTED_FUNCTIONS=ON` 时 **766 断言，0 失败**。
+测试总量：**763 断言，0 失败**（默认配置）；`-DFC_ENABLE_NESTED_FUNCTIONS=ON` 时 **767 断言，0 失败**。
 两种配置由 `tools/verify-configurations.ps1` 统一验证。
 
 ---
@@ -294,7 +294,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\coverage.ps1 `
 
 ```
 build-debug/Calculater/Debug/FunctionsCalculater.exe   # 最小入口
-build-debug/Calculater/Debug/FunctionsUnitTest.exe    # 762 断言测试套件（默认配置）
+build-debug/Calculater/Debug/FunctionsUnitTest.exe    # 763 断言测试套件（默认配置）
 build-debug/Calculater/Debug/ShadowRepro.exe          # 遮蔽行为复现工具
 ```
 
@@ -311,7 +311,7 @@ FunctionsCaller/
 │   ├── runtime.h    (37)      # FCValue / Frame / VariableRuntimeInfo
 │   ├── language_options.h (12)# 编译期语言开关（嵌套 def，默认关闭）
 │   ├── token.h/cc   (390/142) # AST 族 + 符号模型 + FCBinaryOp
-│   ├── lexer.h/cc   (53/187)  # FC::Lexer    [阶段1 · 独立可测]
+│   ├── lexer.h/cc   (52/186)  # FC::Lexer    [阶段1 · 独立可测]
 │   ├── trace.h/cc   (16/56)   # 按阶段启用的诊断输出（FC_TRACE）
 │   ├── parser.h/cc  (63/485)  # FC::Parser   [阶段2 · 纯语法]
 │   ├── semantic.h/cc(174/379) # FCSemanticContext + SemanticAnalyzer [阶段3]
@@ -319,7 +319,7 @@ FunctionsCaller/
 │   ├── evaluator.h/cc(50/362) # 树遍历解释器 [后端A]
 │   ├── codegen.h/cc (43/847)  # LLVM IR 生成 [后端B]
 │   ├── main.cc      (7)       # 最小入口
-│   ├── unit_test.cc (3093)    # 综合断言套件
+│   ├── unit_test.cc (3094)    # 综合断言套件
 │   └── shadow_repro.cc (35)   # 遮蔽行为复现
 ├── tools/
 │   ├── coverage.ps1            # 行覆盖率（95% 门禁）
@@ -353,7 +353,7 @@ d9203e8 refactor(A): 全局作用域并入帧栈（帧锚点模型）
 ---
 
 > 文档生成：2026-10-20（Asia/Shanghai），基于 `refactor/var-symbol-binding@bb9916a` 实测代码结构与质量指标  
-> 验证口径：cmake 3.20+ / MSVC / LLVM 18.1.6 / 默认配置 762 断言、开关打开 766 断言 / coverage 95.29%
+> 验证口径：cmake 3.20+ / MSVC / LLVM 18.1.6 / 默认配置 763 断言、开关打开 767 断言 / coverage 95.28%
 
 
 
