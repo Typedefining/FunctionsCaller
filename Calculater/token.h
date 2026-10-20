@@ -42,6 +42,14 @@ enum struct FCToken {
   tok_assign,
   tok_colon,
   tok_semicolon,
+  // 运算符与字面量标点一样，以枚举值表示，不在 Token::kind 中携带 ASCII 码
+  tok_less,
+  tok_plus,
+  tok_minus,
+  tok_star,
+  tok_slash,
+  // 词法错误：lexeme 携带可直接展示给用户的错误说明
+  tok_error,
 };
 
 // 二元运算符的统一表示：Lexer/Parser/AST/后端全程使用，杜绝 ASCII 泄露

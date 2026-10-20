@@ -32,6 +32,9 @@ private:
 	std::string m_input;
 	std::string::iterator m_idx;
 	int m_lastChar;
+	// 已读入字符自身的位置（m_curLine/m_curColumn 指向下一个待读位置）
+	int m_lastCharLine;
+	int m_lastCharColumn;
 	int m_curLine;
 	int m_curColumn;
 

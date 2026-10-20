@@ -31,6 +31,8 @@ add_library(FunctionsCore STATIC
 	token.cc
 	lexer.h
 	lexer.cc
+	trace.h
+	trace.cc
 	parser.h
 	parser.cc
 )

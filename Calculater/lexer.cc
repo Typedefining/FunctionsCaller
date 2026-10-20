@@ -1,6 +1,8 @@
 #include "lexer.h"
 #include <cctype>
+#include <cstdio>
 #include <cstdlib>
+#include "trace.h"
 
 using FCMarks::FCToken;
 
@@ -10,6 +12,8 @@ Lexer::Lexer(std::string input)
 	: m_input(std::move(input))
 	, m_idx(m_input.begin())
 	, m_lastChar(' ')
+	, m_lastCharLine(1)
+	, m_lastCharColumn(1)
 	, m_curLine(1)
 	, m_curColumn(1) {
 	m_curToken = { static_cast<int>(FCToken::tok_eof), "", 1, 1 };
@@ -19,6 +23,8 @@ void Lexer::reset(const std::string& input) {
 	m_input = input;
 	m_idx = m_input.begin();
 	m_lastChar = ' ';
+	m_lastCharLine = 1;
+	m_lastCharColumn = 1;
 	m_curLine = 1;
 	m_curColumn = 1;
 	m_hasPeek = false;
@@ -28,10 +34,16 @@ void Lexer::reset(const std::string& input) {
 char Lexer::readChar() {
 	if (m_idx == m_input.end()) {
 		m_lastChar = EOF;
+		// EOF 没有对应字符：位置取下一个字符本该出现的位置
+		m_lastCharLine = m_curLine;
+		m_lastCharColumn = m_curColumn;
 		return static_cast<char>(EOF);
 	}
 	char ch = static_cast<char>(*m_idx++);
 	m_lastChar = static_cast<unsigned char>(ch);
+	// 先记录该字符自身的位置，再推进行列，Token 起点据此确定
+	m_lastCharLine = m_curLine;
+	m_lastCharColumn = m_curColumn;
 	if (ch == '\n') {
 		m_curLine++;
 		m_curColumn = 1;
@@ -42,15 +54,13 @@ char Lexer::readChar() {
 }
 
 Token Lexer::getTok() {
-	int startLine = m_curLine;
-	int startColumn = m_curColumn;
-
 	// 跳过空白符
 	while (m_lastChar != EOF && std::isspace(static_cast<unsigned char>(m_lastChar))) {
 		readChar();
 	}
-	startLine = m_curLine;
-	startColumn = m_curColumn;
+	// 此时 m_lastChar 是 Token 的第一个字符，其位置由 readChar 记录
+	const int startLine = m_lastCharLine;
+	const int startColumn = m_lastCharColumn;
 
 	// 此时为标识符
 	// 函数标识符、变量标识符、函数定义标识符
@@ -79,25 +89,18 @@ Token Lexer::getTok() {
 		return { static_cast<int>(FCToken::tok_identifier), identifierStr, startLine, startColumn };
 	}
 	// 此时为数字字面量
-	// 支持整数、浮点数
+	// 支持整数、浮点数；整数与浮点的区别由 lexeme 中的小数点体现，
+	// 具体类型在语义阶段依据声明类型确定
 	if (m_lastChar != EOF &&
 	    (std::isdigit(static_cast<unsigned char>(m_lastChar)) || m_lastChar == '.')) {
 		std::string numStr;
-		bool curDouble = false;
 		do {
 			numStr += static_cast<char>(m_lastChar);
 			m_lastChar = readChar();
-			if (m_lastChar == '.')
-				curDouble = true;
 		} while (
 			m_lastChar != EOF &&
 			(std::isdigit(static_cast<unsigned char>(m_lastChar)) || m_lastChar == '.'));
-		if (curDouble) {
-			// 浮点数支持
-			return { static_cast<int>(FCToken::tok_number), numStr, startLine, startColumn };
-		} else {
-			return { static_cast<int>(FCToken::tok_number), numStr, startLine, startColumn };
-		}
+		return { static_cast<int>(FCToken::tok_number), numStr, startLine, startColumn };
 	}
 	// 字符串标识符
 	if (m_lastChar == '"') {
@@ -108,7 +111,9 @@ Token Lexer::getTok() {
 			m_lastChar = readChar();
 		}
 		if (m_lastChar != '"') {
-			return { static_cast<int>(FCToken::tok_eof), "", startLine, startColumn };
+			// 未闭合字符串是词法错误，不能退化成 EOF（否则错误信息失真）
+			return { static_cast<int>(FCToken::tok_error), "unterminated string literal",
+				     startLine, startColumn };
 		}
 		readChar(); // 跳过结尾的 "
 		return { static_cast<int>(FCToken::tok_string), strVal, startLine, startColumn };
@@ -127,7 +132,7 @@ Token Lexer::getTok() {
 		m_lastChar = ' ';
 		return { static_cast<int>(FCToken::tok_eof), "", startLine, startColumn };
 	}
-	// 其他值
+	// 标点与运算符：一律返回枚举值，Token::kind 不携带 ASCII 码
 	int thisChar = m_lastChar;
 	m_lastChar = readChar();
 	switch (thisChar) {
@@ -147,9 +152,21 @@ Token Lexer::getTok() {
 		return { static_cast<int>(FCToken::tok_colon), ":", startLine, startColumn, FCMarks::FCBinaryOp::Unknown };
 	case ';':
 		return { static_cast<int>(FCToken::tok_semicolon), ";", startLine, startColumn, FCMarks::FCBinaryOp::Unknown };
+	case '<':
+		return { static_cast<int>(FCToken::tok_less), "<", startLine, startColumn, FCMarks::FCBinaryOp::Less };
+	case '+':
+		return { static_cast<int>(FCToken::tok_plus), "+", startLine, startColumn, FCMarks::FCBinaryOp::Add };
+	case '-':
+		return { static_cast<int>(FCToken::tok_minus), "-", startLine, startColumn, FCMarks::FCBinaryOp::Sub };
+	case '*':
+		return { static_cast<int>(FCToken::tok_star), "*", startLine, startColumn, FCMarks::FCBinaryOp::Mul };
+	case '/':
+		return { static_cast<int>(FCToken::tok_slash), "/", startLine, startColumn, FCMarks::FCBinaryOp::Div };
 	default:
-		return { thisChar, std::string(1, static_cast<char>(thisChar)), startLine, startColumn,
-			     FCMarks::charToBinaryOp(static_cast<char>(thisChar)) };
+		// 未识别字符是词法错误；lexeme 携带错误说明，供 Parser 直接展示
+		return { static_cast<int>(FCToken::tok_error),
+			     std::string("unexpected character '") + static_cast<char>(thisChar) + "'",
+			     startLine, startColumn };
 	}
 }
 
@@ -159,6 +176,11 @@ Token Lexer::nextToken() {
 		m_curToken = m_peekToken;
 	} else {
 		m_curToken = getTok();
+	}
+	if (traceEnabled("lexer")) {
+		fprintf(stderr, "[lexer] kind=%d lexeme='%s' binop=%d @%d:%d\n", m_curToken.kind,
+		        m_curToken.lexeme.c_str(), static_cast<int>(m_curToken.binop),
+		        m_curToken.line, m_curToken.column);
 	}
 	return m_curToken;
 }

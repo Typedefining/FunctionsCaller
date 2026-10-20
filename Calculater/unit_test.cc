@@ -5,6 +5,7 @@
 #include "language_options.h"
 #include "lexer.h"
 #include "parser.h"
+#include "trace.h"
 #include "llvm/IR/Verifier.h"
 #include <chrono>
 #include <iomanip>
@@ -294,6 +295,19 @@ private:
             FCScanner defTail;
             auto tailAst = defTail.analysis("def f() { 1 }; f()");
             expect(tailAst != nullptr, "scanner-facade - def trailing semicolon stays legal");
+
+            // 词法错误在语法阶段之前暴露：返回 null 并标记解析错误
+            FCScanner lexErr;
+            expect(lexErr.analysis("\"unterminated") == nullptr,
+                   "scanner-facade - unterminated string returns null");
+            expect(lexErr.hadParseError(),
+                   "scanner-facade - unterminated string flags parse error");
+
+            FCScanner charErr;
+            expect(charErr.analysis("@") == nullptr,
+                   "scanner-facade - unexpected character returns null");
+            expect(charErr.hadParseError(),
+                   "scanner-facade - unexpected character flags parse error");
         }
     }
 
@@ -1614,11 +1628,25 @@ private:
                    "lexer - string lexeme");
         }
 
-        // 未闭合字符串直接返回 eof
+        // 未闭合字符串是词法错误：返回 tok_error，lexeme 携带错误说明
         {
             FC::Lexer lexer("\"unterminated");
-            expect(lexer.nextToken().kind == static_cast<int>(FCToken::tok_eof),
-                   "lexer - unterminated string yields eof");
+            auto err = lexer.nextToken();
+            expect(err.kind == static_cast<int>(FCToken::tok_error),
+                   "lexer - unterminated string yields tok_error");
+            expect(err.lexeme == "unterminated string literal",
+                   "lexer - unterminated string carries message");
+            expect(!lexer.isAtEnd(), "lexer - lexer error is not eof");
+        }
+
+        // 未识别字符同样是词法错误，lexeme 指出具体字符
+        {
+            FC::Lexer lexer("@");
+            auto err = lexer.nextToken();
+            expect(err.kind == static_cast<int>(FCToken::tok_error),
+                   "lexer - unexpected character yields tok_error");
+            expect(err.lexeme == "unexpected character '@'",
+                   "lexer - unexpected character carries message");
         }
 
         // 注释被跳过，注释后继续返回 token
@@ -1629,16 +1657,26 @@ private:
                    "lexer - comment skipped");
         }
 
-        // 行号/列号追踪
+        // 行号/列号追踪：位置是 Token 第一个字符所在的行列（从 1 开始）
         {
             FC::Lexer lexer("a\n  bc");
             auto first = lexer.nextToken();
-            expect(first.line == 1 && first.lexeme == "a", "lexer - first token line");
+            expect(first.line == 1 && first.column == 1 && first.lexeme == "a",
+                   "lexer - first token at line 1 column 1");
             auto second = lexer.nextToken();
-            expect(second.line == 2 && second.lexeme == "bc", "lexer - line advances on newline");
+            expect(second.line == 2 && second.column == 3 && second.lexeme == "bc",
+                   "lexer - line advances and column counts leading spaces");
+
+            FC::Lexer spaced("1 + 2 * 3");
+            expect(spaced.nextToken().column == 1, "lexer - column of first operand");
+            expect(spaced.nextToken().column == 3, "lexer - column of plus");
+            expect(spaced.nextToken().column == 5, "lexer - column of second operand");
+            expect(spaced.nextToken().column == 7, "lexer - column of star");
+            expect(spaced.nextToken().column == 9, "lexer - column of third operand");
+            expect(spaced.nextToken().column == 10, "lexer - eof sits after last character");
         }
 
-        // 标点与运算符：kind 为枚举，binop 为统一枚举表示
+        // 标点与运算符：kind 与 binop 都是枚举，Token::kind 不携带 ASCII 码
         {
             FC::Lexer lexer("( ) { } , ; : = + - * / <");
             expect(lexer.nextToken().kind == static_cast<int>(FCToken::tok_parenthes_open), "lexer - paren open");
@@ -1648,12 +1686,56 @@ private:
             expect(lexer.nextToken().kind == static_cast<int>(FCToken::tok_comma), "lexer - comma");
             expect(lexer.nextToken().kind == static_cast<int>(FCToken::tok_semicolon), "lexer - semicolon");
             expect(lexer.nextToken().kind == static_cast<int>(FCToken::tok_colon), "lexer - colon");
-            expect(lexer.nextToken().kind == static_cast<int>(FCToken::tok_assign), "lexer - assign kind");
-            expect(lexer.nextToken().binop == FCBinaryOp::Add, "lexer - binop add");
-            expect(lexer.nextToken().binop == FCBinaryOp::Sub, "lexer - binop sub");
-            expect(lexer.nextToken().binop == FCBinaryOp::Mul, "lexer - binop mul");
-            expect(lexer.nextToken().binop == FCBinaryOp::Div, "lexer - binop div");
-            expect(lexer.nextToken().binop == FCBinaryOp::Less, "lexer - binop less");
+
+            auto assign = lexer.nextToken();
+            expect(assign.kind == static_cast<int>(FCToken::tok_assign), "lexer - assign kind");
+            expect(assign.binop == FCBinaryOp::Assign, "lexer - assign binop");
+
+            auto plus = lexer.nextToken();
+            expect(plus.kind == static_cast<int>(FCToken::tok_plus), "lexer - plus kind is enum");
+            expect(plus.binop == FCBinaryOp::Add, "lexer - binop add");
+
+            auto minus = lexer.nextToken();
+            expect(minus.kind == static_cast<int>(FCToken::tok_minus), "lexer - minus kind is enum");
+            expect(minus.binop == FCBinaryOp::Sub, "lexer - binop sub");
+
+            auto star = lexer.nextToken();
+            expect(star.kind == static_cast<int>(FCToken::tok_star), "lexer - star kind is enum");
+            expect(star.binop == FCBinaryOp::Mul, "lexer - binop mul");
+
+            auto slash = lexer.nextToken();
+            expect(slash.kind == static_cast<int>(FCToken::tok_slash), "lexer - slash kind is enum");
+            expect(slash.binop == FCBinaryOp::Div, "lexer - binop div");
+
+            auto less = lexer.nextToken();
+            expect(less.kind == static_cast<int>(FCToken::tok_less), "lexer - less kind is enum");
+            expect(less.binop == FCBinaryOp::Less, "lexer - binop less");
+        }
+
+        // 诊断输出开关：按阶段匹配逗号分隔列表
+        {
+            FC::setTraceStagesForTesting("");
+            expect(!FC::traceEnabled("lexer"), "trace - disabled when stages empty");
+
+            FC::setTraceStagesForTesting("all");
+            expect(FC::traceEnabled("lexer") && FC::traceEnabled("parser"),
+                   "trace - all enables every stage");
+
+            FC::setTraceStagesForTesting("lexer, parser ");
+            expect(FC::traceEnabled("lexer"), "trace - first stage matched");
+            expect(FC::traceEnabled("parser"), "trace - stage after comma matched despite spaces");
+            expect(!FC::traceEnabled("semantic"), "trace - unlisted stage disabled");
+
+            FC::setTraceStagesForTesting(",lexer,");
+            expect(FC::traceEnabled("lexer"), "trace - empty list items are skipped");
+            expect(!FC::traceEnabled("codegen"), "trace - empty list items do not match everything");
+
+            // 打开 lexer 诊断输出：执行一次词法分析，输出内容不作为断言对象
+            FC::setTraceStagesForTesting("lexer");
+            FC::Lexer traced("1 + 2");
+            expect(traced.nextToken().kind == static_cast<int>(FCToken::tok_number),
+                   "trace - tracing does not change tokens");
+            FC::setTraceStagesForTesting("");
         }
 
         // binop 转换工具

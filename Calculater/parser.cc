@@ -113,6 +113,9 @@ std::unique_ptr<FCExprAST> Parser::parsePrimary() {
 	switch (m_curTok.kind) {
 	default:
 		return logError("unknown FCToken when expecting an expression");
+	case static_cast<int>(FCToken::tok_error):
+		// 词法错误的 lexeme 已是可直接展示的说明
+		return logError(m_curTok.lexeme.c_str());
 	case static_cast<int>(FCToken::tok_identifier):
 		return parseIdentifierExpr();
 	case static_cast<int>(FCToken::tok_number):
