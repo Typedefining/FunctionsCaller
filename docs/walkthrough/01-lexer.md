@@ -35,13 +35,12 @@ cmake --build build-strict --config Debug --target FunctionsCalculater
 实测输出（原样抄录，不是示意）：
 
 ```text
-[lexer] kind=1  lexeme=''  binop=6 @1:1
 [lexer] kind=4  lexeme='1' binop=6 @1:1
 [lexer] kind=21 lexeme='+' binop=2 @1:3
 [lexer] kind=4  lexeme='2' binop=6 @1:5
 [lexer] kind=23 lexeme='*' binop=4 @1:7
 [lexer] kind=4  lexeme='3' binop=6 @1:9
-[lexer] kind=1  lexeme=''  binop=6 @1:10
+[lexer] kind=1  lexeme='' binop=6 @1:10
 ```
 
 看完复原（同时关掉开关）：
@@ -53,7 +52,7 @@ Remove-Item Env:\FC_TRACE
 
 ---
 
-## 第 2 步：读懂这 7 行
+## 第 2 步：读懂这 6 行
 
 先建立编号对照。`kind` 是 `FCToken` 的枚举值（`Calculater/token.h:20-46`），`binop` 是 `FCBinaryOp` 的枚举值（`token.h:48-56`）：
 
@@ -70,22 +69,22 @@ Remove-Item Env:\FC_TRACE
 | 24 | `tok_slash` | | | |
 | 25 | `tok_error` | | | |
 
-于是那 7 行可以翻译成：
+于是这 6 行可以翻译成：
 
 | 行 | kind | binop | lexeme | 位置 | 说明 |
 |---|---|---|---|---|---|
-| 1 | `tok_eof` | Unknown | 空 | 1:1 | **与输入无关**：`FCScanner` 构造时先构造 `Parser`，`Parser` 构造函数就调用了一次 `advance()`，此时 Lexer 里还是空串（`scanner.cc:6-8`、`parser.cc:10-13`） |
-| 2 | `tok_number` | Unknown | `1` | 1:1 | 数字字面量 |
-| 3 | `tok_plus` | Add | `+` | 1:3 | 运算符：`kind` 与 `binop` 同时给出 |
-| 4 | `tok_number` | Unknown | `2` | 1:5 | |
-| 5 | `tok_star` | Mul | `*` | 1:7 | |
-| 6 | `tok_number` | Unknown | `3` | 1:9 | |
-| 7 | `tok_eof` | Unknown | 空 | 1:10 | 这次是真的输入结束，位置在最后一个字符之后 |
+| 1 | `tok_number` | Unknown | `1` | 1:1 | 数字字面量 |
+| 2 | `tok_plus` | Add | `+` | 1:3 | 运算符：`kind` 与 `binop` 同时给出 |
+| 3 | `tok_number` | Unknown | `2` | 1:5 | |
+| 4 | `tok_star` | Mul | `*` | 1:7 | |
+| 5 | `tok_number` | Unknown | `3` | 1:9 | |
+| 6 | `tok_eof` | Unknown | 空 | 1:10 | 输入结束，位置在最后一个字符之后 |
 
 三个必须在第一次阅读时就注意到的现象：
 
-1. **第一个 `tok_eof` 是构造期的副产品**。`Lexer` 的构造函数（`lexer.cc:11-20`）把当前词法单元初始化成 `tok_eof`；`Parser` 构造函数又会立刻取一个单元。所以任何一次 `analysis()` 都会先看到它，与输入内容无关。
+1. **token 流与输入一一对应，没有多余单元**。`6` 个单元正是 `1`、`+`、`2`、`*`、`3` 和结尾标记。这一点曾经不成立：`Parser` 的构造函数里调用过一次 `advance()`，而 `FCScanner` 构造 `Parser` 时 Lexer 还持有空串，于是每次 `analysis()` 的第一个单元都是一个与输入无关的 `tok_eof`（`@1:1`）。修复方式是让"读取第一个 token"只发生在解析阶段开始时：`Parser::begin()`（`parser.cc:21-23`）在 `parseProgram()` 入口被调用（`parser.cc:87-88`），构造函数只建立与 Lexer 的引用关系。
 2. **位置是词法单元第一个字符的位置，列号从 1 开始**。`1` 报 `@1:1`，`+` 报 `@1:3`，EOF 报 `@1:10`（最后一个字符之后）。这依赖 `readChar()` 在**推进行列之前**记录每个字符自身的位置（`lexer.cc:44-46`）。
+3. **运算符有两条独立的信息**：`kind` 回答"这是什么类别的单元"，`binop` 回答"它是哪个二元运算符"。两者都在词法阶段确定，但消费方不同——见第 3 步末尾的表格。
 3. **运算符有两条独立的信息**：`kind` 回答"这是什么类别的单元"，`binop` 回答"它是哪个二元运算符"。两者都在词法阶段确定，但消费方不同——见第 3 步末尾的表格。
 
 ---
@@ -96,14 +95,15 @@ Remove-Item Env:\FC_TRACE
 FCScanner::analysis            scanner.cc:11
   └─ m_lexer.reset(inputStr)   scanner.cc:15   → lexer.cc:22
   └─ m_parser.reset()          scanner.cc:16   → parser.cc:15
-  └─ m_parser.parseProgram()   scanner.cc:19   → parser.cc:76
+  └─ m_parser.parseProgram()   scanner.cc:19   → parser.cc:84
   └─ SemanticAnalyzer.analyze  scanner.cc:25
 ```
 
 本段只关心词法部分，也就是 `nextToken()` 被调用之后发生的事：
 
 ```text
-Parser::advance        parser.cc:20   → m_curTok = m_lexer.nextToken()
+Parser::begin          parser.cc:21-24 → 进入解析阶段并 advance()
+Parser::advance        parser.cc:26-29 → m_curTok = m_lexer.nextToken()
 Lexer::nextToken       lexer.cc:173   → 有预读就用预读，否则 getTok()
 Lexer::getTok          lexer.cc:56    → 真正的识别逻辑
   └─ Lexer::readChar   lexer.cc:34    → 取一个字符，维护行号列号
@@ -147,9 +147,9 @@ Lexer::getTok          lexer.cc:56    → 真正的识别逻辑
 
 | 字段 | 消费者 | 用途 |
 |---|---|---|
-| `kind` | `Parser::parsePrimary`（`parser.cc:112`）、`parseProgram`（`parser.cc:76`） | 决定走哪条解析分支 |
+| `kind` | `Parser::parsePrimary`（`parser.cc:122`）、`parseProgram`（`parser.cc:84`） | 决定走哪条解析分支 |
 | `lexeme` | `Parser::parseNumberExpr` / `parseIdentifierExpr` | 数值转换、变量名与函数名；`tok_error` 时直接作为错误信息 |
-| `binop` | `Parser::tokenPrecedence`（`parser.cc:48`）、`FCBinaryExprAST` | 优先级判定与 AST 运算符 |
+| `binop` | `Parser::tokenPrecedence`（`parser.cc:56`）、`FCBinaryExprAST` | 优先级判定与 AST 运算符 |
 | `line` / `column` | 仅 `unit_test.cc` 的断言 | **没有参与任何错误报告**——报错信息里目前不带位置 |
 
 最后一行是这段代码的真实状态，也是你后面读 `parser.cc` 时会反复遇到的现象：错误信息只有一句 `LogError: ...`，没有行列号。
@@ -163,7 +163,7 @@ Lexer::getTok          lexer.cc:56    → 真正的识别逻辑
 - **关键字不是词法单元类型，而是标识符的保留值**：实现上先扫成标识符，再查一张表（`lexer.cc:74-87`）把它改判为关键字。所以"关键字"在词法层面只是"某些特定的标识符"。
 - **预读（lookahead）**：解析器经常需要"看下一个单元但不推进"。两种实现：词法分析器内部缓存（本项目的做法），或者解析器自己维护一个单元缓冲。
 - **词法错误必须有自己的类别**：一个阶段发现错误后，要么产出表示"错误"的单元，要么向上抛异常；不能伪装成正常的输入结束。否则上层只能报出"表达式位置遇到输入结束"这类与真实原因无关的信息。
-- **词法阶段不该知道的东西**：优先级、类型、作用域。本项目里 `binop` 只是把字符映射成枚举，优先级表在 `parser.cc:48`——这条边界保持得比较干净。
+- **词法阶段不该知道的东西**：优先级、类型、作用域。本项目里 `binop` 只是把字符映射成枚举，优先级表在 `parser.cc:56`——这条边界保持得比较干净。
 
 ---
 
@@ -231,13 +231,13 @@ LogError: unterminated string literal
 
 把 `lexer.cc:44-46` 的三行（`m_lastCharLine` / `m_lastCharColumn` 的赋值）移到 `lexer.cc:47-52` 的行列推进之后，重新构建并运行 `FunctionsUnitTest`。
 
-预期：`runLexerTests` 里以 `column` 为条件的断言失败，`1 + 2 * 3` 的列号整体加一。改完复原，并确认 751 个断言重新全绿。
+预期：`runLexerTests` 里以 `column` 为条件的断言失败，`1 + 2 * 3` 的列号整体加一。改完复原，并确认 759 个断言重新全绿。
 
 ---
 
 ## 第 7 步：自测题
 
-1. `1 + 2 * 3` 的 7 个单元里，为什么第一个是 `tok_eof`？如果我们把 `FCScanner` 改成延迟构造 `Parser`，这个单元还会出现吗？
+1. `1 + 2 * 3` 的 6 个单元里，第一个为什么是 `tok_number` 而不是别的？如果 `Parser` 构造函数仍保留 `advance()`，看到的现象会变成什么？
 2. `def` 为什么必须作为关键字处理，而不能在语法分析阶段当作普通标识符？如果不这样做，`parsePrimary` 会遇到什么歧义？
 3. `peekToken()` 被声明为 `const`，却修改了 `m_peekToken` 与 `m_hasPeek`。除了 `mutable`，还有什么等价写法？各自的代价是什么？
 4. 诊断输出为什么放在 `nextToken()` 而不是 `getTok()`？
@@ -245,11 +245,11 @@ LogError: unterminated string literal
 
 答案：
 
-1. 不会。它来自 `Parser` 构造函数里的第一次 `advance()`（`parser.cc:10-13`），而 `FCScanner` 的成员初始化列表（`scanner.cc:6-8`）在 `Lexer` 还是空串时就构造了 `Parser`。
+1. 因为词法单元的产出从"输入的第一个字符"开始：`Parser` 在 `parseProgram()` 入口才调用 `begin()` 读取第一个单元（`parser.cc:21-23`、`86-89`），此时 Lexer 已收到 `1 + 2 * 3`，所以第一个就是 `tok_number`。若构造函数保留 `advance()`，它会先读空串，多出一个与输入无关的 `tok_eof @1:1`，单元数变成 7；这个单元随后被 `FCScanner::analysis` 里的 `reset()` 丢弃，所以不影响结果，只污染诊断输出。
 2. 因为 `def` 后面跟的是"函数名 + 参数列表 + 函数体"，与"标识符后跟调用参数"在词法层面完全同形。若不在词法层区分，`parsePrimary` 见到 `def` 只能是标识符或函数调用，无法判断接下来该解析原型还是实参。
 3. 方案一：去掉 `const`，让调用方持有非 `const` 引用（最简单，但丢失"不修改已消费状态"的语义）。方案二：把预读状态抽成独立的 `Tokenizer` 对象，由调用方持有可变副本（干净，但要改所有调用点）。
 4. `nextToken()` 是"已消费单元"的唯一出口，所有调用方都经过它，因此一处打印即可覆盖全部消费路径；`getTok()` 还会被注释递归调用，且返回后可能被 `peekToken()` 缓存而不立即消费，放在那里会重复或提前打印。
-5. `Parser::logError`（`parser.cc:65`）需要当前单元的位置；`Parser::parse...` 各处的错误信息需要带上 `m_curTok.line/column`；`FCScanner::analysis` 不会变。改造成本主要不在代码，而在于所有断言错误信息的测试都要跟着变。
+5. `Parser::logError`（`parser.cc:73`）需要当前单元的位置；`Parser::parse...` 各处的错误信息需要带上 `m_curTok.line/column`；`FCScanner::analysis` 不会变。改造成本主要不在代码，而在于所有断言错误信息的测试都要跟着变。
 
 ---
 
@@ -257,6 +257,9 @@ LogError: unterminated string literal
 
 第 2 段（`var a:int = 1 + 2 * 3; a`）会用到本段的三个结论：
 
-- 表达式起始符的判定在 `parser.cc:31` 的 `startsExpression`，它只认 8 种 `kind`；
-- 优先级表吃的是 `binop`（`parser.cc:48`），不是 `kind`；
+- 表达式起始符的判定在 `parser.cc:39` 的 `startsExpression`，它只认 8 种 `kind`；
+- 优先级表吃的是 `binop`（`parser.cc:56`），不是 `kind`；
 - 位置信息目前没有被消费，所以下一段看到的错误依然不带行列号。
+
+
+
