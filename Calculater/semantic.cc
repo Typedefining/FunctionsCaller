@@ -15,8 +15,6 @@ FCSemanticContext::FCSemanticContext() {
 FCSemanticContext::~FCSemanticContext() = default;
 
 void FCSemanticContext::reset() {
-  m_binopPrecedence = {{'=', 5},  {'<', 9},  {'+', 10},
-                       {'-', 10}, {'*', 20}, {'/', 20}};
   m_scopeStack.clear();
   m_functionSet.clear();
   m_frameAnchor = 0;
@@ -36,11 +34,6 @@ void FCSemanticContext::reset() {
   m_compiledProgram->functions["<global>"] = m_frameRecords[0];
 }
 
-int FCSemanticContext::getOperatorPrecedence(char op) const {
-  const auto it = m_binopPrecedence.find(op);
-  return it == m_binopPrecedence.end() ? 0 : it->second;
-}
-
 void FCSemanticContext::pushScope() {
   m_scopeStack.emplace_back(Scope{
       .variables = {}, .depth = static_cast<int>(m_scopeStack.size() + 1)});
@@ -56,7 +49,7 @@ void FCSemanticContext::pushFunctionScope() {
   // 有人绕过 analyzer 直接压第二个函数帧，Debug 下立刻暴露
   assert(kNestedFunctionDefinitions || m_frameAnchor == 0);
 
-  // 帧锚点走帧计数域（layout/records 的下标），与作用域栈深度解耦；
+  // 帧基址走帧计数域（layout/records 的下标），与作用域栈深度解耦；
   // 函数体自带的作用域压在记录的 scopeDepthAtPush+1 位置
   const size_t scopeDepthAtPush = m_scopeStack.size();
   m_frameAnchorStack.push_back({m_frameAnchor, scopeDepthAtPush});
@@ -73,7 +66,7 @@ void FCSemanticContext::popFunctionScope() {
   assert(m_frameRecords.size() == m_frameAnchor + 1);
   assert(m_frameAnchorStack.size() >= 1);
   // 弹出本帧：作用域栈裁回进入前深度，帧级向量裁到锚点（本帧条目移除），
-  // 再从锚点栈恢复外层帧锚点（嵌套函数定义由此支持）
+  // 再从帧基址栈恢复外层帧基址（嵌套函数定义由此支持）
   const auto entry = m_frameAnchorStack.back();
   m_frameAnchorStack.pop_back();
   m_scopeStack.resize(entry.scopeDepthAtPush);
@@ -156,7 +149,7 @@ FCSemanticContext::declareVariable(VarDeclPtr declaration) {
     return nullptr;
   }
 
-  // 唯一分配路径：从当前帧锚点的布局分配槽位（<global> 帧也是普通布局）
+  // 唯一分配路径：从当前帧基址的布局分配槽位（<global> 帧也是普通布局）
   const int slot = m_frameLayouts[m_frameAnchor]->allocateSlot();
 
   const std::string name = declaration->name;

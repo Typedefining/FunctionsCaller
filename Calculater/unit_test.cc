@@ -450,19 +450,10 @@ private:
             }
 
             const auto& semanticCtx = scanner.semanticContext();
-            bool ok = true;
             std::string details;
 
-            // 检查操作符优先级表
-            if (semanticCtx.getOperatorPrecedence('+') <= 0 ||
-                semanticCtx.getOperatorPrecedence('*') <= 0)
-            {
-                ok = false;
-                details = "Operator precedence table not initialized";
-            }
-
             // 对于预期成功的测试，检查是否能找到相关声明
-            if (expected && ok)
+            if (expected)
             {
                 size_t varPos = code.find("var");
                 if (varPos != std::string::npos)
@@ -487,13 +478,10 @@ private:
                 }
             }
 
-            bool passed = (ok == expected);
+            bool passed = expected;
             if (!passed)
             {
-                if (expected && !ok)
-                    details = "Unexpected semantic failure: " + details;
-                else if (!expected && ok)
-                    details = "Expected semantic error but none detected";
+                details = "Expected semantic error but none detected";
             }
             expect(passed, "semantic - " + name);
             if (passed)
@@ -2252,14 +2240,6 @@ private:
         // ============================================================
         {
             FCSemanticContext ctx;
-
-            expect(ctx.getOperatorPrecedence('=') == 5, "semantic-api - precedence assign");
-            expect(ctx.getOperatorPrecedence('<') == 9, "semantic-api - precedence less");
-            expect(ctx.getOperatorPrecedence('+') == 10, "semantic-api - precedence plus");
-            expect(ctx.getOperatorPrecedence('-') == 10, "semantic-api - precedence minus");
-            expect(ctx.getOperatorPrecedence('*') == 20, "semantic-api - precedence mul");
-            expect(ctx.getOperatorPrecedence('/') == 20, "semantic-api - precedence div");
-            expect(ctx.getOperatorPrecedence('?') == 0, "semantic-api - unknown precedence");
 
             expect(ctx.registerFunction("f", nullptr), "semantic-api - register new function");
             expect(ctx.hasFunction("f"), "semantic-api - hasFunction true");

@@ -88,8 +88,6 @@ public:
   ~FCSemanticContext();
   void reset();
 
-  int getOperatorPrecedence(char op) const;
-
   void pushScope();
   void popScope();
 
@@ -122,7 +120,7 @@ public:
   int currentGlobalLayoutSize() const;
 
   // 当前位置能否开始一个函数帧：关闭嵌套定义时只允许在 <global> 帧上定义。
-  // 判据用帧锚点而非作用域栈深度——顶层块里的 def 锚点仍为 0。
+  // 判据用帧基址而非作用域栈深度——顶层块里的 def 帧基址仍为 0。
   bool mayDefineFunctionHere() const;
 
   // 兼容访问器：等价于 currentFrameLayoutSize（供旧测试断言 frameSize 数值）
@@ -213,7 +211,7 @@ private:
   bool isInFunctionScope() const;
   bool isCurrentFrameGlobal() const;
 
-  // 当前帧锚点的编译记录（<global> 记录或当前函数）
+  // 当前帧基址处的编译记录（<global> 记录或当前函数）
   CompiledFunction& currentFrameFunction() const;
   // 当前帧记录指针（注册时移交用）
   std::shared_ptr<CompiledFunction> currentFrameRecord() const;
@@ -223,16 +221,15 @@ private:
 
 
 private:
-  std::unordered_map<char, int> m_binopPrecedence;
   std::vector<Scope> m_scopeStack;                                 // 可见性栈（块只动栈顶）
-  size_t m_frameAnchor = 0;                                        // 当前函数帧锚点（帧计数域）；0 = <global>
-  // 外层帧锚点与进入时作用域栈深（函数可在任意嵌套块位置定义；
+  size_t m_frameAnchor = 0;                                        // 当前函数帧基址（帧计数域）；0 = <global>
+  // 外层帧基址与进入时作用域栈深（函数可在任意嵌套块位置定义；
   // 帧下标走帧计数域，与作用域栈深度解耦，避免 block scope 参与帧寻址）
   struct FrameAnchorEntry { size_t prevAnchor; size_t scopeDepthAtPush; };
   std::vector<FrameAnchorEntry> m_frameAnchorStack;
   std::vector<std::unique_ptr<FrameLayout>> m_frameLayouts;        // 每个函数帧一个布局
   std::vector<std::shared_ptr<CompiledFunction>> m_frameRecords;    // 每帧一个编译记录；注册时移交 functions 表
-  // 符号 → 所属帧锚点。名字解析据此拒绝跨函数帧捕获（闭包未支持）
+  // 符号 → 所属帧基址。名字解析据此拒绝跨函数帧捕获（闭包未支持）
   std::unordered_map<const VariableSymbol *, size_t> m_symbolOwnerFrame;
   std::set<std::string> m_functionSet;
 

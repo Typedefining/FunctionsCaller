@@ -52,7 +52,7 @@ static bool startsExpression(int kind) {
 	}
 }
 
-// 优先级表与 FCSemanticContext 的 m_binopPrecedence 保持一致
+// 运算符优先级表的唯一实现：语义层不再保留 char→优先级的副本
 int Parser::tokenPrecedence(FCMarks::FCBinaryOp op) {
 	switch (op) {
 	case FCMarks::FCBinaryOp::Assign:
