@@ -2,6 +2,7 @@
 #include "evaluator.h"
 #include "scanner.h"
 #include "semantic.h"
+#include "language_options.h"
 #include "lexer.h"
 #include "parser.h"
 #include "llvm/IR/Verifier.h"
@@ -2459,48 +2460,66 @@ private:
         }
 
         // ============================================================
-        // 帧锚点模型：函数定义可出现在任意嵌套块位置（不再 assert 位置约束），
-        // 且外层函数的局部对内层函数可见（作用域栈连续，帧布局按锚点切换）
+        // 嵌套函数定义：能否表示由编译开关决定
+        // 关闭态：语义期拒绝，且拒绝不留下帧副作用
+        // 打开态：语义期允许并登记，但仅建模，不可执行
         // ============================================================
         {
-            FCSemanticContext ctx;
-            FCSemanticContext::SemanticAnalyzer analyzer(ctx);
+            auto buildNested = [](bool captureOuter) {
+                std::vector<std::unique_ptr<FCExprAST>> body;
+                body.emplace_back(std::make_unique<FCVarDeclExprAST>(
+                    std::make_shared<VarDecl>("outerVar", "int"), nullptr));
+                body.emplace_back(std::make_unique<FCFunctionAST>(
+                    std::make_unique<FCPrototypeAST>("inner", std::vector<VarDeclPtr>{}),
+                    captureOuter
+                        ? std::unique_ptr<FCExprAST>(
+                              std::make_unique<FCVariableExprAST>(std::string("outerVar")))
+                        : std::unique_ptr<FCExprAST>(std::make_unique<FCNumberExprAST>(1))));
+                return std::make_unique<FCFunctionAST>(
+                    std::make_unique<FCPrototypeAST>("outer", std::vector<VarDeclPtr>{}),
+                    std::make_unique<FCBlockExprAST>(std::move(body)));
+            };
 
-            auto outerDecl = std::make_shared<VarDecl>("outerVar", "int");
-            auto innerFn = std::make_unique<FCFunctionAST>(
-                std::make_unique<FCPrototypeAST>("inner", std::vector<VarDeclPtr>{}),
-                std::make_unique<FCVariableExprAST>(std::string("outerVar")));
-            auto outerFn = std::make_unique<FCFunctionAST>(
-                std::make_unique<FCPrototypeAST>("outer", std::vector<VarDeclPtr>{}),
-                std::make_unique<FCBlockExprAST>(
-                    [] {
-                        std::vector<std::unique_ptr<FCExprAST>> v;
-                        v.emplace_back(std::make_unique<FCVarDeclExprAST>(
-                            std::make_shared<VarDecl>("outerVar", "int"), nullptr));
-                        v.emplace_back(std::make_unique<FCBlockExprAST>(
-                            [] {
-                                std::vector<std::unique_ptr<FCExprAST>> b;
-                                b.emplace_back(std::make_unique<FCFunctionAST>(
-                                    std::make_unique<FCPrototypeAST>("inner", std::vector<VarDeclPtr>{}),
-                                    std::make_unique<FCVariableExprAST>(std::string("outerVar"))));
-                                return b;
-                            }()));
-                        return v;
-                    }()));
-            expect(analyzer.analyze(outerFn.get()), "semantic-analyzer - nested function definition parses");
+            if constexpr (FCMarks::kNestedFunctionDefinitions)
+            {
+                FCSemanticContext ctx;
+                FCSemanticContext::SemanticAnalyzer analyzer(ctx);
 
-            // 外层函数帧记录：outerVar 占据帧槽 0
-            auto* outerRecord = ctx.getCompiledFunction("outer");
-            expect(outerRecord != nullptr, "semantic-analyzer - outer function registered");
-            auto outerSym = outerRecord->symbols.lookupShared("outerVar");
-            expect(outerSym != nullptr && outerSym->runtime.frameIndex != -1,
-                   "semantic-analyzer - outer var is frame-local");
+                auto outerFn = buildNested(false);
+                expect(analyzer.analyze(outerFn.get()),
+                       "semantic-analyzer - nested definition allowed when enabled");
 
-            // 内层函数在嵌套块内成功注册，且引用外层局部（作用域栈连续可见）
-            auto* innerRecord = ctx.getCompiledFunction("inner");
-            expect(innerRecord != nullptr, "semantic-analyzer - nested function registered");
-            expect(innerRecord != outerRecord,
-                   "semantic-analyzer - nested function has distinct record");
+                auto *outerRecord = ctx.getCompiledFunction("outer");
+                auto *innerRecord = ctx.getCompiledFunction("inner");
+                expect(outerRecord != nullptr, "semantic-analyzer - outer function registered");
+                expect(innerRecord != nullptr, "semantic-analyzer - nested function registered");
+                expect(innerRecord != outerRecord,
+                       "semantic-analyzer - nested function has distinct record");
+
+                // 内层帧独立：外层帧只含 outerVar
+                expect(outerRecord->frameSize == 1,
+                       "semantic-analyzer - nested frame does not inflate outer frame");
+            }
+            else
+            {
+                FCSemanticContext ctx;
+                FCSemanticContext::SemanticAnalyzer analyzer(ctx);
+
+                auto outerFn = buildNested(false);
+                expect(!analyzer.analyze(outerFn.get()),
+                       "semantic-analyzer - nested definition rejected when disabled");
+                expect(ctx.getCompiledFunction("inner") == nullptr,
+                       "semantic-analyzer - rejected nested definition leaves no record");
+                expect(ctx.getCompiledFunction("outer") != nullptr,
+                       "semantic-analyzer - enclosing function record survives rejection");
+
+                // 守卫在压帧之前生效：拒绝后帧栈已回退，后续顶层定义仍可分析
+                auto afterFn = std::make_unique<FCFunctionAST>(
+                    std::make_unique<FCPrototypeAST>("afterNested", std::vector<VarDeclPtr>{}),
+                    std::make_unique<FCNumberExprAST>(2));
+                expect(analyzer.analyze(afterFn.get()),
+                       "semantic-analyzer - frames restored after nested rejection");
+            }
         }
 
         // ============================================================

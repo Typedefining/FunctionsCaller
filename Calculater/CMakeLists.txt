@@ -67,7 +67,8 @@ add_library(FunctionsFrontend STATIC
 	scanner.h
 	scanner.cc
 )
-target_link_libraries(FunctionsFrontend PRIVATE FunctionsCore FunctionsSemantic)
+# 前端对外暴露 semantic.h（scanner.h 内含），故链接与语言开关定义需 PUBLIC 传递
+target_link_libraries(FunctionsFrontend PUBLIC FunctionsCore FunctionsSemantic)
 target_include_directories(FunctionsFrontend PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_executable(${PROJECT_NAME} main.cc)

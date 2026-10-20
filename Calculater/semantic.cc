@@ -2,6 +2,7 @@
 #include <cstdio>
 
 #include "semantic.h"
+#include "language_options.h"
 #include "token.h"
 #include <algorithm>
 
@@ -50,6 +51,10 @@ void FCSemanticContext::popScope() {
 }
 
 void FCSemanticContext::pushFunctionScope() {
+  // 关闭嵌套定义时，帧记录栈至多只有 <global> 与当前函数两层；
+  // 有人绕过 analyzer 直接压第二个函数帧，Debug 下立刻暴露
+  assert(kNestedFunctionDefinitions || m_frameAnchor == 0);
+
   // 帧锚点走帧计数域（layout/records 的下标），与作用域栈深度解耦；
   // 函数体自带的作用域压在记录的 scopeDepthAtPush+1 位置
   const size_t scopeDepthAtPush = m_scopeStack.size();
@@ -213,6 +218,11 @@ int FCSemanticContext::currentFrameLayoutSize() const {
 
 int FCSemanticContext::currentGlobalLayoutSize() const {
   return m_frameLayouts[0]->frameSize();
+}
+
+bool FCSemanticContext::mayDefineFunctionHere() const {
+  // <global> 帧上定义函数始终合法；函数体内定义只有在开启嵌套时才合法
+  return kNestedFunctionDefinitions || m_frameAnchor == 0;
 }
 
 const CompiledProgram &FCSemanticContext::getCompiledProgram() const {
@@ -440,6 +450,15 @@ bool FCSemanticContext::SemanticAnalyzer::analyzeBinary(const FCExprClass::FCBin
 }
 
 bool FCSemanticContext::SemanticAnalyzer::analyzeFunction(const FCExprClass::FCFunctionAST *node) {
+  // 守卫必须在压帧与声明参数之前：被拒绝时不得留下任何帧副作用
+  if (!m_ctx.mayDefineFunctionHere()) {
+    fprintf(stderr,
+            "Error: nested function definition '%s' requires "
+            "FC_ENABLE_NESTED_FUNCTIONS\n",
+            node->getProtoName().c_str());
+    return false;
+  }
+
   FCSemanticContext::FunctionScopeGuard guard(m_ctx);
 
   // 先声明参数，分配帧内槽位（slot 从 0 开始累加）

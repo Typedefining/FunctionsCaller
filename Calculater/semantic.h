@@ -121,6 +121,10 @@ public:
   int currentFrameLayoutSize() const;
   int currentGlobalLayoutSize() const;
 
+  // 当前位置能否开始一个函数帧：关闭嵌套定义时只允许在 <global> 帧上定义。
+  // 判据用帧锚点而非作用域栈深度——顶层块里的 def 锚点仍为 0。
+  bool mayDefineFunctionHere() const;
+
   // 兼容访问器：等价于 currentFrameLayoutSize（供旧测试断言 frameSize 数值）
   int currentFrameLayoutFrameSize() const { return currentFrameLayoutSize(); }
 
