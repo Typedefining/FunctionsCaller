@@ -779,37 +779,36 @@ private:
                    "evaluator - unresolved parameter symbol returns dangle");
         }
 
-        // 7. 嵌套定义：前端允许（开关打开）时，求值器仍拒绝执行
-        if constexpr (FCMarks::kNestedFunctionDefinitions)
+        // 7. 嵌套定义：求值器不提供执行能力（与语言开关无关，后端一律拒绝）
         {
-            FCSemanticContext sem;
-            std::vector<std::unique_ptr<FCExprAST>> body;
-            body.emplace_back(std::make_unique<FCFunctionAST>(
+            std::vector<std::unique_ptr<FCExprAST>> nestedBody;
+            nestedBody.emplace_back(std::make_unique<FCFunctionAST>(
                 std::make_unique<FCPrototypeAST>("inner", std::vector<VarDeclPtr>{}),
                 std::make_unique<FCNumberExprAST>(1)));
-            body.emplace_back(std::make_unique<FCNumberExprAST>(2));
-            auto outerFn = std::make_unique<FCFunctionAST>(
-                std::make_unique<FCPrototypeAST>("outer", std::vector<VarDeclPtr>{}),
-                std::make_unique<FCBlockExprAST>(std::move(body)));
+            nestedBody.emplace_back(std::make_unique<FCNumberExprAST>(2));
+            auto nestedOuter = std::make_unique<FCFunctionAST>(
+                std::make_unique<FCPrototypeAST>("nestedOuter", std::vector<VarDeclPtr>{}),
+                std::make_unique<FCBlockExprAST>(std::move(nestedBody)));
 
-            {
-                FCSemanticContext::SemanticAnalyzer analyzer(sem);
-                expect(analyzer.analyze(outerFn.get()),
-                       "evaluator - nested definition passes semantic when enabled");
-            }
+            // 手工提供编译记录：本用例只验证求值器的拒绝分支
+            CompiledProgram nestedProgram;
+            auto nestedRecord = std::make_shared<CompiledFunction>();
+            nestedRecord->frameSize = 0;
+            nestedRecord->maxTempSlots = 0;
+            nestedProgram.functions["nestedOuter"] = nestedRecord;
 
-            FCEvaluationContext ctx(sem.getCompiledProgram());
-            FCFunctionAST *outerRaw = outerFn.get();
-            ctx.functions.registerFunction(outerRaw);
+            FCEvaluationContext nestedCtx(nestedProgram);
+            nestedCtx.functions.registerFunction(nestedOuter.get());
 
-            // 顶层（无活动帧）仍走登记路径：兼容手工构造 AST 的用法
-            expect(evaluate(outerFn.get(), ctx).type == FCValueCategory::Dangle,
+            // 顶层（无活动函数帧）仍走登记路径
+            expect(evaluate(nestedOuter.get(), nestedCtx).type == FCValueCategory::Dangle,
                    "evaluator - top-level definition still registers");
 
             // 进入函数体后遇到嵌套定义：明确拒绝，而不是静默沿用 Dangle 语义
-            std::vector<std::unique_ptr<FCExprAST>> callArgs;
-            auto call = std::make_unique<FCCallExprAST>("outer", std::move(callArgs));
-            expect(evaluate(call.get(), ctx).type == FCValueCategory::Dangle,
+            std::vector<std::unique_ptr<FCExprAST>> nestedArgs;
+            auto nestedCall =
+                std::make_unique<FCCallExprAST>("nestedOuter", std::move(nestedArgs));
+            expect(evaluate(nestedCall.get(), nestedCtx).type == FCValueCategory::Dangle,
                    "evaluator - nested definition rejected inside a frame");
         }
     }
@@ -1091,25 +1090,25 @@ private:
             expect(true, "codegen - invalid function call handling");
         }
 
-        // 嵌套定义（开关打开）：前端放行，codegen 明确拒绝而不是生成半成品 IR
-        if constexpr (FCMarks::kNestedFunctionDefinitions)
+        // 嵌套定义：codegen 拒绝生成半成品 IR（与语言开关无关，后端一律不提供该能力）
         {
-            FCSemanticContext sem;
-            std::vector<std::unique_ptr<FCExprAST>> body;
-            body.emplace_back(std::make_unique<FCFunctionAST>(
+            std::vector<std::unique_ptr<FCExprAST>> nestedBody;
+            nestedBody.emplace_back(std::make_unique<FCFunctionAST>(
                 std::make_unique<FCPrototypeAST>("inner", std::vector<VarDeclPtr>{}),
                 std::make_unique<FCNumberExprAST>(1)));
-            body.emplace_back(std::make_unique<FCNumberExprAST>(2));
+            nestedBody.emplace_back(std::make_unique<FCNumberExprAST>(2));
             auto outerFn = std::make_unique<FCFunctionAST>(
-                std::make_unique<FCPrototypeAST>("outer", std::vector<VarDeclPtr>{}),
-                std::make_unique<FCBlockExprAST>(std::move(body)));
+                std::make_unique<FCPrototypeAST>("nestedOuter", std::vector<VarDeclPtr>{}),
+                std::make_unique<FCBlockExprAST>(std::move(nestedBody)));
 
-            FCSemanticContext::SemanticAnalyzer analyzer(sem);
-            expect(analyzer.analyze(outerFn.get()),
-                   "codegen - nested definition passes semantic when enabled");
+            // 手工提供编译记录：本用例只验证 codegen 的拒绝分支
+            CompiledProgram nestedProgram;
+            auto nestedRecord = std::make_shared<CompiledFunction>();
+            nestedRecord->frameSize = 0;
+            nestedRecord->maxTempSlots = 0;
+            nestedProgram.functions["nestedOuter"] = nestedRecord;
 
-            FCCodegenContext nestedContext("NestedTest", sem.getCompiledProgram());
-            nestedContext.semantic = &sem;
+            FCCodegenContext nestedContext("NestedTest", nestedProgram);
             auto* generated = codegen(outerFn.get(), nestedContext);
             expect(generated == nullptr, "codegen - nested definition rejected");
         }

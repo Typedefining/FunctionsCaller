@@ -1,10 +1,10 @@
 # FunctionsCaller 项目架构信息
 
-> 基准分支：`refactor/var-symbol-binding`（HEAD `b8ce4b1`）  
-> 文档日期：2026-10-19  
-> 当前状态：词法/语法/语义三阶段解耦完成，全量 694/694 测试通过，生产代码行覆盖率 95.11%  
+> 基准分支：`refactor/var-symbol-binding`  
+> 文档日期：2026-10-20  
+> 当前状态：词法/语法/语义三阶段解耦完成；默认配置 723/723 断言通过，嵌套函数开关打开时 727/727；生产代码行覆盖率 95.25%  
 > 语言标准：C++20（CMake 设定），LLVM 18.1.6（vcpkg），Windows + MSVC  
-> 关联文档：`docs/superpowers/plans/2025-06-20-lexer-parser-semantic-decoupling.md`（解耦方案）、`ARCHITECTURE_DESIGN.md`（解耦前架构分析）
+> 关联文档：`docs/superpowers/plans/2025-06-20-lexer-parser-semantic-decoupling.md`（解耦方案）、`docs/superpowers/specs/2026-10-20-nested-functions-opt-in-design.md`（嵌套函数开关设计）、`docs/postmortems/2026-10-20-frame-anchor-and-separator-bugs.md`（三处设计缺陷复盘）
 
 ---
 
@@ -215,21 +215,25 @@ Evaluator/Codegen: switch (FCBinaryOp) 分派
 | lexer.cc | 100.00% | 独立套件全覆盖 |
 | scanner.cc | 100.00% | Facade 全路径 |
 | token.cc | 100.00% | 含 binaryOpName 全分支 |
-| parser.cc | 98.36% | 剩余为不可达防御分支 |
-| semantic.cc | 96.10% | SemanticAnalyzer + 上下文 |
-| evaluator.cc | 96.22% | 错误分支经边界用例覆盖 |
-| codegen.cc | 90.94% | LLVM 错误注入路径为主 |
-| **Overall** | **95.35%** | **≥95% 门禁达标** |
+| parser.cc | 97.76% | 剩余为不可达防御分支 |
+| semantic.cc | 96.21% | SemanticAnalyzer + 上下文 |
+| evaluator.cc | 97.32% | 错误分支经边界用例覆盖 |
+| codegen.cc | 90.97% | LLVM 错误注入路径为主 |
+| **Overall** | **95.25%** | **≥95% 门禁达标（默认配置）** |
 
-统计口径：`tools/coverage.ps1`（Microsoft.CodeCoverage.Console），排除 `unit_test.cc/main.cc`。
+统计口径：`tools/coverage.ps1 -BuildDir build-strict`（Microsoft.CodeCoverage.Console），排除 `unit_test.cc/main.cc`。
 
-测试总量：**694 断言，0 失败**（ctest 全绿）。
+测试总量：**723 断言，0 失败**（默认配置）；`-DFC_ENABLE_NESTED_FUNCTIONS=ON` 时 **727 断言，0 失败**。
+两种配置由 `tools/verify-configurations.ps1` 统一验证。
 
 ---
 
 ## 8. 语言限制与已知行为
 
-- 不支持：`return`、`extern`、布尔字面量、除 `<` 外的比较/逻辑运算、一元负号、数组/结构体、字符串转义、下划线标识符、嵌套 `def`（闭包）
+- 不支持：`return`、`extern`、布尔字面量、除 `<` 外的比较/逻辑运算、一元负号、数组/结构体、字符串转义、下划线标识符、闭包
+- 嵌套 `def` 是**前端编译期选项**（`FC_ENABLE_NESTED_FUNCTIONS`，默认 OFF）：关闭时语义期直接拒绝；打开时前端允许表示与登记，但求值器与 codegen 一律拒绝执行，内层函数引用外层局部一律按捕获拒绝（`semantic.cc` 的 `m_symbolOwnerFrame` 判定）
+- 打开态下嵌套 `def` 仍不可调用：`FCFunctionRegistry::index` 只登记顶层函数，调用会落到 “unknown function” 失败路径
+- 顶层块中的 `def` 不受该开关影响（帧锚点仍为 0）
 - 循环变量仅 `int`；浮点循环报错
 - 字符串拼接 codegen 调用 libc（strlen/malloc/strcpy/strcat），不释放内存
 - LLVM 顶层 `__fc_main` 将最终表达式 cast 为 int，失败回退常量 0
@@ -240,7 +244,7 @@ Evaluator/Codegen: switch (FCBinaryOp) 分派
 
 ## 9. 后续演进方向
 
-1. **闭包捕获**：`isCaptured` 字段与 `frameIndex` 机制已就绪，待嵌套 `def` 语法扩展后启用跨帧存活
+1. **闭包捕获**：`isCaptured` 字段与帧锚点模型已就绪；开关打开后前端已能表示嵌套 `def`，下一步需要 upvalue 链并同时修正四处 `frameIndex` 单值假设，才能让内层函数安全引用外层局部
 2. **Codegen 覆盖率**：90.94% 的缺口集中在 LLVM 验证失败注入路径，可补充针对性错误构造
 3. **Token 结构统一**：`FCToken` 与 `FCBinaryOp` 存在职责重叠（tok_assign），可在后续清理中归并为单一 token 域
 4. **deprecated char 构造移除**：`FCBinaryExprAST(char,...)` 过渡重载待测试全部迁移后删除
@@ -262,16 +266,24 @@ cmake -S . -B build-debug `
 cmake --build build-debug --config Debug --parallel 16
 ctest --test-dir build-debug -C Debug --output-on-failure
 
+# 嵌套函数开关（默认 OFF）：打开只放开前端表示，后端仍拒绝执行
+cmake -S . -B build-nested `
+  -DLLVM_DIR="D:\Code\github\FunctionsCaller\vcpkg_installed\x64-windows\share\llvm" `
+  -DFC_ENABLE_NESTED_FUNCTIONS=ON
+
+# 双配置验证（构建 + 全量断言）
+pwsh -NoProfile -File .\tools\verify-configurations.ps1
+
 # 覆盖率（≥95% 门禁）
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\coverage.ps1 `
-  -BuildDir .\build-debug -Configuration Debug
+  -BuildDir .\build-strict -Configuration Debug
 ```
 
 主要产物：
 
 ```
 build-debug/Calculater/Debug/FunctionsCalculater.exe   # 最小入口
-build-debug/Calculater/Debug/FunctionsUnitTest.exe    # 694 断言测试套件
+build-debug/Calculater/Debug/FunctionsUnitTest.exe    # 723 断言测试套件（默认配置）
 build-debug/Calculater/Debug/ShadowRepro.exe          # 遮蔽行为复现工具
 ```
 
@@ -283,9 +295,10 @@ build-debug/Calculater/Debug/ShadowRepro.exe          # 遮蔽行为复现工具
 FunctionsCaller/
 ├── CMakeLists.txt              # 根配置（C++20, find_package LLVM）
 ├── vcpkg.json                  # 依赖清单（llvm）
-├── README                      # 语言规范（语法/作用域/限制，487 行）
+├── README                      # 语言规范（语法/作用域/限制）
 ├── Calculater/
 │   ├── runtime.h    (37)      # FCValue / Frame / VariableRuntimeInfo
+│   ├── language_options.h (12)# 编译期语言开关（嵌套 def，默认关闭）
 │   ├── token.h/cc   (323/142) # AST 族 + 符号模型 + FCBinaryOp
 │   ├── lexer.h/cc   (37/171)  # FC::Lexer    [阶段1 · 独立可测]
 │   ├── parser.h/cc  (45/372)  # FC::Parser   [阶段2 · 纯语法]
@@ -294,29 +307,37 @@ FunctionsCaller/
 │   ├── evaluator.h/cc(50/362) # 树遍历解释器 [后端A]
 │   ├── codegen.h/cc (43/847)  # LLVM IR 生成 [后端B]
 │   ├── main.cc      (7)       # 最小入口
-│   ├── unit_test.cc (2357)    # 694 断言综合套件
+│   ├── unit_test.cc (2357)    # 综合断言套件
 │   └── shadow_repro.cc (35)   # 遮蔽行为复现
-├── tools/coverage.ps1          # 行覆盖率（95% 门禁）
+├── tools/
+│   ├── coverage.ps1            # 行覆盖率（95% 门禁）
+│   └── verify-configurations.ps1 # 双配置构建 + 全量断言
 ├── triplets/x64-windows-debug.cmake
-└── docs/superpowers/plans/
-    ├── 2025-06-20-symbol-identity-runtime.md          # 符号身份重构方案
-    ├── 2025-06-20-lexer-parser-semantic-decoupling.md  # 三阶段解耦方案（已落地）
-    └── ARCHITECTURE_DESIGN.md                          # 解耦前架构分析
+└── docs/
+    ├── ARCHITECTURE.md
+    ├── postmortems/2026-10-20-frame-anchor-and-separator-bugs.md  # 三处设计缺陷复盘
+    ├── superpowers/plans/
+    │   ├── 2025-06-20-symbol-identity-runtime.md          # 符号身份重构方案
+    │   ├── 2025-06-20-lexer-parser-semantic-decoupling.md  # 三阶段解耦方案（已落地）
+    │   ├── 2026-10-20-global-scope-merge-and-separator-unification.md
+    │   └── ARCHITECTURE_DESIGN.md                          # 解耦前架构分析
+    └── superpowers/specs/2026-10-20-nested-functions-opt-in-design.md
 ```
 
-提交历史：95 commits（本分支领先 origin 17），最近演进序列：
+提交历史：104 commits（本分支领先 origin 5），最近演进序列：
 
 ```
-b8ce4b1 step6: 独立 Parser 单元测试（三阶段隔离达成）
-74a2b96 step5: 头文件依赖清理 + 过渡 shim 移除
-519f10c step4: Facade 流水线 + FCBinaryOp 统一 + AST/语义解耦
-2edf139 step3: SemanticAnalyzer（AST 遍历语义分析）
-8c11cde step2: 纯语法 Parser + AST 节点纯化
-3ef6238 step1: Lexer 模块
+2b4f7fe feat: codegen 拒绝生成嵌套函数定义
+af019f3 feat: 求值器拒绝执行嵌套函数定义
+435ae61 feat: 拒绝嵌套函数捕获外层局部
+da76233 feat: 语义期按开关拒绝嵌套函数定义
+67b39f4 build: 新增嵌套函数定义开关（默认关闭）
+732ea2d refactor(B): 语句分隔符统一（startsExpression）
+d9203e8 refactor(A): 全局作用域并入帧栈（帧锚点模型）
 ```
 
 ---
 
-> 文档生成：2026-10-19（Asia/Shanghai），基于 `refactor/var-symbol-binding@b8ce4b1` 实测代码结构与质量指标  
-> 验证口径：cmake 3.20+ / MSVC / LLVM 18.1.6 / ctest 694 通过 / coverage 95.11%
+> 文档生成：2026-10-20（Asia/Shanghai），基于 `refactor/var-symbol-binding@2b4f7fe` 实测代码结构与质量指标  
+> 验证口径：cmake 3.20+ / MSVC / LLVM 18.1.6 / 默认配置 723 断言、开关打开 727 断言 / coverage 95.25%
 

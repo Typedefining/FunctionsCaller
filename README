@@ -53,6 +53,21 @@ cmake -S . -B build-debug `
   -DLLVM_DIR="D:\Code\github\FunctionsCaller\vcpkg_installed\x64-windows\share\llvm"
 ```
 
+默认构建下嵌套 `def` 在前端被拒绝。要在前端放开该语法（仅用于语法/语义建模与测试，
+后端仍拒绝执行），额外传 `-DFC_ENABLE_NESTED_FUNCTIONS=ON`：
+
+```powershell
+cmake -S . -B build-nested `
+  -DLLVM_DIR="D:\Code\github\FunctionsCaller\vcpkg_installed\x64-windows\share\llvm" `
+  -DFC_ENABLE_NESTED_FUNCTIONS=ON
+```
+
+两种配置可以用脚本一次验证（构建 + 全量断言）：
+
+```powershell
+pwsh -NoProfile -File .\tools\verify-configurations.ps1
+```
+
 构建完成后，主要程序位于：
 
 ```text
@@ -395,7 +410,9 @@ add(10, 3)
 - 数组、结构体和对象；
 - 字符串转义；
 - 带下划线的标识符；
-- `end` 关键字（token 已定义但未生效）。
+- 函数体内定义函数（嵌套 `def`）：默认在前端拒绝；可用
+  `-DFC_ENABLE_NESTED_FUNCTIONS=ON` 放开前端的表示能力，但求值器与 LLVM codegen
+  仍然拒绝执行，且内层函数引用外层局部会被判为捕获并拒绝（不支持闭包）。
 
 其他已知行为：
 
