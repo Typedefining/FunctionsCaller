@@ -93,7 +93,7 @@ Remove-Item Env:\FC_TRACE
 
 ```text
 FCScanner::analysis            scanner.cc:11
-  └─ m_lexer.reset(inputStr)   scanner.cc:15   → lexer.cc:22
+  └─ m_lexer.reset(inputStr)   scanner.cc:15   → lexer.cc:16
   └─ m_parser.reset()          scanner.cc:16   → parser.cc:15
   └─ m_parser.parseProgram()   scanner.cc:19   → parser.cc:84
   └─ SemanticAnalyzer.analyze  scanner.cc:25
@@ -104,44 +104,48 @@ FCScanner::analysis            scanner.cc:11
 ```text
 Parser::begin          parser.cc:21-24 → 进入解析阶段并 advance()
 Parser::advance        parser.cc:26-29 → m_curTok = m_lexer.nextToken()
-Lexer::nextToken       lexer.cc:173   → 有预读就用预读，否则 getTok()
-Lexer::getTok          lexer.cc:56    → 真正的识别逻辑
-  └─ Lexer::readChar   lexer.cc:34    → 取一个字符，维护行号列号
+Lexer::nextToken            lexer.cc:162   → 在主游标上识别一个 Token
+Lexer::Cursor::getTok       lexer.cc:46    → 真正的识别逻辑（只读写游标与输入）
+  └─ Lexer::Cursor::readChar lexer.cc:22   → 按下标取一个字符，维护行列号
 ```
 
 逐个函数，只需要看懂这四件事：
 
-### `readChar()`（`lexer.cc:34-54`）
+### `Cursor::readChar()`（`lexer.cc:22-44`）
 
-- 从 `m_idx` 取一个字符，写入 `m_lastChar`；
-- **先把该字符自身的位置写进 `m_lastCharLine` / `m_lastCharColumn`，再推进行列**（`lexer.cc:44-52`）：遇到换行把行号加一、列号归 1，否则列号加一；
-- 到结尾返回 `EOF`，位置取"下一个字符本该出现的位置"（`lexer.cc:35-41`）。
+- 从 `m_input[pos]` 按**下标**取一个字符（`lexer.cc:31-33`），写入 `lastChar`，`pos` 后移；实现不持有迭代器，因此复制游标就等于复制读取位置；
+- **先把该字符自身的位置写进 `lastCharLine` / `lastCharColumn`，再推进行列**（`lexer.cc:34-42`）：遇到换行把行号加一、列号归 1，否则列号加一；
+- 到结尾返回 `EOF`，位置取"下一个字符本该出现的位置"（`lexer.cc:23-29`）。
 
-关键点：`m_lastChar` 不是"当前字符"，而是"**已经读进缓冲、尚未被消费**的那个字符"。整个 `getTok()` 都是围绕这个缓冲字符写的——先看它属于哪一类，再用 `readChar()` 把下一个字符读进来。
+关键点：`lastChar` 不是"当前字符"，而是"**已经读进缓冲、尚未被消费**的那个字符"。整个 `getTok()` 都是围绕这个缓冲字符写的——先看它属于哪一类，再用 `readChar()` 把下一个字符读进来。
 
-### `getTok()`（`lexer.cc:56-171`）
+### `Cursor::getTok()`（`lexer.cc:46-160`）
+
+先注意它为什么是 `Cursor` 的成员而不是 `Lexer` 的：识别一个 Token 只需要"输入 + 读取位置 + 行列号 + 缓冲字符"这四样，而它们全在 `Cursor` 里。`Lexer` 持有的只是 `m_input`、一个主游标 `m_cursor` 和最近产出的 `m_curToken`。这个切分是 `peekToken()` 能保持纯函数语义的前提（见下一节）。
 
 分支顺序是固定的，**顺序本身就是规则**：
 
 | 顺序 | 分支 | 位置 | 规则 |
 |---|---|---|---|
-| 1 | 跳过空白 | 57-60 | `isspace` 的所有字符（空格、制表、换行）直接丢弃 |
-| 2 | 标识符 / 关键字 | 65-90 | 首字符 `isalpha`，后续 `isalnum`；先按标识符扫完，再与 7 个关键字逐个比较，命中就返回对应枚举值 |
-| 3 | 数字 | 91-104 | 首字符 `isdigit` 或 `.`；后续接受数字与 `.` |
-| 4 | 字符串 | 105-120 | 以 `"` 开始，读到下一个 `"` 为止；读不到返回 `tok_error` |
-| 5 | 注释 | 121-129 | `#` 到行尾，然后**递归调用 `getTok()`** 继续 |
-| 6 | 输入结束 | 130-134 | 返回 `tok_eof` |
-| 7 | 标点与运算符 | 135-164 | 括号、花括号、逗号、等号、冒号、分号、`< + - * /` 各返回对应枚举值，同时填 `binop` |
-| 8 | `default` | 165-169 | 返回 `tok_error`，`lexeme` 携带 `unexpected character 'x'` |
+| 1 | 跳过空白 | 47-50 | `isspace` 的所有字符（空格、制表、换行）直接丢弃 |
+| 2 | 标识符 / 关键字 | 55-80 | 首字符 `isalpha`，后续 `isalnum`；先按标识符扫完，再与 7 个关键字逐个比较，命中就返回对应枚举值 |
+| 3 | 数字 | 81-93 | 首字符 `isdigit` 或 `.`；后续接受数字与 `.` |
+| 4 | 字符串 | 94-109 | 以 `"` 开始，读到下一个 `"` 为止；读不到返回 `tok_error` |
+| 5 | 注释 | 110-118 | `#` 到行尾，然后**递归调用 `getTok()`** 继续 |
+| 6 | 输入结束 | 119-123 | 返回 `tok_eof` |
+| 7 | 标点与运算符 | 124-153 | 括号、花括号、逗号、等号、冒号、分号、`< + - * /` 各返回对应枚举值，同时填 `binop` |
+| 8 | `default` | 154-159 | 返回 `tok_error`，`lexeme` 携带 `unexpected character 'x'` |
 
 为什么标识符要"先扫完再查表"？因为 `define`、`ifx`、`forall` 这类词必须整体识别成标识符，不能见到 `if` 就切一刀。这就是**最长匹配**（maximal munch）：在合法前提下尽可能多地吃字符。
 
-### `nextToken()` / `peekToken()` / `currentToken()`（`lexer.cc:173-204`）
+### `nextToken()` / `peekToken()` / `currentToken()`（`lexer.cc:162-185`）
 
-- `nextToken()`：正常取下一个，把结果同时存进 `m_curToken`；随后若 `traceEnabled("lexer")` 为真，打印一行诊断信息（`lexer.cc:180-184`）——所有诊断输出都集中在各阶段的入口/出口，业务分支里不夹打印语句；
-- `peekToken()`：需要看下一个但**不推进**。实现方式是把下一个单元预读进 `m_peekToken` 并置 `m_hasPeek`，下次 `nextToken()` 直接取缓存。注意它是 `const` 方法却要改成员，所以成员声明成 `mutable`，并用 `const_cast` 绕过 `const`（`lexer.cc:188-196`）——能工作，但不是好写法；
-- `currentToken()`：返回已经消费的那个单元；
-- `isAtEnd()`：判断当前单元是否为 `tok_eof`。
+- `nextToken()`：在主游标上识别下一个 Token，把结果同时存进 `m_curToken`（`lexer.cc:162-163`）；随后若 `traceEnabled("lexer")` 为真，打印一行诊断信息（`lexer.cc:164-169`）——所有诊断输出都集中在各阶段的入口/出口，业务分支里不夹打印语句；
+- `peekToken()`：需要看下一个但**不推进**。实现是复制主游标得到 `lookahead`，在副本上调用 `Cursor::getTok()`（`lexer.cc:172-177`）。主游标的读取位置、行列号、缓冲字符都不变，所以 `peekToken()` 是 `const` 方法却不需要 `mutable`、`const_cast` 或预读缓存；代价是 peek 时把下一个 Token 完整识别一次（原本也要识别，只是结果被缓存起来）；
+- `currentToken()`：返回已经消费的那个单元（`lexer.cc:179-181`）；
+- `isAtEnd()`：判断当前单元是否为 `tok_eof`（`lexer.cc:183-185`）。
+
+为什么不能"只判断下一个字符"来实现 peek？因为下一个 Token 可能隔着空白、注释甚至换行，长度也不确定；要得到它的 `kind` 与 `lexeme`，只能完整识别一次。把识别逻辑放进游标，才能既复用同一套规则，又不移动主游标。
 
 ### 谁在使用这些字段
 
@@ -160,8 +164,8 @@ Lexer::getTok          lexer.cc:56    → 真正的识别逻辑
 
 - **词法单元（token）与词素（lexeme）**：词素是源文本里的原始片段（`"1"`、`"+"`），词法单元是它的分类结果（`tok_number` + 词素 + 位置）。同一个词素在不同上下文可能属于不同类别，分类由词法规则决定。
 - **最长匹配**：识别时总是取最长的合法前缀。`ifx` 是一条标识符而不是 `if` 加 `x`。
-- **关键字不是词法单元类型，而是标识符的保留值**：实现上先扫成标识符，再查一张表（`lexer.cc:74-87`）把它改判为关键字。所以"关键字"在词法层面只是"某些特定的标识符"。
-- **预读（lookahead）**：解析器经常需要"看下一个单元但不推进"。两种实现：词法分析器内部缓存（本项目的做法），或者解析器自己维护一个单元缓冲。
+- **关键字不是词法单元类型，而是标识符的保留值**：实现上先扫成标识符，再查一张表（`lexer.cc:64-77`）把它改判为关键字。所以"关键字"在词法层面只是"某些特定的标识符"。
+- **预读（lookahead）**：解析器经常需要"看下一个单元但不推进"。常见实现有三种：词法分析器内部缓存结果；解析器自己维护一个单元缓冲；把读取位置做成可复制的值，peek 时在副本上识别（本项目 `lexer.cc:172-177` 的做法）。第三种不会让"已经读到哪里"变成隐藏状态，代价是重复识别一次。
 - **词法错误必须有自己的类别**：一个阶段发现错误后，要么产出表示"错误"的单元，要么向上抛异常；不能伪装成正常的输入结束。否则上层只能报出"表达式位置遇到输入结束"这类与真实原因无关的信息。
 - **词法阶段不该知道的东西**：优先级、类型、作用域。本项目里 `binop` 只是把字符映射成枚举，优先级表在 `parser.cc:56`——这条边界保持得比较干净。
 
@@ -173,7 +177,7 @@ Lexer::getTok          lexer.cc:56    → 真正的识别逻辑
 
 **1. 列号偏移一（旧的 `getTok()` 起点记录）**
 
-旧代码在跳过空白**之后**仍用 `m_curLine` / `m_curColumn` 记录起点，而 `readChar()` 每读一个字符就加一，于是 `1 + 2 * 3` 里的 `1` 被报成 `@1:2`。修复方式是把位置记录前移到 `readChar()` 内部、推进之前（`lexer.cc:44-46`）。这类缺陷不会让程序算错，只会让诊断信息误导人——而诊断信息是排障时唯一的线索。
+旧代码在跳过空白**之后**仍用 `m_curLine` / `m_curColumn` 记录起点，而 `readChar()` 每读一个字符就加一，于是 `1 + 2 * 3` 里的 `1` 被报成 `@1:2`。修复方式是把位置记录前移到 `readChar()` 内部、推进之前（`lexer.cc:35-36`）。这类缺陷不会让程序算错，只会让诊断信息误导人——而诊断信息是排障时唯一的线索。
 
 **2. 死分支（旧的数字分支）**
 
@@ -185,11 +189,11 @@ if (curDouble) {
 }
 ```
 
-两个分支返回完全相同的词法单元。`curDouble` 被计算、被判断，却从未影响结果——浮点数与整数的区分根本没有体现在词法单元上，而是在后面由 `lexeme` 是否存在 `.` 重新判断。修复：删掉 `curDouble` 与整个 `if/else`，直接返回；整数与浮点的区别由 `lexeme` 表达，具体类型在语义阶段依据声明类型确定（`lexer.cc:91-104`）。
+两个分支返回完全相同的词法单元。`curDouble` 被计算、被判断，却从未影响结果——浮点数与整数的区分根本没有体现在词法单元上，而是在后面由 `lexeme` 是否存在 `.` 重新判断。修复：删掉 `curDouble` 与整个 `if/else`，直接返回；整数与浮点的区别由 `lexeme` 表达，具体类型在语义阶段依据声明类型确定（`lexer.cc:81-93`）。
 
 **3. 未闭合字符串伪装成正常结束**
 
-旧代码在缺少右引号时返回 `tok_eof`，解析器看到的不是"字符串未闭合"，而是"表达式位置突然遇到输入结束"，最终错误信息是 `LogError: unknown FCToken when expecting an expression`。修复：增加 `tok_error` 类别，词法错误原样带上说明传上去（`lexer.cc:113-117`），由 `parser.cc:114-118` 直接展示：
+旧代码在缺少右引号时返回 `tok_eof`，解析器看到的不是"字符串未闭合"，而是"表达式位置突然遇到输入结束"，最终错误信息是 `LogError: unknown FCToken when expecting an expression`。修复：增加 `tok_error` 类别，词法错误原样带上说明传上去（`lexer.cc:104-105`），由 `parser.cc:126-130` 直接展示：
 
 ```text
 LogError: unterminated string literal
@@ -197,7 +201,7 @@ LogError: unterminated string literal
 
 **4. 运算符的两种编码并存**
 
-旧代码里 `+` 的 `kind` 是 ASCII 码 43，而 `=` 的 `kind` 是枚举值 `tok_assign`。同一个概念在同一个结构体里有两种表示法，任何按 `kind` 做 `switch` 的代码都必须记得这份例外。修复：`token.h:38-46` 增加 `tok_less`、`tok_plus`、`tok_minus`、`tok_star`、`tok_slash`、`tok_error`，`lexer.cc:135-169` 全部返回枚举值；未识别字符则返回 `tok_error`。
+旧代码里 `+` 的 `kind` 是 ASCII 码 43，而 `=` 的 `kind` 是枚举值 `tok_assign`。同一个概念在同一个结构体里有两种表示法，任何按 `kind` 做 `switch` 的代码都必须记得这份例外。修复：`token.h:46-52` 增加 `tok_less`、`tok_plus`、`tok_minus`、`tok_star`、`tok_slash`、`tok_error`，`lexer.cc:124-159` 全部返回枚举值；未识别字符则返回 `tok_error`。
 
 ---
 
@@ -217,21 +221,21 @@ LogError: unterminated string literal
 
 **实验 2：数字不再接受前导小数点**
 
-把 `lexer.cc:95` 的 `|| m_lastChar == '.'` 删掉，输入改成 `.5`。
+把 `lexer.cc:85` 的 `|| lastChar == '.'` 删掉，输入改成 `.5`。
 
 预期：`.` 变成 `tok_error`，错误信息是 `LogError: unexpected character '.'`（不再是"两个单元"——因为 `.` 已经由 `default` 分支统一处理为词法错误）。
 
 **实验 3：把词法错误降级回"未知单元"**
 
-删除 `parser.cc:114-117` 中 `case tok_error:` 那三行。输入改成 `"abc`，观察错误信息退化为 `LogError: unknown FCToken when expecting an expression`。
+删除 `parser.cc:126-129` 中 `case tok_error:` 那几行。输入改成 `"abc`，观察错误信息退化为 `LogError: unknown FCToken when expecting an expression`。
 
 预期：错误信息不再说明真实原因。恢复后确认它变回 `LogError: unterminated string literal`。这个实验说明错误类别不是装饰，它决定了排障时能不能一次定位。
 
 **实验 4：把列号改回偏移一**
 
-把 `lexer.cc:44-46` 的三行（`m_lastCharLine` / `m_lastCharColumn` 的赋值）移到 `lexer.cc:47-52` 的行列推进之后，重新构建并运行 `FunctionsUnitTest`。
+把 `lexer.cc:35-36` 的两行（`lastCharLine` / `lastCharColumn` 的赋值）移到 `lexer.cc:37-42` 的行列推进之后，重新构建并运行 `FunctionsUnitTest`。
 
-预期：`runLexerTests` 里以 `column` 为条件的断言失败，`1 + 2 * 3` 的列号整体加一。改完复原，并确认 759 个断言重新全绿。
+预期：`runLexerTests` 里以 `column` 为条件的断言失败，`1 + 2 * 3` 的列号整体加一。改完复原，并确认 762 个断言重新全绿。
 
 ---
 
@@ -239,16 +243,16 @@ LogError: unterminated string literal
 
 1. `1 + 2 * 3` 的 6 个单元里，第一个为什么是 `tok_number` 而不是别的？如果 `Parser` 构造函数仍保留 `advance()`，看到的现象会变成什么？
 2. `def` 为什么必须作为关键字处理，而不能在语法分析阶段当作普通标识符？如果不这样做，`parsePrimary` 会遇到什么歧义？
-3. `peekToken()` 被声明为 `const`，却修改了 `m_peekToken` 与 `m_hasPeek`。除了 `mutable`，还有什么等价写法？各自的代价是什么？
-4. 诊断输出为什么放在 `nextToken()` 而不是 `getTok()`？
+3. `peekToken()` 是 `const` 方法且不推进读取位置。它现在复制游标得到副本、在副本上完整识别一次；如果改成"复制识别逻辑、只读下一个字符就返回"，会在哪些输入上给出错误结果？
+4. 诊断输出为什么放在 `nextToken()` 而不是 `Cursor::getTok()`？
 5. 如果把 `line`/`column` 接进错误报告，最小改动点在哪几个函数？
 
 答案：
 
 1. 因为词法单元的产出从"输入的第一个字符"开始：`Parser` 在 `parseProgram()` 入口才调用 `begin()` 读取第一个单元（`parser.cc:21-23`、`86-89`），此时 Lexer 已收到 `1 + 2 * 3`，所以第一个就是 `tok_number`。若构造函数保留 `advance()`，它会先读空串，多出一个与输入无关的 `tok_eof @1:1`，单元数变成 7；这个单元随后被 `FCScanner::analysis` 里的 `reset()` 丢弃，所以不影响结果，只污染诊断输出。
 2. 因为 `def` 后面跟的是"函数名 + 参数列表 + 函数体"，与"标识符后跟调用参数"在词法层面完全同形。若不在词法层区分，`parsePrimary` 见到 `def` 只能是标识符或函数调用，无法判断接下来该解析原型还是实参。
-3. 方案一：去掉 `const`，让调用方持有非 `const` 引用（最简单，但丢失"不修改已消费状态"的语义）。方案二：把预读状态抽成独立的 `Tokenizer` 对象，由调用方持有可变副本（干净，但要改所有调用点）。
-4. `nextToken()` 是"已消费单元"的唯一出口，所有调用方都经过它，因此一处打印即可覆盖全部消费路径；`getTok()` 还会被注释递归调用，且返回后可能被 `peekToken()` 缓存而不立即消费，放在那里会重复或提前打印。
+3. 下一个单元可能隔着空白、注释甚至换行，长度也不确定：`"1"`、`"abc"`、`"  # c\n42"` 三种输入的下一个单元长度各不相同。只看一个字符无法判断它属于关键字、标识符、数字还是字符串（`if` 与 `ifx` 前两个字符相同），也无法给出正确的 `lexeme` 与结束位置。所以要么完整识别一次，要么把识别规则复制一份——后者会在两处规则上产生漂移，风险更大。
+4. `nextToken()` 是"已消费单元"的唯一出口，所有调用方都经过它，因此一处打印即可覆盖全部消费路径；`Cursor::getTok()` 还会被注释递归调用，且 `peekToken()` 也会在游标副本上调用它，放在那里会重复打印、并且把"只看不消费"的预读也打印成消费。
 5. `Parser::logError`（`parser.cc:73`）需要当前单元的位置；`Parser::parse...` 各处的错误信息需要带上 `m_curTok.line/column`；`FCScanner::analysis` 不会变。改造成本主要不在代码，而在于所有断言错误信息的测试都要跟着变。
 
 ---
