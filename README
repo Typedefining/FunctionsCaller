@@ -206,13 +206,13 @@ a = 10
 分隔符规则（全语言统一）：
 
 - `;` 是唯一的表达式分隔符；**裸 `;`（空语句）在任意层级均为非法**，包括顶层；
-- 顶层 `def` 定义块之后的收尾 `;` 是惯例写法，保持合法（如 `def f() { 1 }; f()`）；
+- `;` 只能跟在**非块终结**的表达式之后。块以 `}` 结尾，已经终止当前语句，其后不得再写 `;`，下一条语句直接开始：`def f() { 1 } f()` 合法，`def f() { 1 }; f()` 非法；
 - 序列遇到非表达式起始符即自然终止，由所属结构消费（`}` 属于块、`)` 属于括号、`else` 属于 `if`、`in` 属于 `for`）。
 
 块的值是最后一个表达式的求值结果。每个块引入一个新的作用域，块可以嵌套：
 
 ```text
-def nested() { { 1 }; { 2 }; 3 }
+def nested() { { 1 } { 2 } 3 }
 ```
 
 ## 函数定义
@@ -362,7 +362,7 @@ for i = 0, i < 10 in i
 - 循环表达式的值是最后一次循环体的求值结果：
 
 ```text
-def loopReturn(n:int) { for i = 0, i < n, 1 in i }; loopReturn(3)   # 求值为 2
+def loopReturn(n:int) { for i = 0, i < n, 1 in i } loopReturn(3)   # 求值为 2
 ```
 
 循环支持嵌套：
@@ -386,11 +386,11 @@ def update() { var x:int = 1; x = x + 1; x }
 (x = x + 2; x * 3)
 ```
 
-顶层可以包含多个函数定义和表达式：
+顶层可以包含多个函数定义和表达式。定义块以 `}` 收尾，下一条语句直接开始，不需要也不会接受 `;`：
 
 ```text
-def add(a:int, b:int) { a + b };
-def sub(a:int, b:int) { a - b };
+def add(a:int, b:int) { a + b }
+def sub(a:int, b:int) { a - b }
 add(10, 3)
 ```
 
@@ -454,7 +454,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\coverage.ps1 `
 
 ```cpp
 FCScanner scanner;
-auto ast = scanner.analysis("def add(a:int, b:int) { a + b }; add(2, 3)");
+auto ast = scanner.analysis("def add(a:int, b:int) { a + b } add(2, 3)");
 ```
 
 解释执行：

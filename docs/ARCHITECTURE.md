@@ -2,7 +2,7 @@
 
 > 基准分支：`refactor/var-symbol-binding`  
 > 文档日期：2026-10-21  
-> 当前状态：词法/语法/语义三阶段解耦完成；默认配置 775/775 断言通过，嵌套函数开关打开时 779/779；生产代码行覆盖率 95.63%  
+> 当前状态：词法/语法/语义三阶段解耦完成；默认配置 782/782 断言通过，嵌套函数开关打开时 786/786；生产代码行覆盖率 95.66%  
 > 语言标准：C++20（CMake 设定），LLVM 18.1.6（vcpkg），Windows + MSVC  
 > 关联文档：`docs/superpowers/plans/2025-06-20-lexer-parser-semantic-decoupling.md`（解耦方案）、`docs/superpowers/specs/2026-10-20-nested-functions-opt-in-design.md`（嵌套函数开关设计）、`docs/postmortems/2026-10-20-frame-anchor-and-separator-bugs.md`（三处设计缺陷复盘）
 
@@ -38,7 +38,7 @@
 ```
 ┌────────────────────────────────────────────────────────────────┐
 │  可执行目标                                                      │
-│  main.cc（最小入口）  unit_test.cc（775 断言测试）  shadow_repro  │
+│  main.cc（最小入口）  unit_test.cc（782 断言测试）  shadow_repro  │
 ├────────────────────────────────────────────────────────────────┤
 │  Facade 层                                                      │
 │  scanner.h/cc (35/49 行) — FCScanner                            │
@@ -226,21 +226,22 @@ Evaluator/Codegen: switch (FCBinaryOp) 分派
 | scanner.cc | 100.00% | Facade 全路径 |
 | trace.cc | 100.00% | 阶段匹配全分支 |
 | ast_dump.cc | 100.00% | 三类容器、if/for/call、字面量与兜底节点（120/120） |
-| parser.cc | 97.81% | 剩余为不可达防御分支 |
+| parser.cc | 97.90% | 剩余为不可达防御分支 |
 | semantic.cc | 96.15% | SemanticAnalyzer + 上下文 |
 | evaluator.cc | 97.32% | 错误分支经边界用例覆盖 |
 | codegen.cc | 90.97% | LLVM 错误注入路径为主 |
-| **Overall** | **95.63%** | **≥95% 门禁达标（默认配置）** |
+| **Overall** | **95.66%** | **≥95% 门禁达标（默认配置）** |
 
 统计口径：`pwsh -NoProfile -File tools/coverage.ps1 -BuildDir build-strict`（Microsoft.CodeCoverage.Console），排除 `unit_test.cc/main.cc`。
 
-测试总量：**775 断言，0 失败**（默认配置）；`-DFC_ENABLE_NESTED_FUNCTIONS=ON` 时 **779 断言，0 失败**。
+测试总量：**782 断言，0 失败**（默认配置）；`-DFC_ENABLE_NESTED_FUNCTIONS=ON` 时 **786 断言，0 失败**。
 两种配置由 `tools/verify-configurations.ps1` 统一验证。
 
 ---
 
 ## 8. 语言限制与已知行为
 
+- 分隔符只有 `;`，且只能跟在**非块终结**的表达式之后：块（`}`）已终止语句，其后写 `;` 报 `';' must not follow a block terminator`，下一条语句直接开始（`def f() { 1 } f()` 合法）
 - 不支持：`return`、`extern`、布尔字面量、除 `<` 外的比较/逻辑运算、一元负号、数组/结构体、字符串转义、下划线标识符、闭包
 - 嵌套 `def` 是**前端编译期选项**（`FC_ENABLE_NESTED_FUNCTIONS`，默认 OFF）：关闭时语义期直接拒绝；打开时前端允许表示与登记，但求值器与 codegen 一律拒绝执行，内层函数引用外层局部一律按捕获拒绝（`semantic.cc` 的 `m_symbolOwnerFrame` 判定）
 - 打开态下嵌套 `def` 仍不可调用：`FCFunctionRegistry::index` 只登记顶层函数，调用会落到 “unknown function” 失败路径
@@ -300,7 +301,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\coverage.ps1 `
 
 ```
 build-debug/Calculater/Debug/FunctionsCalculater.exe   # 最小入口
-build-debug/Calculater/Debug/FunctionsUnitTest.exe    # 775 断言测试套件（默认配置）
+build-debug/Calculater/Debug/FunctionsUnitTest.exe    # 782 断言测试套件（默认配置）
 build-debug/Calculater/Debug/ShadowRepro.exe          # 遮蔽行为复现工具
 ```
 
@@ -326,7 +327,7 @@ FunctionsCaller/
 │   ├── evaluator.h/cc(60/445) # 树遍历解释器 [后端A]
 │   ├── codegen.h/cc (51/983)  # LLVM IR 生成 [后端B]
 │   ├── main.cc      (9)       # 最小入口
-│   ├── unit_test.cc (3236)    # 综合断言套件
+│   ├── unit_test.cc (3265)    # 综合断言套件
 │   └── shadow_repro.cc (38)   # 遮蔽行为复现
 ├── tools/
 │   ├── coverage.ps1            # 行覆盖率（95% 门禁）
@@ -345,9 +346,11 @@ FunctionsCaller/
     └── superpowers/specs/2026-10-20-nested-functions-opt-in-design.md
 ```
 
-提交历史：117 commits（本分支领先 origin 2），最近演进序列：
+提交历史：119 commits（本分支领先 origin 4），最近演进序列：
 
 ```
+36261ee fix: 分隔符只能跟在非块终结的表达式之后，块结束后禁止再写分号
+8c83b97 docs: 新增第 2 段代码阅读章节（语法分析），同步架构指标
 0a14a1a feat: 语法层输出 AST 文本形式，接入 FC_TRACE=ast 诊断输出
 fca733d docs: 同步优先级表去重后的指标与行号
 76b1390 refactor: 删除语义层重复的运算符优先级表
@@ -362,8 +365,8 @@ bb9916a feat: 新增按阶段启用的诊断输出开关，修正词法层四处
 
 ---
 
-> 文档生成：2026-10-21（Asia/Shanghai），基于 `refactor/var-symbol-binding@0a14a1a` 实测代码结构与质量指标  
-> 验证口径：cmake 3.20+ / MSVC / LLVM 18.1.6 / 默认配置 775 断言、开关打开 779 断言 / coverage 95.63%
+> 文档生成：2026-10-21（Asia/Shanghai），基于 `refactor/var-symbol-binding@36261ee` 实测代码结构与质量指标  
+> 验证口径：cmake 3.20+ / MSVC / LLVM 18.1.6 / 默认配置 782 断言、开关打开 786 断言 / coverage 95.66%
 
 
 

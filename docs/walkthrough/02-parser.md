@@ -101,21 +101,21 @@ Remove-Item Env:\FC_TRACE
 | 2 | `Calculater/parser.cc:84-120` | `parseProgram()`：唯一入口，循环取语句 |
 | 3 | `Calculater/parser.cc:122-146` | `parsePrimary()`：按 `kind` 分派到 9 种基本形式 |
 | 4 | `Calculater/parser.cc:174-179` | `parseExpression()`：先取一个基本形式，再交给优先级处理 |
-| 5 | `Calculater/parser.cc:148-172` | `parseBinOpRHS()`：优先级爬升，决定 `+`/`*` 谁先结合 |
-| 6 | `Calculater/parser.cc:56-71` | `tokenPrecedence()`：优先级的**唯一**实现 |
-| 7 | `Calculater/parser.cc:39-53` | `startsExpression()`：序列是否继续的唯一判据 |
-| 8 | `Calculater/parser.cc:458-483` | `parseSeqExpr()`：`;` 连接的表达式序列 |
-| 9 | `Calculater/parser.cc:425-456` | `parseBlockExpr()`：`{ ... }` 块体 |
-| 10 | `Calculater/parser.cc:391-423` / `315-342` / `344-391` | 变量声明、`if`、`for` 三种带固定骨架的形式 |
+| 5 | `Calculater/parser.cc:158-181` | `parseBinOpRHS()`：优先级爬升，决定 `+`/`*` 谁先结合 |
+| 6 | `Calculater/parser.cc:63-78` | `tokenPrecedence()`：优先级的**唯一**实现 |
+| 7 | `Calculater/parser.cc:46-60` | `startsExpression()`：序列是否继续的唯一判据 |
+| 8 | `Calculater/parser.cc:472-501` | `parseSeqExpr()`：`;` 连接的表达式序列 |
+| 9 | `Calculater/parser.cc:434-470` | `parseBlockExpr()`：`{ ... }` 块体 |
+| 10 | `Calculater/parser.cc:402-432` / `324-351` / `353-400` | 变量声明、`if`、`for` 三种带固定骨架的形式 |
 
-### `parseProgram()`（`parser.cc:84-120`）
+### `parseProgram()`（`parser.cc:91-129`）
 
-三个契约值得记住：
+四个契约值得记住：
 
-- `parseProgram()` 之前必须先 `reset()`：`assert(!m_started)`（`parser.cc:87`）。Parser 构造时不读 token，`begin()`（`parser.cc:21-24`）才推进到第一个词法单元。"已构造但未开始"这个状态因此不存在。
-- `def` 是语句而不是表达式，单独走 `parseDefinition()`；`def` 块结束的 `}` 之后**允许**一个收尾 `;`（`parser.cc:96-97`），这是 `def f() {...}; f()` 这种惯例写法的来源。
-- 顶层裸 `;` 报 `empty statement at top level`（`parser.cc:104-106`）——`;` 是分隔符，不是空语句。
-- 任何一步失败都**立即返回** `nullptr`（`parser.cc:101`、`113`），不会带着同一个 token 重试。
+- `parseProgram()` 之前必须先 `reset()`：`assert(!m_started)`（`parser.cc:94`）。Parser 构造时不读 token，`begin()`（`parser.cc:22-26`）才推进到第一个词法单元。"已构造但未开始"这个状态因此不存在。
+- `def` 是语句而不是表达式，单独走 `parseDefinition()`；定义体以 `}` 收尾，**该语句到此结束**。紧随的 `;` 会报 `';' must not follow a block terminator`（`parser.cc:103-106`），下一条语句直接开始：`def f() { 1 } f()` 合法。
+- 顶层裸 `;` 报 `empty statement at top level`（`parser.cc:112-116`）——`;` 是分隔符，不是空语句。
+- 任何一步失败都**立即返回** `nullptr`（`parser.cc:110`、`122`），不会带着同一个 token 重试。
 
 ### `parsePrimary()`（`parser.cc:122-146`）
 
@@ -138,13 +138,13 @@ LHS = std::make_unique<FCBinaryExprAST>(op, std::move(LHS), std::move(RHS));
 
 `TokPrec + 1` 而不是 `TokPrec`，决定**左结合**：同级运算符在下一层递归里被拒绝，于是由外层循环继续向左合并。把它改成 `TokPrec`，`1 - 2 - 3` 会变成 `1 - (2 - 3)`（实验 2 会验证）。
 
-`tokenPrecedence()` 返回 `-1` 表示"当前 token 不是二元运算符"（`parser.cc:68-70`）。这个 `-1` 是必需的：如果返回 `0`，而调用方以 `0` 作为起始层次，`TokPrec < ExprPrec` 就变成 `0 < 0` 为假，`;` 与 EOF 会被当作运算符消费掉——第 5 步第 2 条会讲这个缺陷。
+`tokenPrecedence()` 返回 `-1` 表示"当前 token 不是二元运算符"（`parser.cc:75-76`）。这个 `-1` 是必需的：如果返回 `0`，而调用方以 `0` 作为起始层次，`TokPrec < ExprPrec` 就变成 `0 < 0` 为假，`;` 与 EOF 会被当作运算符消费掉——第 5 步第 2 条会讲这个缺陷。
 
-### `parseSeqExpr()`（`parser.cc:458-483`）与 `startsExpression()`（`parser.cc:39-53`）
+### `parseSeqExpr()`（`parser.cc:472-501`）与 `startsExpression()`（`parser.cc:46-60`）
 
 `;` 是分隔符，不是语句终止符。`parseSeqExpr()` 先解析一个表达式，然后**只在**下一个 token 是 `;` 时继续；`;` 之后用 `startsExpression()` 判断是否还有下一条表达式。`startsExpression()` 的 case 表与 `parsePrimary()` 完全相同，这不是重复，而是**同一个集合的两种用途**：前者回答"序列该不该继续"，后者回答"这个起始符该走哪个分支"。一旦两者不同构，就会出现"序列认为还有表达式、`parsePrimary` 却认不出"的错位。
 
-结构性 token——`}`、`)`、`else`、`in`、`def`、EOF、`;`——都不在起始符集合里，因此出现在序列位置时序列自然终止，把控制权交还外层结构消费。`parseBlockExpr()` 的终止符是 `}` 且由块自己消费（`parser.cc:434`、`453`）；块内空语句报 `empty statement in block`（`parser.cc:437-438`）。
+结构性 token——`}`、`)`、`else`、`in`、`def`、EOF、`;`——都不在起始符集合里，因此出现在序列位置时序列自然终止，把控制权交还外层结构消费。`parseBlockExpr()` 的终止符是 `}` 且由块自己消费（`parser.cc:434`、`467`）；块内空语句报 `empty statement in block`（`parser.cc:446-447`）。块内的规则与顶层一致：`;` 可以连接非块终结的表达式，但块语句以 `}` 结束后下一条语句直接开始（`parser.cc:463-464`），再写 `;` 报 `block terminator` 错误（`parser.cc:454-457`）。
 
 ---
 
@@ -162,7 +162,7 @@ LHS = std::make_unique<FCBinaryExprAST>(op, std::move(LHS), std::move(RHS));
 ## 第 5 步：这一层曾经踩过的三个坑（都已修掉）
 
 1. **词法单元的类型域不统一**：早期 `kind` 对运算符返回 ASCII 码（`'+'` 即 43），而 `=` 等标点返回枚举值，解析层却在用 `static_cast<char>(kind)` 比较——两边永远不相等，所有含运算符的程序都在解析期失败。现在运算符也有独立枚举（`tok_less=20` … `tok_slash=24`），解析层只比较枚举。
-2. **非运算符的优先级返回 0**：配合调用方以 `0` 为起始层次，`0 < 0` 为假，`;` 与 EOF 被当成二元运算符消费，随后 `parsePrimary()` 撞上 `}`、`def`、EOF，报出与实际原因无关的 `unknown FCToken`。现在非运算符返回 `-1`（`parser.cc:68-70`）。
+2. **非运算符的优先级返回 0**：配合调用方以 `0` 为起始层次，`0 < 0` 为假，`;` 与 EOF 被当成二元运算符消费，随后 `parsePrimary()` 撞上 `}`、`def`、EOF，报出与实际原因无关的 `unknown FCToken`。现在非运算符返回 `-1`（`parser.cc:75-76`）。
 3. **失败后不终止**：早期 `parseProgram()` 在 `parseSeqExpr()` 失败且已有错误标记时既不前进也不退出，同一个 token 反复进入序列解析，实测刷出 437 行重复 `LogError` 并触发 60 秒超时。现在失败路径只有一条：立即 `return nullptr`。
 4. **Parser 在构造期读 token**：早期构造函数直接 `advance()`，而构造时 Lexer 还是空串，于是每次分析都先产生一个与输入无关的 `tok_eof`。现在 `begin()` 才读第一个 token（`parser.cc:21-24`），并加断言禁止未开始就读取位置。
 
@@ -192,7 +192,7 @@ Binary -
 
 **实验 3：让序列不终止**
 
-在 `parser.cc:470` 把 `startsExpression(m_curTok.kind)` 改成恒真，再解析 `1;`。序列在 `;` 之后看到 EOF 仍认为"还有表达式"，于是 `parsePrimary()` 收到 EOF：
+在 `parser.cc:486` 把 `startsExpression(m_curTok.kind)` 改成恒真，再解析 `1;`。序列在 `;` 之后看到 EOF 仍认为"还有表达式"，于是 `parsePrimary()` 收到 EOF：
 
 ```text
 LogError: unknown FCToken when expecting an expression
@@ -200,15 +200,15 @@ LogError: unknown FCToken when expecting an expression
 
 这说明"序列该不该继续"必须由起始符集合回答，不能靠猜测。
 
-**实验 4：去掉 `def` 收尾分号的容忍**
+**实验 4：让 `;` 重新跟在 `}` 之后**
 
-删掉 `parser.cc:96-97` 两行，再解析 `def f() { 1 }; f()`：
+把 `parseSeqExpr()` 里 `lastTokenWasBlockClose()` 的守卫（`parser.cc:483-484`）和 `parseProgram()` 的 def 分支守卫（`parser.cc:103-106`）都去掉，再把 `Calculater/main.cc` 的输入换成 `def f() { 1 }; f()`：
 
 ```text
-LogError: empty statement at top level
+ast=ok parseError=0
 ```
 
-`}` 之后的 `;` 失去承接者，落到顶层循环，被当作空语句拒绝。
+`;` 一旦无人拦截，就被当成普通分隔符吞掉，规则随之消失，`def f() { 1 }; f()` 重新变合法。这正是守卫存在的原因：`}` 已经结束语句，再写 `;` 是多余的标点。
 
 ---
 
