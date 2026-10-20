@@ -84,7 +84,7 @@ Remove-Item Env:\FC_TRACE
 
 1. **token 流与输入一一对应，没有多余单元**。`6` 个单元正是 `1`、`+`、`2`、`*`、`3` 和结尾标记。这一点曾经不成立：`Parser` 的构造函数里调用过一次 `advance()`，而 `FCScanner` 构造 `Parser` 时 Lexer 还持有空串，于是每次 `analysis()` 的第一个单元都是一个与输入无关的 `tok_eof`（`@1:1`）。修复方式是让"读取第一个 token"只发生在解析阶段开始时：`Parser::begin()`（`parser.cc:21-23`）在 `parseProgram()` 入口被调用（`parser.cc:87-88`），构造函数只建立与 Lexer 的引用关系。
 2. **位置是词法单元第一个字符的位置，列号从 1 开始**。`1` 报 `@1:1`，`+` 报 `@1:3`，EOF 报 `@1:10`（最后一个字符之后）。这依赖 `readChar()` 在**推进行列之前**记录每个字符自身的位置（`lexer.cc:35-36`）。
-3. **`Token` 只记录词法类别**：`+` 的类别是 `tok_plus`，"它是加法还是减法"不属于词法层。运算符含义由解析层用 `binaryOpOf(kind)` 推得（`token.h:66-78`），AST 才因此拿到 `FCBinaryOp`。早期 `Token` 里还有一个 `binop` 字段，与 `kind` 一一对应，属于可失步的重复表示，已删除。
+3. **`Token` 只记录词法类别**：`+` 的类别是 `tok_plus`，"它是加法还是减法"不属于词法层。运算符含义由解析层用 `binaryOpOf(kind)` 推得（`token.h:66-78`），AST 才因此拿到 `FCBinaryOp`。早期 `Token` 里还有一个 `binop` 字段，与 `kind` 一一对应，属于同一事实的两份副本（违反单一数据源），两者可能不一致，已删除。
 
 ---
 
@@ -214,9 +214,9 @@ LogError: unterminated string literal
 
 预期：`1 + 2 * 3` 分析失败，`stderr` 出现 `LogError: unknown FCToken when expecting an expression`。词法阶段不受影响——`[lexer] kind=21 lexeme='+' @1:3` 照常打印，说明 `Token` 仍正确表达了"这是个 `+`"。
 
-推导链（读代码验证）：`binaryOpOf(tok_plus)=Unknown` → `tokenPrecedence` 返回 `-1`（`parser.cc:61`）→ `parseBinOpRHS` 认为 `+` 不是运算符、不消费它 → `parseSeqExpr` 返回 `1` → `parseProgram` 下一轮仍在 `+` 上 → `parseSeqExpr` → `parsePrimary` 的 `default` 分支报错（`parser.cc:112-115`）。
+推导链（读代码验证）：`binaryOpOf(tok_plus)=Unknown` → `tokenPrecedence` 返回 `-1`（`parser.cc:69`）→ `parseBinOpRHS` 认为 `+` 不是运算符、不消费它 → `parseSeqExpr` 返回 `1` → `parseProgram` 下一轮仍在 `+` 上 → `parseSeqExpr` → `parsePrimary` 的 `tok_error`/`default` 分支报错（`parser.cc:124-128`）。
 
-这个实验说明一件事：**运算符含义只存在于解析层这一次映射里；词法层给出的 `kind` 没有第二份副本可以与之失步**。
+这个实验说明一件事：**运算符含义只存在于解析层这一次映射里；词法层给出的 `kind` 是唯一的类别表示，不存在需要与它保持一致的第二份副本**。
 
 **实验 2：数字不再接受前导小数点**
 
@@ -234,7 +234,7 @@ LogError: unterminated string literal
 
 把 `lexer.cc:35-36` 的两行（`lastCharLine` / `lastCharColumn` 的赋值）移到 `lexer.cc:37-42` 的行列推进之后，重新构建并运行 `FunctionsUnitTest`。
 
-预期：`runLexerTests` 里以 `column` 为条件的断言失败，`1 + 2 * 3` 的列号整体加一。改完复原，并确认 763 个断言重新全绿。
+预期：`runLexerTests` 里以 `column` 为条件的断言失败，`1 + 2 * 3` 的列号整体加一。改完复原，并确认 756 个断言重新全绿。
 
 ---
 
