@@ -29,14 +29,20 @@ public:
 	bool started() const { return m_started; }
 
 private:
+	// 语句分隔符 ';' 的合法位置：只能出现在非块终结的表达式之后。
+	// 块（'}'）已经终止当前语句，其后不得再有 ';'，下一条语句直接开始。
 	Lexer& m_lexer;
 	Token m_curTok;
+	int m_prevKind = -1;
 	bool m_hadError = false;
 	bool m_started = false;
 
 	void begin();
 	void advance();
 	bool check(int kind) const;
+
+	// 上一个被消费的 token 是否是 '}'：用于判定 ';' 是否紧跟块终结符。
+	bool lastTokenWasBlockClose() const;
 	static int tokenPrecedence(FCMarks::FCBinaryOp op);
 
 	std::unique_ptr<FCExprClass::FCExprAST> logError(const char* msg);

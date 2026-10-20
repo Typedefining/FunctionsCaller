@@ -199,11 +199,11 @@ private:
             {"def concat(a:string, b:string) { a + b }", "string function"},
             {"var g:double = 3.14; g * 2.0", "floating global"},
             {"def nestedCall() { add(2, 3) }", "function call inside function"},
-            {"var g:int = 0; def inc() { g = g + 1 }; def dec() { g = g - 1 }", "multiple functions with global"},
+            {"var g:int = 0; def inc() { g = g + 1 } def dec() { g = g - 1 }", "multiple functions with global"},
             {"def sum(n:int) { var s:int = 0; for i = 0, i < n, 1 in s = s + i; s }", "loop with accumulation"},
             {"def countdown(n:int) { if n < 1 then 0 else (var x:int = n; x - countdown(n - 1)) }", "complex recursive"},
             {"var a:int = 5; (a = a + 1; a * 2)", "assignment in parentheses"},
-            {"def id(x:int) { x }; id(id(3))", "nested function calls"},
+            {"def id(x:int) { x } id(id(3))", "nested function calls"},
             {"var s:string = \"abc\"; s + \"def\"", "string variable concatenation"},
             {"0 - 1", "negative via subtraction"},
             {"2 * 3 + 4 / 2", "mixed precedence"},
@@ -212,13 +212,13 @@ private:
             {"\"a\" + \"b\" + \"c\"", "string chain concatenation"},
             {"# comment only\n42", "comment then number"},
             {"var a:int = 1; var b:int = 2; a = b; a", "assignment chain"},
-            {"def f() { 1 }; def g() { f() + f() }; g()", "multiple functions and call"},
+            {"def f() { 1 } def g() { f() + f() } g()", "multiple functions and call"},
             {"def loop(n:int) { for i = 0, i < n in i }", "for without step"},
             {"def dbl(x:double) { x * 2.0 }", "double parameter"},
             {"def str(s:string) { s }", "string parameter"},
             {"if 1 then 2 else 3", "top-level if"},
             {"(1; 2; 3)", "sequence in parentheses"},
-            {"def nested() { { 1 }; { 2 }; 3 }", "nested blocks"},
+            {"def nested() { { 1 } { 2 } 3 }", "nested blocks"},
             {"var g:double = 1.5; def r() { g }", "double global"},
             {"def many(a:int, b:int, c:int, d:int) { a + b + c + d }", "four-argument function"},
             {"def mix(a:int, b:double, c:string) { a }", "mixed parameter types"},
@@ -233,13 +233,13 @@ private:
             {"1 + 2 + 3 + 4 + 5 + 6 + 7 + 8 + 9 + 10", "long additive chain"},
             {"var x1:int = 1; x1 + x1", "identifier containing digit"},
             {"def f(a:int) { a = a + 1; a }", "assignment to parameter"},
-            {"1; def f() { 2 }; 3", "mixed statements with def in middle"},
+            {"1; def f() { 2 } 3", "mixed statements with def in middle"},
             {"\"\"", "empty string literal"},
             {"2.0", "float with trailing digit"},
             {"def f() { var x:int = 1; { var y:int = 2; x + y } }", "nested block with locals"},
             {"def f() { for i = 0, i < 5, 1 in for j = 0, j < 5, 1 in i + j }", "nested for loops"},
             {"def f() { if 1 then if 2 then 3 else 4 else 5 }", "if nested in then"},
-            {"var g:int = 1; def bump() { g = g + 1 }; bump()", "global function call"},
+            {"var g:int = 1; def bump() { g = g + 1 } bump()", "global function call"},
             {"def f() { (1 + 2) * (3 + 4) - 5 / 2 }", "arithmetic with parens"},
             {"0.5 + 0.25", "fractional literals"},
             {"def f(a:int, b:double, c:string, d:int) { a + b }", "four mixed params"}
@@ -302,10 +302,39 @@ private:
             expect(bareSemi.hadParseError(),
                    "scanner-facade - bare semicolon flags parse error");
 
-            // def 块后的收尾 ';' 是惯例写法，保持合法（"def ...}; expr"）
+            // 分隔符统一规则：';' 只能跟在非块终结的表达式之后。
+            // def 体以 '}' 收尾，其后不得再有 ';'（"def ...} expr" 现为非法）
             FCScanner defTail;
             auto tailAst = defTail.analysis("def f() { 1 }; f()");
-            expect(tailAst != nullptr, "scanner-facade - def trailing semicolon stays legal");
+            expect(tailAst == nullptr,
+                   "scanner-facade - ';' after a definition is rejected");
+            expect(defTail.hadParseError(),
+                   "scanner-facade - ';' after a definition flags parse error");
+
+            // 但下一条语句可以直接写，无需分隔符
+            FCScanner defAdjacent;
+            expect(defAdjacent.analysis("def f() { 1 } f()") != nullptr,
+                   "scanner-facade - definition followed directly by a statement");
+
+            // 块终结后同一条规则：下一条语句直接开始，不得再用 ';' 连接
+            FCScanner blockSeq;
+            expect(blockSeq.analysis("var g:int = 0; { g = 1 } { g = 2 } g") != nullptr,
+                   "scanner-facade - statements may follow a block without ';'");
+
+            FCScanner blockSemi;
+            expect(blockSemi.analysis("var g:int = 0; { g = 1 }; g") == nullptr,
+                   "scanner-facade - ';' after a block is rejected");
+            expect(blockSemi.hadParseError(),
+                   "scanner-facade - ';' after a block flags parse error");
+
+            FCScanner ifBlocks;
+            expect(ifBlocks.analysis("def pick(c:int) { if c then { 1 } else { 2 } 3 }") != nullptr,
+                   "scanner-facade - if arms end blocks, next statement follows directly");
+
+            // 块内同样不得用 ';' 连接在块之后
+            FCScanner innerBlockSemi;
+            expect(innerBlockSemi.analysis("def f() { var g:int = 0; { g = 1 }; g }") == nullptr,
+                   "scanner-facade - ';' after a block inside a body is rejected");
 
             // 词法错误在语法阶段之前暴露：返回 null 并标记解析错误
             FCScanner lexErr;
@@ -417,7 +446,7 @@ private:
             {"def power(a:int, n:int) { if n < 1 then 1 else a * power(a, n - 1) }", "recursive power", true},
             {"var g:double = 2.5; def mul() { g * 2.0 }", "global double", true},
             {"def concat(a:string, b:string) { a + b }", "string function", true},
-            {"var x:int = 1; def f() { x }; def g() { var x:int = 2; f() }", "shadowing check", true},
+            {"var x:int = 1; def f() { x } def g() { var x:int = 2; f() }", "shadowing check", true},
             {"def sumTo(n:int) { var s:int = 0; for i = 0, i < n, 1 in s = s + i; s }", "loop with local", true},
             {"def simple() { var x:int = 1; var y:int = 2; x + y }", "multiple locals", true},
             {"var g1:int = 1; var g2:int = 2; g1 + g2", "multiple globals work", true},
@@ -504,24 +533,24 @@ private:
     {
         std::vector<std::tuple<std::string, std::string, std::string>> evaluatorCases = {
             {"var x:int = 5; x + 3", "variable declaration", "8"},
-            {"def square(x:int) { x * x }; square(4)", "function call", "16"},
-            {"def add(a:int, b:int) { a + b }; add(3, 7)", "two-argument function", "10"},
+            {"def square(x:int) { x * x } square(4)", "function call", "16"},
+            {"def add(a:int, b:int) { a + b } add(3, 7)", "two-argument function", "10"},
             {"if 1 then 10 else 20", "if true branch", "10"},
             {"if 0 then 10 else 20", "if false branch", "20"},
-            {"def fib(n:int) { if n < 2 then n else fib(n - 1) + fib(n - 2) }; fib(5)", "fibonacci", "5"},
+            {"def fib(n:int) { if n < 2 then n else fib(n - 1) + fib(n - 2) } fib(5)", "fibonacci", "5"},
             {"var x:int = 1; x = x + 1; x", "assignment", "2"},
-            {"def power(a:int, n:int) { if n < 1 then 1 else a * power(a, n - 1) }; power(2, 4)", "power function", "16"},
-            {"var counter:int = 0; def inc() { counter = counter + 1 }; inc(); inc(); counter", "global counter", "2"},
-            {"def fact(n:int) { if n < 2 then 1 else n * fact(n - 1) }; fact(6)", "factorial", "720"},
-            {"def max(a:int, b:int) { if a < b then b else a }; max(10, max(5, 20))", "nested call", "20"},
-            {"var g:int = 1; def f() { g = g + 1 }; f(); f(); g", "global mutation", "3"},
-            {"def sum(n:int) { var s:int = 0; for i = 0, i < n, 1 in s = s + i; s }; sum(10)", "loop sum", "45"},
-            {"def concat(a:string, b:string) { a + b }; concat(\"ab\", \"cd\")", "string function", "\"abcd\""},
+            {"def power(a:int, n:int) { if n < 1 then 1 else a * power(a, n - 1) } power(2, 4)", "power function", "16"},
+            {"var counter:int = 0; def inc() { counter = counter + 1 } inc(); inc(); counter", "global counter", "2"},
+            {"def fact(n:int) { if n < 2 then 1 else n * fact(n - 1) } fact(6)", "factorial", "720"},
+            {"def max(a:int, b:int) { if a < b then b else a } max(10, max(5, 20))", "nested call", "20"},
+            {"var g:int = 1; def f() { g = g + 1 } f(); f(); g", "global mutation", "3"},
+            {"def sum(n:int) { var s:int = 0; for i = 0, i < n, 1 in s = s + i; s } sum(10)", "loop sum", "45"},
+            {"def concat(a:string, b:string) { a + b } concat(\"ab\", \"cd\")", "string function", "\"abcd\""},
             {"var x:int = 1; (x = x + 2; x * 3)", "assignment in seq", "9"},
-            {"def id(x:int) { x }; id(id(5))", "nested id", "5"},
-            {"def countdown(n:int) { if n < 1 then 0 else (var x:int = n; x - countdown(n - 1)) }; countdown(5)", "alternating sum", "3"},
+            {"def id(x:int) { x } id(id(5))", "nested id", "5"},
+            {"def countdown(n:int) { if n < 1 then 0 else (var x:int = n; x - countdown(n - 1)) } countdown(5)", "alternating sum", "3"},
             {"var s:string = \"a\"; s = s + \"b\"; s + \"c\"", "string variable", "\"abc\""},
-            {"def loopReturn(n:int) { for i = 0, i < n, 1 in i }; loopReturn(3)", "loop return value", "2"},
+            {"def loopReturn(n:int) { for i = 0, i < n, 1 in i } loopReturn(3)", "loop return value", "2"},
             {"10 - 3", "integer subtraction", "7"},
             {"2 * 3 + 1", "multiplication precedence", "7"},
             {"(2 + 3) * 4", "parenthesized precedence", "20"},
@@ -532,55 +561,55 @@ private:
             {"6.0 / 2.0", "floating division", "3.0"},
             {"if 1.5 then 1 else 2", "floating truthy condition", "1"},
             {"if 0.0 then 1 else 2", "floating falsey condition", "2"},
-            {"def sumDefault(n:int) { var s:int = 0; for i = 0, i < n in s = s + i; s }; sumDefault(5)", "for default step", "10"},
-            {"def dbl(x:double) { x * 2.0 }; dbl(3.5)", "double function", "7.0"},
-            {"def bang(s:string) { s + \"!\" }; bang(\"hi\")", "string append", "\"hi!\""},
+            {"def sumDefault(n:int) { var s:int = 0; for i = 0, i < n in s = s + i; s } sumDefault(5)", "for default step", "10"},
+            {"def dbl(x:double) { x * 2.0 } dbl(3.5)", "double function", "7.0"},
+            {"def bang(s:string) { s + \"!\" } bang(\"hi\")", "string append", "\"hi!\""},
             {"var a:string = \"x\"; var b:string = \"y\"; a + b", "string globals", "\"xy\""},
-            {"def sub(a:int, b:int) { a - b }; sub(10, 4)", "function subtraction", "6"},
-            {"def div(a:int, b:int) { a / b }; div(20, 4)", "function division", "5"},
-            {"def fsub(a:double, b:double) { a - b }; fsub(5.5, 2.0)", "float function subtraction", "3.5"},
-            {"def fdiv(a:double, b:double) { a / b }; fdiv(7.5, 2.5)", "float function division", "3.0"},
-            {"var x:int = 10; def f() { var x:int = 2; x }; f()", "local shadows global", "2"},
+            {"def sub(a:int, b:int) { a - b } sub(10, 4)", "function subtraction", "6"},
+            {"def div(a:int, b:int) { a / b } div(20, 4)", "function division", "5"},
+            {"def fsub(a:double, b:double) { a - b } fsub(5.5, 2.0)", "float function subtraction", "3.5"},
+            {"def fdiv(a:double, b:double) { a / b } fdiv(7.5, 2.5)", "float function division", "3.0"},
+            {"var x:int = 10; def f() { var x:int = 2; x } f()", "local shadows global", "2"},
             // 块级遮蔽：同函数内层块重新声明同名变量，内层声明必须覆盖外层符号
-            {"def f() { var x:int = 1; { var x:int = 2; x } }; f()", "block shadowing inner wins", "2"},
-            {"def f() { var x:int = 1; { var x:int = 2; }; x }; f()", "block shadowing outer restored", "1"},
-            {"def nested2() { var x:int = 1; var y:int = 2; x + y }; nested2()", "multiple locals", "3"},
-            {"def nf(n:int) { var s:int = 0; for i = 0, i < n, 1 in for j = 0, j < n, 1 in s = s + i; s }; nf(3)", "nested for loop", "9"},
-            {"def accum(n:int) { var r:int = 1; for i = 1, i < n, 1 in r = r * 2; r }; accum(5)", "loop accumulation multiply", "16"},
-            {"def choose(n:int) { if n < 3 then 1 else (choose(n - 1) + choose(n - 2)) }; choose(6)", "tree recursion", "8"},
+            {"def f() { var x:int = 1; { var x:int = 2; x } } f()", "block shadowing inner wins", "2"},
+            {"def f() { var x:int = 1; { var x:int = 2; } x } f()", "block shadowing outer restored", "1"},
+            {"def nested2() { var x:int = 1; var y:int = 2; x + y } nested2()", "multiple locals", "3"},
+            {"def nf(n:int) { var s:int = 0; for i = 0, i < n, 1 in for j = 0, j < n, 1 in s = s + i; s } nf(3)", "nested for loop", "9"},
+            {"def accum(n:int) { var r:int = 1; for i = 1, i < n, 1 in r = r * 2; r } accum(5)", "loop accumulation multiply", "16"},
+            {"def choose(n:int) { if n < 3 then 1 else (choose(n - 1) + choose(n - 2)) } choose(6)", "tree recursion", "8"},
             // ---- 新增 ----
-            {"def isEven(n:int) { if n < 1 then 1 else isOdd(n - 1) }; def isOdd(n:int) { if n < 1 then 0 else isEven(n - 1) }; isEven(10)", "mutual recursion even", "1"},
-            {"def isEven(n:int) { if n < 1 then 1 else isOdd(n - 1) }; def isOdd(n:int) { if n < 1 then 0 else isEven(n - 1) }; isOdd(6)", "mutual recursion odd false", "0"},
-            {"def isEven(n:int) { if n < 1 then 1 else isOdd(n - 1) }; def isOdd(n:int) { if n < 1 then 0 else isEven(n - 1) }; isOdd(7)", "mutual recursion odd true", "1"},
-            {"def sumdown(n:int) { var s:int = 0; for i = n, 0 < i, 0 - 1 in s = s + i; s }; sumdown(5)", "negative step loop", "15"},
-            {"def f() { 1 }; def g() { 2 }; f() + g()", "multiple functions combined", "3"},
-            {"var g:int = 0; def bump() { g = g + 2 }; bump(); bump(); g", "global accumulation", "4"},
-            {"def dec(n:int) { n - 1 }; dec(dec(dec(5)))", "chained calls", "2"},
-            {"def add3(a:int, b:int, c:int) { a + b + c }; add3(1, 2, 3)", "three-argument function", "6"},
-            {"var s:string = \"ab\"; def app(x:string) { s = s + x; s }; app(\"c\")", "string param mutation", "\"abc\""},
-            {"def dbl2(x:double) { x * 2.0 }; dbl2(dbl2(2.0))", "double chained", "8.0"},
-            {"def pick(a:int) { if a then 1 else 0 }; pick(0) + pick(5)", "if as value", "1"},
-            {"var a:int = 1; var b:int = 2; def swap() { var t:int = a; a = b; b = t }; swap(); a * 10 + b", "swap via temp", "21"},
-            {"def fib10(n:int) { if n < 2 then n else fib10(n - 1) + fib10(n - 2) }; fib10(10)", "fibonacci 10", "55"},
-            {"def loop1(n:int) { for i = 0, i < n, 1 in i }; loop1(1)", "single iteration loop", "0"},
-            {"def loop0(n:int) { for i = 0, i < n, 1 in i }; loop0(0)", "zero iteration loop", "0"},
+            {"def isEven(n:int) { if n < 1 then 1 else isOdd(n - 1) } def isOdd(n:int) { if n < 1 then 0 else isEven(n - 1) } isEven(10)", "mutual recursion even", "1"},
+            {"def isEven(n:int) { if n < 1 then 1 else isOdd(n - 1) } def isOdd(n:int) { if n < 1 then 0 else isEven(n - 1) } isOdd(6)", "mutual recursion odd false", "0"},
+            {"def isEven(n:int) { if n < 1 then 1 else isOdd(n - 1) } def isOdd(n:int) { if n < 1 then 0 else isEven(n - 1) } isOdd(7)", "mutual recursion odd true", "1"},
+            {"def sumdown(n:int) { var s:int = 0; for i = n, 0 < i, 0 - 1 in s = s + i; s } sumdown(5)", "negative step loop", "15"},
+            {"def f() { 1 } def g() { 2 } f() + g()", "multiple functions combined", "3"},
+            {"var g:int = 0; def bump() { g = g + 2 } bump(); bump(); g", "global accumulation", "4"},
+            {"def dec(n:int) { n - 1 } dec(dec(dec(5)))", "chained calls", "2"},
+            {"def add3(a:int, b:int, c:int) { a + b + c } add3(1, 2, 3)", "three-argument function", "6"},
+            {"var s:string = \"ab\"; def app(x:string) { s = s + x; s } app(\"c\")", "string param mutation", "\"abc\""},
+            {"def dbl2(x:double) { x * 2.0 } dbl2(dbl2(2.0))", "double chained", "8.0"},
+            {"def pick(a:int) { if a then 1 else 0 } pick(0) + pick(5)", "if as value", "1"},
+            {"var a:int = 1; var b:int = 2; def swap() { var t:int = a; a = b; b = t } swap(); a * 10 + b", "swap via temp", "21"},
+            {"def fib10(n:int) { if n < 2 then n else fib10(n - 1) + fib10(n - 2) } fib10(10)", "fibonacci 10", "55"},
+            {"def loop1(n:int) { for i = 0, i < n, 1 in i } loop1(1)", "single iteration loop", "0"},
+            {"def loop0(n:int) { for i = 0, i < n, 1 in i } loop0(0)", "zero iteration loop", "0"},
             {"\"a\" + \"b\" + \"c\"", "string chain concat top-level", "\"abc\""},
-            {"def mul2(a:int, b:int) { a * b }; def twice(x:int) { mul2(x, 2) }; twice(21)", "call through helper", "42"},
-            {"var g:double = 1.0; def up() { g = g + 0.5 }; up(); up(); g", "double global mutation", "2.0"},
-            {"def f() { var x:int = 1; { var y:int = 2; x + y } }; f()", "block locals", "3"},
-            {"def cl(n:int) { if n < 1 then 0 else (cl(n - 1) + 1) }; cl(25)", "linear recursion 25", "25"},
-            {"def gauss(n:int) { var s:int = 0; for i = 1, i < n, 1 in s = s + i; s }; gauss(100)", "gauss sum", "4950"},
+            {"def mul2(a:int, b:int) { a * b } def twice(x:int) { mul2(x, 2) } twice(21)", "call through helper", "42"},
+            {"var g:double = 1.0; def up() { g = g + 0.5 } up(); up(); g", "double global mutation", "2.0"},
+            {"def f() { var x:int = 1; { var y:int = 2; x + y } } f()", "block locals", "3"},
+            {"def cl(n:int) { if n < 1 then 0 else (cl(n - 1) + 1) } cl(25)", "linear recursion 25", "25"},
+            {"def gauss(n:int) { var s:int = 0; for i = 1, i < n, 1 in s = s + i; s } gauss(100)", "gauss sum", "4950"},
             {"0 - 7", "negative result", "-7"},
             {"7 * 0", "multiply by zero", "0"},
             {"var s:string = \"x\"; s + \"\"", "string plus empty", "\"x\""},
             // 触发 evaluator.cc 赋值时符号未绑定的错误分支（line 174-176）
             {"var x:int = 1; (x = 2)", "assignment value check", "2"},
             // 触发 evaluator.cc 无效 slot 错误分支（line 179-184）
-            {"def f() { var x:int = 1; x }; f()", "local variable in function", "1"},
+            {"def f() { var x:int = 1; x } f()", "local variable in function", "1"},
             // 触发 evaluateBinary 默认操作符分支（line 213-215）
-            {"def f(a:int, b:int) { a + b }; f(3, 7)", "binary add function call", "10"},
+            {"def f(a:int, b:int) { a + b } f(3, 7)", "binary add function call", "10"},
             // 触发 evaluateFor slot 越界（line 88-89）
-            {"def f(n:int) { for i = 0, i < n, 1 in i }; f(5)", "for loop return last", "4"},
+            {"def f(n:int) { for i = 0, i < n, 1 in i } f(5)", "for loop return last", "4"},
         };
 
         for (const auto& [code, name, expected] : evaluatorCases)
@@ -712,7 +741,7 @@ private:
         // 4. for 循环变量 slot 越界（触发 line 88-89）
         {
             FCScanner scanner;
-            auto ast = scanner.analysis("def f(n:int) { for i = 0, i < n, 1 in i }; f(5)");
+            auto ast = scanner.analysis("def f(n:int) { for i = 0, i < n, 1 in i } f(5)");
             if (ast)
             {
                 CompiledProgram program = scanner.semanticContext().getCompiledProgram();
@@ -833,21 +862,21 @@ private:
             {"def one() { 1 }", "single function", 1},
             {"def add(a:int, b:int) { a + b }", "function with params", 1},
             {"def fib(n:int) { if n < 2 then n else fib(n - 1) + fib(n - 2) }", "recursive function", 1},
-            {"def square(x:int) { x * x }; def cube(x:int) { x * x * x }", "multiple functions", 2},
-            {"var g:int = 1; def read() { g }; def write() { g = 2 }", "functions with globals", 2},
+            {"def square(x:int) { x * x } def cube(x:int) { x * x * x }", "multiple functions", 2},
+            {"var g:int = 1; def read() { g } def write() { g = 2 }", "functions with globals", 2},
             {"def empty() { 42 }", "zero-argument function", 1},
-            {"def a() { 1 }; def b() { 2 }; def c() { 3 }", "three functions", 3},
+            {"def a() { 1 } def b() { 2 } def c() { 3 }", "three functions", 3},
             {"def f() { var x:int = 1; x }", "function with local", 1},
             {"def fact(n:int) { if n < 2 then 1 else n * fact(n - 1) }", "recursive factorial", 1},
-            {"def a() { 1 }; def b() { 2 }; def c() { 3 }; def d() { 4 }", "four functions", 4},
-            {"def a() { 1 }; def b() { 2 }; def c() { 3 }; def d() { 4 }; def e() { 5 }", "five functions", 5},
+            {"def a() { 1 } def b() { 2 } def c() { 3 } def d() { 4 }", "four functions", 4},
+            {"def a() { 1 } def b() { 2 } def c() { 3 } def d() { 4 } def e() { 5 }", "five functions", 5},
             {"var g:int = 1; def f() { g }", "global plus function", 1},
             {"def mix(a:int, b:double, c:string) { a }", "mixed-parameter function", 1},
-            {"def f() { var x:int = 1; x }; def g() { f() }", "local and call", 2},
+            {"def f() { var x:int = 1; x } def g() { f() }", "local and call", 2},
             {"def r(n:int) { if n < 1 then 0 else r(n - 1) }", "recursive", 1},
-            {"def f1() { 1 }; def f2() { 2 }; def f3() { 3 }; def f4() { 4 }; def f5() { 5 }; def f6() { 6 }", "six functions", 6},
+            {"def f1() { 1 } def f2() { 2 } def f3() { 3 } def f4() { 4 } def f5() { 5 } def f6() { 6 }", "six functions", 6},
             // ---- 新增 ----
-            {"def a() { 1 }; var g:int = 1; def b() { g }", "functions interleaved with global", 2}
+            {"def a() { 1 } var g:int = 1; def b() { g }", "functions interleaved with global", 2}
         };
 
         for (const auto& [code, name, expectedCount] : registryCases)
@@ -967,7 +996,7 @@ private:
             {"def iftest(a:int) { if a < 1 then 1 else 2 }", "if expression"},
             {"def loop(n:int) { for i = 0, i < n, 1 in i }", "for loop"},
             {"def local(a:int) { var b:int = a + 1; b }", "local variable"},
-            {"var g:int = 10; def read() { g }; def write() { g = 20 }", "global variables"},
+            {"var g:int = 10; def read() { g } def write() { g = 20 }", "global variables"},
             {"def fib(n:int) { if n < 2 then n else fib(n - 1) + fib(n - 2) }", "recursive function"},
             {"def power(a:int, n:int) { if n < 1 then 1 else a * power(a, n - 1) }", "power function"},
             {"def fact(n:int) { if n < 2 then 1 else n * fact(n - 1) }", "factorial recursion"},
@@ -975,8 +1004,8 @@ private:
             {"def sum(n:int) { var s:int = 0; for i = 0, i < n, 1 in s = s + i; s }", "loop with accumulation"},
             {"def countdown(n:int) { if n < 1 then 0 else (var x:int = n; x - countdown(n - 1)) }", "complex recursion"},
             {"var g:double = 3.14; def readDouble() { g }", "global double"},
-            {"def id(x:int) { x }; def caller() { id(42) }", "nested function call"},
-            {"var s:string = \"hello\"; def get() { s }; def set(x:string) { s = x }", "string global"},
+            {"def id(x:int) { x } def caller() { id(42) }", "nested function call"},
+            {"var s:string = \"hello\"; def get() { s } def set(x:string) { s = x }", "string global"},
             {"def sub(a:int, b:int) { a - b }", "integer subtraction"},
             {"def div(a:int, b:int) { a / b }", "integer division"},
             {"def cmp(a:int, b:int) { a < b }", "integer comparison"},
@@ -987,36 +1016,36 @@ private:
             {"def big(n:int) { var s:int = 0; for i = 0, i < n in s = s + i; s }", "for default step"},
             {"def nest(n:int) { var s:int = 0; for i = 0, i < n, 1 in for j = 0, j < n, 1 in s = s + i; s }", "nested for"},
             {"var x:int = 1; def f() { var x:int = 2; x }", "local shadows global"},
-            {"var g:int = 0; def inc() { g = g + 1 }; def run() { inc(); inc(); g }", "global mutation via functions"},
+            {"var g:int = 0; def inc() { g = g + 1 } def run() { inc(); inc(); g }", "global mutation via functions"},
             {"def seqfn() { (var x:int = 1; x + 1; x + 2) }", "sequence function"},
-            {"def div2(a:double, b:double) { a / b }; def caller() { div2(7.5, 2.5) }", "nested float call"},
+            {"def div2(a:double, b:double) { a / b } def caller() { div2(7.5, 2.5) }", "nested float call"},
             {"var gd:double = 1.5; var gi:int = 2; def mix2() { gd + gi }", "mixed globals"},
-            {"def strcat(a:string, b:string) { a + b }; def use() { strcat(\"a\", \"b\") }", "string concat via call"},
+            {"def strcat(a:string, b:string) { a + b } def use() { strcat(\"a\", \"b\") }", "string concat via call"},
             {"def many(n:int) { var a:int = 1; var b:int = 2; var c:int = 3; var d:int = 4; a + b + c + d + n }", "many locals"},
             {"def branch(a:int) { if a < 1 then 1 else if a < 2 then 2 else 3 }", "nested if else"},
             {"def gauss(n:int) { var s:int = 0; for i = 1, i < n, 1 in s = s + i; s }", "gauss loop"},
             {"(var g:int = 1; g + 1); def f() { g }", "global in top-level sequence"},
-            {"{ 1 + 2 }; def f() { 3 }", "top-level block in program"},
+            {"{ 1 + 2 } def f() { 3 }", "top-level block in program"},
             {"if 1 then 2 else 3; def f() { 4 }", "top-level if in program"},
-            {"def fib(n:int) { if n < 2 then n else fib(n - 1) + fib(n - 2) }; fib(5)", "recursive function in program"},
+            {"def fib(n:int) { if n < 2 then n else fib(n - 1) + fib(n - 2) } fib(5)", "recursive function in program"},
             {"def fmax(a:double, b:double) { if a < b then b else a }", "double if expression"},
             {"def fcond(a:double) { if a then 1 else 2 }", "floating if condition"},
             {"var s:string = \"hi\"", "standalone string global"},
             // ---- 新增 ----
-            {"def caller() { later(5) }; def later(x:int) { x + 1 }", "forward reference call"},
-            {"def isEven(n:int) { if n < 1 then 1 else isOdd(n - 1) }; def isOdd(n:int) { if n < 1 then 0 else isEven(n - 1) }", "mutual recursion codegen"},
-            {"def f(n:int) { var s:int = 0; for i = 0, i < n, 1 in { s = s + i }; s }", "for with block body"},
+            {"def caller() { later(5) } def later(x:int) { x + 1 }", "forward reference call"},
+            {"def isEven(n:int) { if n < 1 then 1 else isOdd(n - 1) } def isOdd(n:int) { if n < 1 then 0 else isEven(n - 1) }", "mutual recursion codegen"},
+            {"def f(n:int) { var s:int = 0; for i = 0, i < n, 1 in { s = s + i } s }", "for with block body"},
             {"def f() { 1 + 2 * 3 - 4 / 2 + (5 * 6) }", "deep arithmetic"},
-            {"def f(a:double) { a }; def g() { f(1) }", "int arg to double param"},
+            {"def f(a:double) { a } def g() { f(1) }", "int arg to double param"},
             {"var g:double = 1.5; def f() { g = 2.5 }", "double global assignment"},
-            {"def f(a:int) { a }; def g() { f(3) }; def h() { g() + f(4) }", "call chain across functions"},
+            {"def f(a:int) { a } def g() { f(3) } def h() { g() + f(4) }", "call chain across functions"},
             {"def f() { if 1 then 2 else 3 }", "constant condition if"},
             {"var x:int = 1; x + 2", "top-level expression with global"},
             {"def f(n:int) { var s:int = 0; for i = 0, i < n, 1 in s = s + (i * 2); s }", "loop with arithmetic body"},
             {"def f(a:int) { var r:int = a; r = r * 2; r = r + 1; r }", "sequential local assignments"},
             {"def f(s:string) { s + s }", "string param self concat"},
-            {"def f(a:double, b:double) { if a < b then a else b }; def g() { f(1.0, 2.0) }", "double call with comparison"},
-            {"def outer(n:int) { var s:int = 0; for i = 0, i < n, 1 in { var t:int = i * 2; s = s + t }; s }", "loop with inner declaration"},
+            {"def f(a:double, b:double) { if a < b then a else b } def g() { f(1.0, 2.0) }", "double call with comparison"},
+            {"def outer(n:int) { var s:int = 0; for i = 0, i < n, 1 in { var t:int = i * 2; s = s + t } s }", "loop with inner declaration"},
             {"var g1:int = 1; var g2:int = 2; def f() { g1 + g2 }", "two globals read in function"},
             {"def f() { 3.0 / 2.0 }", "float division literal"}
         };
@@ -1085,7 +1114,7 @@ private:
         // 测试错误处理
         std::cout << "  Testing: error handling - invalid code\n";
         FCScanner scanner;
-        // {"{ var g:int = 1; g }; def f() { g }", "top-level block with scoped declaration"},
+        // {"{ var g:int = 1; g } def f() { g }", "top-level block with scoped declaration"},
         auto ast = scanner.analysis("def bad() { unknown_function() }");
         if (ast)
         {
@@ -1137,8 +1166,8 @@ private:
         std::vector<std::pair<std::string, std::string>> errorCases = {
             {"1 = 2", "assignment to non-variable"},
             {"def f() { unknownfn() }", "function body call to unknown function"},
-            {"def f(a:int) { a }; f(1, 2)", "argument count mismatch"},
-            {"def f(a:int) { a }; f(\"s\")", "call argument type mismatch"},
+            {"def f(a:int) { a } f(1, 2)", "argument count mismatch"},
+            {"def f(a:int) { a } f(\"s\")", "call argument type mismatch"},
             {"if \"a\" then 1 else 2", "top-level if"},
             {"def f() { if \"a\" then 1 else 2 }", "if condition not numeric"},
             {"def f() { if 1 then 1 else \"s\" }", "if branch type mismatch"},
@@ -1152,18 +1181,18 @@ private:
             {"def f() { var x:int = 1; x = \"s\"; x }", "assignment type mismatch"},
             {"def f() { \"a\" - \"b\" }", "string subtraction"},
             {"def f(a:double) { a + \"s\" }", "double plus string"},
-            {"def f(a:int) { a }; f(unknownfn())", "call argument codegen error"},
+            {"def f(a:int) { a } f(unknownfn())", "call argument codegen error"},
             {"def f() { if 1 then unknownfn() else 2 }", "if then branch error"},
             {"def f() { if 1 then 2 else unknownfn() }", "if else branch error"},
             {"def f() { for i = 0, i < 3, 1 in unknownfn() }", "for body error"},
-            {"def f() { unknownfn() }; 1", "program function codegen error"},
+            {"def f() { unknownfn() } 1", "program function codegen error"},
             {"def empty() {}", "empty function body"},
             // ---- 新增 ----
             {"def f(a:string, b:string) { a < b }", "string comparison"},
             {"def f() { 1.0 = 2.0 }", "assignment to float literal"},
             {"def f() { var x:int = 1; for i = 0, i < 3, 1 in x = \"s\" }", "assignment mismatch in loop body"},
-            {"def f(a:int) { a }; f(1, 2, 3)", "too many arguments"},
-            {"def f() { g(1) }; g(1)", "call to undefined top-level function"},
+            {"def f(a:int) { a } f(1, 2, 3)", "too many arguments"},
+            {"def f() { g(1) } g(1)", "call to undefined top-level function"},
             {"def f() { if 1.5 then 1 else \"x\" }", "float condition with string branch"},
             {"def f() { var x:int = 1; x = x + \"s\"; x }", "assignment with mismatched rhs"},
             {"def f() { for i = 0, i < 3, 1 in 1.0 = 2.0 }", "assignment to literal in loop body"},
@@ -1910,7 +1939,7 @@ private:
 
         // 多条独立语句（含函数定义）才包装 FCProgramAST
         {
-            FC::Lexer lexer("def f() { 1 }; 2");
+            FC::Lexer lexer("def f() { 1 } 2");
             FC::Parser parser(lexer);
             auto ast = parser.parseProgram();
             expect(ast != nullptr, "parser - program with function parses");
@@ -1960,7 +1989,7 @@ private:
 
         // def 终止顶层序列：表达式 def 表达式 三语句程序
         {
-            FC::Lexer lexer("1; def f() { 2 }; 3");
+            FC::Lexer lexer("1; def f() { 2 } 3");
             FC::Parser parser(lexer);
             auto ast = parser.parseProgram();
             expect(ast != nullptr, "parser - def terminates top-level seq");
@@ -2110,7 +2139,7 @@ private:
         expect(dumpOf("1.5") == "Number 1.5\n",
                "ast-dump - floating literal");
 
-        expect(dumpOf("def f() { 1 }; def g() { 2 }") ==
+        expect(dumpOf("def f() { 1 } def g() { 2 }") ==
                    "Program (2 statements)\n"
                    "  Function f()\n"
                    "    Block (1 expressions)\n"
@@ -2919,18 +2948,18 @@ private:
 
         std::vector<std::pair<std::string, std::string>> errorCases = {
             {"undefinedfn(1)", "call to undefined function"},
-            {"def f(a:int) { a }; f(1, 2)", "argument count mismatch"},
+            {"def f(a:int) { a } f(1, 2)", "argument count mismatch"},
             {"1 + \"a\"", "int plus string mismatch"},
-            {"def fl(n:int) { for i = 0.0, i < n, 1 in i }; fl(3)", "floating loop variable"},
+            {"def fl(n:int) { for i = 0.0, i < n, 1 in i } fl(3)", "floating loop variable"},
             {"\"a\" - \"b\"", "string subtraction"},
             {"if \"a\" then 1 else 2", "non-numeric if condition"},
             {"for i = 0, i < 3, 1 in i", "top-level for loop"},
-            {"def f(n:int) { for i = 0, i < n, 1 in undefinedfn() }; f(3)", "loop body error"},
+            {"def f(n:int) { for i = 0, i < n, 1 in undefinedfn() } f(3)", "loop body error"},
             {"(1; \"a\" - \"b\"; 3)", "sequence error propagation"},
-            {"def f() { var x:int = undefinedfn(); x }; f()", "declaration init error"},
+            {"def f() { var x:int = undefinedfn(); x } f()", "declaration init error"},
             {"1 = 2", "assignment to non-variable"},
             {"var x:int = 1; x = undefinedfn(); x", "assignment rhs error"},
-            {"def f(a:int) { a }; f(undefinedfn())", "call argument error"},
+            {"def f(a:int) { a } f(undefinedfn())", "call argument error"},
             {"def f() { 1 }", "standalone function definition"},
             {"1.0 < 2.0", "float comparison"},
             // ---- 新增 ----
@@ -2938,12 +2967,12 @@ private:
             {"2.0 + 1", "double plus int mismatch"},
             {"\"a\" + 1", "string plus int"},
             {"if undefinedfn() then 1 else 2", "dangle if condition"},
-            {"def f() { 1.0 + 2 }; f()", "mixed arithmetic inside function"},
-            {"def f() { \"a\" * 2 }; f()", "string multiplication"},
+            {"def f() { 1.0 + 2 } f()", "mixed arithmetic inside function"},
+            {"def f() { \"a\" * 2 } f()", "string multiplication"},
             {"undefinedfn() + 1", "dangle lhs binary"},
-            {"def f(n:int) { for i = 0, i < n, undefinedfn() in i }; f(3)", "dangle for step"},
-            {"def f() { if 1 then undefinedfn() else 2 }; f()", "dangle then branch"},
-            {"def f() { var x:int = 1; x = x + \"s\"; x }; f()", "mixed assignment rhs"},
+            {"def f(n:int) { for i = 0, i < n, undefinedfn() in i } f(3)", "dangle for step"},
+            {"def f() { if 1 then undefinedfn() else 2 } f()", "dangle then branch"},
+            {"def f() { var x:int = 1; x = x + \"s\"; x } f()", "mixed assignment rhs"},
             {"var g:int = 1; g + \"s\"", "global plus string"}
         };
 
@@ -3088,18 +3117,18 @@ private:
         std::cout << std::string(60, '=') << "\n";
 
         std::vector<std::tuple<std::string, std::string, std::string>> stressCases = {
-            {"def count(n:int) { if n < 1 then 0 else count(n - 1) + 1 }; count(100)", "deep recursion 100", "100"},
-            {"def sumN(n:int) { var s:int = 0; for i = 0, i < n, 1 in s = s + i; s }; sumN(1000)", "large loop 1000", "499500"},
-            {"def fib(n:int) { if n < 2 then n else fib(n - 1) + fib(n - 2) }; fib(15)", "fibonacci 15", "610"},
-            {"def pow2(n:int) { var r:int = 1; for i = 0, i < n, 1 in r = r * 2; r }; pow2(20)", "exponential loop", "1048576"},
-            {"def ack(m:int) { if m < 1 then 1 else (ack(m - 1) + ack(m - 1)) }; ack(12)", "binary tree recursion", "4096"},
+            {"def count(n:int) { if n < 1 then 0 else count(n - 1) + 1 } count(100)", "deep recursion 100", "100"},
+            {"def sumN(n:int) { var s:int = 0; for i = 0, i < n, 1 in s = s + i; s } sumN(1000)", "large loop 1000", "499500"},
+            {"def fib(n:int) { if n < 2 then n else fib(n - 1) + fib(n - 2) } fib(15)", "fibonacci 15", "610"},
+            {"def pow2(n:int) { var r:int = 1; for i = 0, i < n, 1 in r = r * 2; r } pow2(20)", "exponential loop", "1048576"},
+            {"def ack(m:int) { if m < 1 then 1 else (ack(m - 1) + ack(m - 1)) } ack(12)", "binary tree recursion", "4096"},
             // ---- 新增 ----
-            // {"def count(n:int) { if n < 1 then 0 else count(n - 1) + 1 }; count(250)", "deep recursion 250", "250"},
-            {"def sumN(n:int) { var s:int = 0; for i = 0, i < n, 1 in s = s + i; s }; sumN(10000)", "large loop 10000", "49995000"},
-            {"def fib(n:int) { if n < 2 then n else fib(n - 1) + fib(n - 2) }; fib(20)", "fibonacci 20", "6765"},
-            {"def pow2(n:int) { var r:int = 1; for i = 0, i < n, 1 in r = r * 2; r }; pow2(25)", "exponential loop 25", "33554432"},
-            {"def ack(m:int) { if m < 1 then 1 else (ack(m - 1) + ack(m - 1)) }; ack(15)", "binary tree recursion 15", "32768"},
-            {"var a:int = 2; def f(x:int) { x * 2 }; def g(n:int) { var s:int = 0; for i = 0, i < n, 1 in s = s + f(i); s }; g(10)", "mixed program with call in loop", "90"}
+            // {"def count(n:int) { if n < 1 then 0 else count(n - 1) + 1 } count(250)", "deep recursion 250", "250"},
+            {"def sumN(n:int) { var s:int = 0; for i = 0, i < n, 1 in s = s + i; s } sumN(10000)", "large loop 10000", "49995000"},
+            {"def fib(n:int) { if n < 2 then n else fib(n - 1) + fib(n - 2) } fib(20)", "fibonacci 20", "6765"},
+            {"def pow2(n:int) { var r:int = 1; for i = 0, i < n, 1 in r = r * 2; r } pow2(25)", "exponential loop 25", "33554432"},
+            {"def ack(m:int) { if m < 1 then 1 else (ack(m - 1) + ack(m - 1)) } ack(15)", "binary tree recursion 15", "32768"},
+            {"var a:int = 2; def f(x:int) { x * 2 } def g(n:int) { var s:int = 0; for i = 0, i < n, 1 in s = s + f(i); s } g(10)", "mixed program with call in loop", "90"}
         };
 
         for (const auto& [code, name, expected] : stressCases)
@@ -3130,13 +3159,13 @@ private:
         // 上下文复用：同一求值上下文连续执行两个程序
         {
             FCScanner s1;
-            auto ast1 = s1.analysis("def f1(x:int) { x + 1 }; f1(1)");
+            auto ast1 = s1.analysis("def f1(x:int) { x + 1 } f1(1)");
             FCEvaluationContext ctx = makeEvalContext(s1);
             expect(evaluate(ast1.get(), ctx).type == FCValueCategory::Integer,
                    "stress - context reuse program 1");
 
             FCScanner s2;
-            auto ast2 = s2.analysis("def g1(x:int) { x * 2 }; g1(21)");
+            auto ast2 = s2.analysis("def g1(x:int) { x * 2 } g1(21)");
             ctx.compiledProgram = s2.semanticContext().getCompiledProgram();
             FCValue r2 = evaluate(ast2.get(), ctx);
             expect(r2.type == FCValueCategory::Integer && r2.evaluteVal.intVal == 42,
@@ -3147,10 +3176,10 @@ private:
         {
             std::string code =
                 "var a:int = 1; var b:double = 2.5; "
-                "def f1(x:int) { x + 1 }; "
-                "def f2(x:double) { x * 2.0 }; "
-                "def f3(x:int) { if x < 10 then x else x - 10 }; "
-                "def f4(n:int) { var s:int = 0; for i = 0, i < n, 1 in s = s + i; s }; "
+                "def f1(x:int) { x + 1 } "
+                "def f2(x:double) { x * 2.0 } "
+                "def f3(x:int) { if x < 10 then x else x - 10 } "
+                "def f4(n:int) { var s:int = 0; for i = 0, i < n, 1 in s = s + i; s } "
                 "f4(f1(a))";
             FCScanner scanner;
             auto ast = scanner.analysis(code);
@@ -3171,7 +3200,7 @@ private:
 
         // 深嵌套代码生成
         {
-            std::string code = "def f(n:int) { var s:int = 0; for i = 0, i < n, 1 in { var t:int = i; if t < 10 then s = s + t else s = s - t }; s }";
+            std::string code = "def f(n:int) { var s:int = 0; for i = 0, i < n, 1 in { var t:int = i; if t < 10 then s = s + t else s = s - t } s }";
             FCScanner scanner;
             auto ast = scanner.analysis(code);
             if (ast)
@@ -3214,11 +3243,11 @@ static void run(const char* src) {
 
 int main()
 {
-    run("def f() { var x:int = 1; { var x:int = 2; x } }; f()");       // 期望 2
-    run("def f() { var x:int = 1; { var x:int = 2; }; x }; f()");      // 期望 1
-    run("def f() { var x:int = 1; x }; f()");                          // 期望 1（对照）
-    run("def f() { var x:int = 1; { var y:int = 2; x } }; f()");       // 期望 1（对照：不同名）
-    run("def f() { { var x:int = 2; x } }; f()");                      // 期望 2（对照：仅内层）
+    run("def f() { var x:int = 1; { var x:int = 2; x } } f()");       // 期望 2
+    run("def f() { var x:int = 1; { var x:int = 2; } x } f()");      // 期望 1
+    run("def f() { var x:int = 1; x } f()");                          // 期望 1（对照）
+    run("def f() { var x:int = 1; { var y:int = 2; x } } f()");       // 期望 1（对照：不同名）
+    run("def f() { { var x:int = 2; x } } f()");                      // 期望 2（对照：仅内层）
     std::cout << std::unitbuf;
     std::cerr << std::unitbuf;
     std::cout << "COMPREHENSIVE TOY LANGUAGE TEST SUITE\n";

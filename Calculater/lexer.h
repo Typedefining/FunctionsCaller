@@ -7,10 +7,10 @@
 namespace FC {
 
 struct Token {
-	int kind;          // FCToken 枚举值（int）
+	int kind = static_cast<int>(FCMarks::FCToken::tok_begin);
 	std::string lexeme; // 原始文本
-	int line;
-	int column;
+	int line = 1;
+	int column = 1;
 };
 
 /// 词法分析器：字符流 -> Token 流

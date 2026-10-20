@@ -15,17 +15,24 @@ Parser::Parser(Lexer& lexer)
 void Parser::reset() {
 	m_hadError = false;
 	m_started = false;
+	m_prevKind = -1;
 }
 
 // 进入解析阶段：此后 m_curTok 始终是下一个待消费的 token。
 void Parser::begin() {
 	m_started = true;
 	advance();
+	m_prevKind = -1;
 }
 
 void Parser::advance() {
 	assert(m_started && "advance() 只能在解析阶段内调用");
+	m_prevKind = m_curTok.kind;
 	m_curTok = m_lexer.nextToken();
+}
+
+bool Parser::lastTokenWasBlockClose() const {
+	return m_prevKind == static_cast<int>(FCMarks::FCToken::tok_brace_close);
 }
 
 bool Parser::check(int kind) const {
@@ -87,14 +94,16 @@ std::unique_ptr<FCExprAST> Parser::parseProgram() {
 	assert(!m_started && "parseProgram() 前必须 reset()");
 	begin();
 	while (m_curTok.kind != static_cast<int>(FCToken::tok_eof)) {
-		// def 是语句而非表达式：交回 parseDefinition；
-		// def 块的 '}' 之后允许一个收尾 ';'（惯例写法 "def ...}; expr"）
+		// def 是语句而非表达式：交回 parseDefinition；块已终止该语句，
+		// 因此其后不允许再用 ';' 分隔。
 		if (m_curTok.kind == static_cast<int>(FCToken::tok_def)) {
 			auto fn = parseDefinition();
 			if (fn) {
 				statements.push_back(std::move(fn));
-				if (m_curTok.kind == static_cast<int>(FCToken::tok_semicolon))
-					advance();
+				if (m_curTok.kind == static_cast<int>(FCToken::tok_semicolon)) {
+					logError("';' must not follow a block terminator");
+					return nullptr;
+				}
 				continue;
 			}
 			// 函数定义失败（含函数体错误）即整体失败
@@ -443,11 +452,16 @@ std::unique_ptr<FCExprAST> Parser::parseBlockExpr() {
 		expressions.push_back(std::move(expr));
 
 		if (m_curTok.kind == static_cast<int>(FCToken::tok_semicolon)) {
+			// 语句分隔符只能跟在非块终结的表达式之后
+			if (lastTokenWasBlockClose())
+				return logError("';' must not follow a block terminator");
 			advance();
 			continue;   // ';' 后允许直接 '}'（末尾分隔符合法）
 		}
 		if (m_curTok.kind == static_cast<int>(FCToken::tok_brace_close))
 			break;      // 最后一条不带 ';' 直接收尾，同样合法
+		if (lastTokenWasBlockClose())
+			continue;   // 块已终止当前语句，下一条语句直接开始
 		return logError("expected ';' or '}' in block");
 	}
 	advance();  // 消费 '}'
@@ -466,6 +480,8 @@ std::unique_ptr<FCExprAST> Parser::parseSeqExpr() {
 	// 终止判定唯一权威：下一个 token 不是表达式起始符即终止，
 	// 由外层结构（}、)、else、in、def、eof）消费，序列不做猜测
 	while (m_curTok.kind == static_cast<int>(FCToken::tok_semicolon)) {
+		if (lastTokenWasBlockClose())
+			return logError("';' must not follow a block terminator");
 		advance();
 		if (!startsExpression(m_curTok.kind))
 			break;
