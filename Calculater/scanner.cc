@@ -1,5 +1,10 @@
 #include "scanner.h"
 
+#include "ast_dump.h"
+#include "trace.h"
+
+#include <iostream>
+
 using namespace FCExprClass;
 using namespace FCMarks;
 
@@ -19,6 +24,11 @@ FCScanner::analysis(const ::std::string &inputStr) {
     auto ast = m_parser.parseProgram();
     if (!ast || m_parser.hadError()) {
         return nullptr;
+    }
+
+    // 阶段2 的诊断输出：FC_TRACE=ast 时把纯语法树打印到 stderr
+    if (FC::traceEnabled("ast")) {
+        std::cerr << describeAst(*ast) << "\n";
     }
 
     // 阶段3：SemanticAnalyzer — 纯语法 AST -> 语义绑定、frameIndex 赋值

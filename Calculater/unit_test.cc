@@ -3,6 +3,7 @@
 #include "scanner.h"
 #include "semantic.h"
 #include "language_options.h"
+#include "ast_dump.h"
 #include "lexer.h"
 #include "parser.h"
 #include "trace.h"
@@ -109,6 +110,9 @@ public:
 
         // ============ Parser Tests (独立语法测试，只组 Lexer，不依赖 Semantic) ============
         runParserTests();
+
+        // ============ AST Dump Tests (语法树文本形式，供代码阅读章节引用) ============
+        runAstDumpTests();
 
         // ============ Symbol Table Tests ============
         runSymbolTableTests();
@@ -1997,6 +2001,164 @@ private:
             expect(ast == nullptr && parser.hadError(),
                    "parser - unterminated block is an error");
         }
+    }
+
+    // ==================== AST Dump Tests ====================
+    void runAstDumpTests()
+    {
+        std::cout << "\n" << std::string(60, '=') << "\n";
+        std::cout << "AST DUMP TESTS\n";
+        std::cout << std::string(60, '=') << "\n";
+
+        auto dumpOf = [](const std::string &code) {
+            FCScanner scanner;
+            auto ast = scanner.analysis(code);
+            return ast ? describeAst(*ast) : std::string("<error>");
+        };
+
+        expect(dumpOf("1 + 2 * 3") == "Binary +\n"
+                                      "  Number 1\n"
+                                      "  Binary *\n"
+                                      "    Number 2\n"
+                                      "    Number 3\n",
+               "ast-dump - precedence tree");
+
+        expect(dumpOf("(1 + 2) * 3") == "Binary *\n"
+                                        "  Binary +\n"
+                                        "    Number 1\n"
+                                        "    Number 2\n"
+                                        "  Number 3\n",
+               "ast-dump - parentheses override precedence");
+
+        expect(dumpOf("var a:int = 1; a") == "Seq (2 expressions)\n"
+                                             "  VarDecl a:int\n"
+                                             "    Number 1\n"
+                                             "  Variable a\n",
+               "ast-dump - declaration and reference");
+
+        expect(dumpOf("def add(a:int, b:int) { a + b }") ==
+                   "Function add(a:int, b:int)\n"
+                   "  Block (1 expressions)\n"
+                   "    Binary +\n"
+                   "      Variable a\n"
+                   "      Variable b\n",
+               "ast-dump - function with parameters");
+
+        expect(dumpOf("def pick(a:int, b:int) { if a < b then a else b }") ==
+                   "Function pick(a:int, b:int)\n"
+                   "  Block (1 expressions)\n"
+                   "    If\n"
+                   "      Binary <\n"
+                   "        Variable a\n"
+                   "        Variable b\n"
+                   "      Variable a\n"
+                   "      Variable b\n",
+               "ast-dump - if branches in order");
+        expect(dumpOf("f(1, 2)") == "Call f\n  Number 1\n  Number 2\n",
+               "ast-dump - call arguments");
+
+        expect(dumpOf("missing(") == "<error>",
+               "ast-dump - parse failure yields no tree");
+
+        expect(dumpOf("1; 2") ==
+                   "Seq (2 expressions)\n"
+                   "  Number 1\n"
+                   "  Number 2\n",
+               "ast-dump - sequence for ';'");
+
+        expect(dumpOf("def fib(n:int) { if n < 2 then n else fib(n - 1) + fib(n - 2) }") ==
+                   "Function fib(n:int)\n"
+                   "  Block (1 expressions)\n"
+                   "    If\n"
+                   "      Binary <\n"
+                   "        Variable n\n"
+                   "        Number 2\n"
+                   "      Variable n\n"
+                   "      Binary +\n"
+                   "        Call fib\n"
+                   "          Binary -\n"
+                   "            Variable n\n"
+                   "            Number 1\n"
+                   "        Call fib\n"
+                   "          Binary -\n"
+                   "            Variable n\n"
+                   "            Number 2\n",
+               "ast-dump - nested calls compose with if");
+
+        expect(dumpOf("for i = 0, i < 3, 1 in i") ==
+                   "For i:int\n"
+                   "  Number 0\n"
+                   "  Binary <\n"
+                   "    Variable i\n"
+                   "    Number 3\n"
+                   "  Number 1\n"
+                   "  Variable i\n",
+               "ast-dump - for with step");
+
+        expect(dumpOf("for i = 0, i < 3 in i") ==
+                   "For i:int\n"
+                   "  Number 0\n"
+                   "  Binary <\n"
+                   "    Variable i\n"
+                   "    Number 3\n"
+                   "  Variable i\n",
+               "ast-dump - for without step");
+
+        expect(dumpOf("\"hi\"") == "String \"hi\"\n",
+               "ast-dump - string literal");
+
+        expect(dumpOf("1.5") == "Number 1.5\n",
+               "ast-dump - floating literal");
+
+        expect(dumpOf("def f() { 1 }; def g() { 2 }") ==
+                   "Program (2 statements)\n"
+                   "  Function f()\n"
+                   "    Block (1 expressions)\n"
+                   "      Number 1\n"
+                   "  Function g()\n"
+                   "    Block (1 expressions)\n"
+                   "      Number 2\n",
+               "ast-dump - program with two definitions");
+
+        {
+            FCPrototypeAST proto("g", {std::make_shared<VarDecl>("x", "int")});
+            expect(describeAst(proto) == "Prototype g(x:int)\n",
+                   "ast-dump - prototype");
+        }
+        {
+            struct BareExprAST : FCExprAST {
+                void info() override {}
+            };
+            BareExprAST bare;
+            expect(describeAst(bare) == "Expr\n",
+                   "ast-dump - unspecialized node");
+        }
+
+        expect(dumpOf("def half(x:int) { x = x / 2 }") ==
+                   "Function half(x:int)\n"
+                   "  Block (1 expressions)\n"
+                   "    Binary =\n"
+                   "      Variable x\n"
+                   "      Binary /\n"
+                   "        Variable x\n"
+                   "        Number 2\n",
+               "ast-dump - assignment and division operators");
+
+        {
+            FCBinaryExprAST unknown(FCBinaryOp::Unknown,
+                                    std::make_unique<FCNumberExprAST>(1),
+                                    std::make_unique<FCNumberExprAST>(2));
+            expect(describeAst(unknown) == "Binary ?\n  Number 1\n  Number 2\n",
+                   "ast-dump - unknown operator falls back to '?'");
+        }
+
+        FC::setTraceStagesForTesting("ast");
+        {
+            FCScanner scanner;
+            auto ast = scanner.analysis("1 + 2 * 3");
+            expect(ast != nullptr, "ast-dump - FC_TRACE=ast keeps analysis working");
+        }
+        FC::setTraceStagesForTesting("");
     }
 
     // ==================== Symbol Table Tests ====================

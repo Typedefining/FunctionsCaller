@@ -35,6 +35,8 @@ add_library(FunctionsCore STATIC
 	trace.cc
 	parser.h
 	parser.cc
+	ast_dump.h
+	ast_dump.cc
 )
 target_include_directories(FunctionsCore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
