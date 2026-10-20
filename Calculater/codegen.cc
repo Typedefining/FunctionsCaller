@@ -938,7 +938,15 @@ llvm::Value* FCExprClass::codegen(FCExprAST* expression,
 	if (auto* prototype = dynamic_cast<FCPrototypeAST*>(expression))
 		return codegenPrototype(prototype, context);
 	if (auto* function = dynamic_cast<FCFunctionAST*>(expression))
+	{
+		// 函数体内再次遇到 def 即嵌套定义：codegen 不提供生成能力。
+		// 若照旧落到 codegenFunction，它会返回一个 llvm::Function* 值，
+		// 外层把它当表达式值使用，错误要到类型转换时才暴露
+		if (context.currentFunction != nullptr)
+			return logCodegenError(
+				"nested function definition is not supported by codegen");
 		return codegenFunction(function, context);
+	}
 	if (auto* conditional = dynamic_cast<FCIfExprAST*>(expression))
 		return codegenIf(conditional, context);
 	if (auto* loop = dynamic_cast<FCForExprAST*>(expression))

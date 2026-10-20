@@ -1090,6 +1090,29 @@ private:
             std::cout << "      Scanner already rejected invalid code\n";
             expect(true, "codegen - invalid function call handling");
         }
+
+        // 嵌套定义（开关打开）：前端放行，codegen 明确拒绝而不是生成半成品 IR
+        if constexpr (FCMarks::kNestedFunctionDefinitions)
+        {
+            FCSemanticContext sem;
+            std::vector<std::unique_ptr<FCExprAST>> body;
+            body.emplace_back(std::make_unique<FCFunctionAST>(
+                std::make_unique<FCPrototypeAST>("inner", std::vector<VarDeclPtr>{}),
+                std::make_unique<FCNumberExprAST>(1)));
+            body.emplace_back(std::make_unique<FCNumberExprAST>(2));
+            auto outerFn = std::make_unique<FCFunctionAST>(
+                std::make_unique<FCPrototypeAST>("outer", std::vector<VarDeclPtr>{}),
+                std::make_unique<FCBlockExprAST>(std::move(body)));
+
+            FCSemanticContext::SemanticAnalyzer analyzer(sem);
+            expect(analyzer.analyze(outerFn.get()),
+                   "codegen - nested definition passes semantic when enabled");
+
+            FCCodegenContext nestedContext("NestedTest", sem.getCompiledProgram());
+            nestedContext.semantic = &sem;
+            auto* generated = codegen(outerFn.get(), nestedContext);
+            expect(generated == nullptr, "codegen - nested definition rejected");
+        }
     }
 
     // ==================== Codegen Error Tests ====================
