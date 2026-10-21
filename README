@@ -74,10 +74,11 @@ pwsh -NoProfile -File .\tools\verify-configurations.ps1
 build-debug/Calculater/Debug/FunctionsCalculater.exe
 ```
 
-该程序（`main.cc`）是端到端入口：分析一段源码并求值，把结果打印为 `[result] ...`。源码由第一个命令行参数给出，省略时使用内置示例：
+该程序（`main.cc`）是端到端入口：默认分析一段源码并求值，把结果打印为 `[result] ...`；加 `--emit-ir` 则生成 LLVM IR 并把模块文本打印到 stdout。源码由最后一个命令行参数给出，省略时使用内置示例：
 
 ```powershell
 & .\build-debug\Calculater\Debug\FunctionsCalculater.exe 'def add(a:int, b:int) { a + b } add(2, 3)'
+& .\build-debug\Calculater\Debug\FunctionsCalculater.exe --emit-ir 'var a:int = 1 + 2 * 3; a'
 ```
 
 测试程序位于：
@@ -495,7 +496,7 @@ Calculater/
 ├── evaluator.h/.cc   解释执行（evaluate）与 FCFunctionRegistry
 ├── codegen.h/.cc     LLVM IR 生成（codegen）
 ├── unit_test.cc      综合测试套件（FunctionsUnitTest）
-└── main.cc           最小可执行入口（FunctionsCalculater，分析并求值）
+└── main.cc           可执行入口（FunctionsCalculater：默认求值，--emit-ir 输出 LLVM IR）
 
 tools/
 └── coverage.ps1      行覆盖率收集脚本（默认阈值 95%）
