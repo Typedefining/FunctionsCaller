@@ -229,8 +229,6 @@ private:
   std::vector<FrameAnchorEntry> m_frameAnchorStack;
   std::vector<std::unique_ptr<FrameLayout>> m_frameLayouts;        // 每个函数帧一个布局
   std::vector<std::shared_ptr<CompiledFunction>> m_frameRecords;    // 每帧一个编译记录；注册时移交 functions 表
-  // 符号 → 所属帧基址。名字解析据此拒绝跨函数帧捕获（闭包未支持）
-  std::unordered_map<const VariableSymbol *, size_t> m_symbolOwnerFrame;
   std::set<std::string> m_functionSet;
 
   std::shared_ptr<CompiledProgram> m_compiledProgram = std::make_shared<CompiledProgram>();

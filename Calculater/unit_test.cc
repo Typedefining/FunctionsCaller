@@ -2919,16 +2919,16 @@ private:
                 expect(outerRecord->frameSize == 1,
                        "semantic-analyzer - nested frame does not inflate outer frame");
 
-                // 捕获外层局部：跨帧引用没有运行时载体（frameIndex 只有 -1/0），
-                // 语义期必须拒绝，否则会静默读到当前帧的同名槽位
+                // 捕获外层局部：名字解析照常放行（作用域栈连续），
+                // 内层记录独立登记，执行期由求值器与 codegen 拒绝
                 {
                     FCSemanticContext captureCtx;
                     FCSemanticContext::SemanticAnalyzer captureAnalyzer(captureCtx);
                     auto captureFn = buildNested(true);
-                    expect(!captureAnalyzer.analyze(captureFn.get()),
-                           "semantic-analyzer - nested capture rejected when enabled");
-                    expect(captureCtx.getCompiledFunction("inner") == nullptr,
-                           "semantic-analyzer - captured nested definition leaves no record");
+                    expect(captureAnalyzer.analyze(captureFn.get()),
+                           "semantic-analyzer - nested capture resolved when enabled");
+                    expect(captureCtx.getCompiledFunction("inner") != nullptr,
+                           "semantic-analyzer - captured nested definition registered");
                 }
 
                 // 同帧跨块仍可见：帧归属判定只在跨帧时生效

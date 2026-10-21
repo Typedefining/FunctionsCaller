@@ -21,7 +21,6 @@ void FCSemanticContext::reset() {
   m_frameLayouts.clear();
   m_frameRecords.clear();
   m_frameAnchorStack.clear();
-  m_symbolOwnerFrame.clear();
 
   m_compiledProgram = std::make_shared<CompiledProgram>();
   m_currentState = CurrentCompilationState();
@@ -156,7 +155,6 @@ FCSemanticContext::declareVariable(VarDeclPtr declaration) {
   auto symbol = std::make_shared<VariableSymbol>(std::move(declaration), slot,
                                                  scope.depth);
   symbol->runtime.frameIndex = isCurrentFrameGlobal() ? -1 : 0;
-  m_symbolOwnerFrame[symbol.get()] = m_frameAnchor;
   scope.variables.emplace(name, symbol);
 
   // 唯一登记路径：登记进当前帧的编译记录（<global> 记录也存 functions 表）
@@ -508,18 +506,9 @@ FCSemanticContext::SemanticAnalyzer::resolveVariable(const std::string &name) {
     return nullptr;
   }
 
-  // 可见性可跨越外层函数帧（作用域栈连续），但捕获外层局部没有运行时载体：
-  // 帧内符号的 frameIndex 只有 -1/0 两值，跨帧引用会读到当前帧的同名槽位
-  const auto it = m_ctx.m_symbolOwnerFrame.find(symbol.get());
-  if (it != m_ctx.m_symbolOwnerFrame.end() && it->second != 0 &&
-      it->second != m_ctx.m_frameAnchor) {
-    fprintf(stderr,
-            "Error: nested function cannot capture enclosing local '%s' "
-            "(closures are not supported)\n",
-            name.c_str());
-    return nullptr;
-  }
-
+  // 作用域栈连续，内层函数因此能看到外层函数的局部变量与全局变量。
+  // 这里只做名字解析；嵌套函数是否可执行由求值器与 codegen 决定，
+  // 它们一律拒绝在帧内执行函数定义，捕获不会发生在运行期。
   return symbol;
 }
 
