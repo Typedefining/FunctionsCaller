@@ -1,9 +1,11 @@
 #include "evaluator.h"
+#include "trace.h"
 
 #include <algorithm>
 #include <cassert>
 #include <cstdio>
 #include <cstring>
+#include <string>
 
 using namespace FCExprClass;
 using namespace FCMarks;
@@ -23,6 +25,25 @@ FCValue makeStringValue(const std::string &text) {
   value.type = FCValueCategory::String;
   value.evaluteVal.charVal = new FCStringValue{text};
   return value;
+}
+
+// 诊断输出用的值文本形式；与单元测试期望的格式保持一致。
+std::string formatValue(const FCValue &value) {
+  switch (value.type) {
+  case FCValueCategory::Integer:
+    return std::to_string(value.evaluteVal.intVal);
+  case FCValueCategory::Floating: {
+    char buffer[32];
+    std::snprintf(buffer, sizeof(buffer), "%g", value.evaluteVal.doubleVal);
+    return std::string(buffer);
+  }
+  case FCValueCategory::String:
+    return value.evaluteVal.charVal ? "\"" + value.evaluteVal.charVal->str + "\""
+                                   : std::string("\"\"");
+  case FCValueCategory::Dangle:
+    break;
+  }
+  return "Dangle";
 }
 
 FCValue evaluateNumber(const FCNumberExprAST *node) {
@@ -308,7 +329,24 @@ FCValue evaluateCall(const FCCallExprAST *expression,
     frame.locals[symbol->slot] = argumentValues[i];
   }
 
+  if (FC::traceEnabled("evaluator")) {
+    std::string arguments;
+    for (size_t i = 0; i < argumentValues.size(); ++i) {
+      if (i > 0)
+        arguments += ", ";
+      arguments += formatValue(argumentValues[i]);
+    }
+    std::fprintf(stderr, "[evaluator] call %s(%s) depth=%zu\n",
+                 expression->getName().c_str(), arguments.c_str(),
+                 context.callStack.size());
+  }
+
   const auto result = evaluateExpression(function->getBody(), context);
+
+  if (FC::traceEnabled("evaluator"))
+    std::fprintf(stderr, "[evaluator] return %s = %s\n",
+                 expression->getName().c_str(), formatValue(result).c_str());
+
   context.popFrame();
   return result;
 }

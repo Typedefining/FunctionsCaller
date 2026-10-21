@@ -118,6 +118,9 @@ public:
         // ============ Semantic Dump Tests (语义阶段中间状态，供代码阅读章节引用) ============
         runSemanticDumpTests();
 
+        // ============ Evaluator Trace Tests ============
+        runEvaluatorTraceTests();
+
         // ============ Symbol Table Tests ============
         runSymbolTableTests();
 
@@ -2248,6 +2251,45 @@ private:
             auto ast = scanner.analysis("def h(a:int) { a }");
             expect(ast != nullptr, "semantic-dump - FC_TRACE=semantic keeps analysis working");
         }
+        FC::setTraceStagesForTesting("");
+    }
+
+    // 求值阶段的诊断输出：只在 FC_TRACE 含 evaluator 时打印调用与返回
+    void runEvaluatorTraceTests()
+    {
+        auto evaluateOf = [](const std::string &code) -> FCMarks::FCValue {
+            FCScanner scanner;
+            auto ast = scanner.analysis(code);
+            if (!ast)
+                return FCMarks::FCValue{};
+            FCEvaluationContext ctx(scanner.semanticContext().getCompiledProgram());
+            return evaluate(ast.get(), ctx);
+        };
+
+        FC::setTraceStagesForTesting("evaluator");
+
+        auto add = evaluateOf("def add(a:int, b:int) { a + b } add(2, 3)");
+        expect(add.type == FCValueCategory::Integer && add.evaluteVal.intVal == 5,
+               "evaluator-trace - integer call result");
+
+        auto zero = evaluateOf("def two() { 2 } two()");
+        expect(zero.type == FCValueCategory::Integer && zero.evaluteVal.intVal == 2,
+               "evaluator-trace - zero-argument call");
+
+        auto floating = evaluateOf("def half(x:double) { x / 2.0 } half(5.0)");
+        expect(floating.type == FCValueCategory::Floating &&
+                   floating.evaluteVal.doubleVal == 2.5,
+               "evaluator-trace - floating result");
+
+        auto text = evaluateOf("def join(a:string, b:string) { a + b } join(\"x\", \"y\")");
+        expect(text.type == FCValueCategory::String && text.evaluteVal.charVal != nullptr &&
+                   text.evaluteVal.charVal->str == "xy",
+               "evaluator-trace - string result");
+
+        auto dangling = evaluateOf("def bad() { missing() } bad()");
+        expect(dangling.type == FCValueCategory::Dangle,
+               "evaluator-trace - dangle result");
+
         FC::setTraceStagesForTesting("");
     }
 
