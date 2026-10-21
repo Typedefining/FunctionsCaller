@@ -4,6 +4,7 @@
 #include "semantic.h"
 #include "language_options.h"
 #include "ast_dump.h"
+#include "semantic_dump.h"
 #include "lexer.h"
 #include "parser.h"
 #include "trace.h"
@@ -113,6 +114,9 @@ public:
 
         // ============ AST Dump Tests (语法树文本形式，供代码阅读章节引用) ============
         runAstDumpTests();
+
+        // ============ Semantic Dump Tests (语义阶段中间状态，供代码阅读章节引用) ============
+        runSemanticDumpTests();
 
         // ============ Symbol Table Tests ============
         runSymbolTableTests();
@@ -2186,6 +2190,63 @@ private:
             FCScanner scanner;
             auto ast = scanner.analysis("1 + 2 * 3");
             expect(ast != nullptr, "ast-dump - FC_TRACE=ast keeps analysis working");
+        }
+        FC::setTraceStagesForTesting("");
+    }
+
+    // ==================== Semantic Dump Tests ====================
+    void runSemanticDumpTests()
+    {
+        auto dumpOf = [](const std::string &code) -> std::string {
+            FCScanner scanner;
+            auto ast = scanner.analysis(code);
+            if (!ast)
+                return "<error>";
+            return FCMarks::describeCompiledProgram(
+                scanner.semanticContext().getCompiledProgram());
+        };
+
+        std::string globalOnly = dumpOf("1");
+        expect(globalOnly.find("frame <global> (global) frameSize=0") != std::string::npos,
+               "semantic-dump - empty global frame");
+        expect(globalOnly.find("bindings=0") != std::string::npos,
+               "semantic-dump - no bindings for a literal");
+
+        std::string globalVar = dumpOf("var a:int = 1; a");
+        expect(globalVar.find("a:int slot=0 depth=0 frameIndex=-1") != std::string::npos,
+               "semantic-dump - global variable keeps slot and frame index");
+        expect(globalVar.find("bindings=2") != std::string::npos,
+               "semantic-dump - declaration and reference both bound");
+
+        std::string add = dumpOf("def add(a:int, b:int) { a + b }");
+        expect(add.find("frame <global> (global)") != std::string::npos,
+               "semantic-dump - global frame printed first");
+        expect(add.find("frame add (function) frameSize=2 maxTempSlots=2 params=[0, 1]") !=
+                   std::string::npos,
+               "semantic-dump - parameter slots follow prototype order");
+        expect(add.find("a:int slot=0 depth=0 frameIndex=0") != std::string::npos,
+               "semantic-dump - parameter is frame-local");
+        expect(add.find("b:int slot=1 depth=0 frameIndex=0") != std::string::npos,
+               "semantic-dump - second parameter takes next slot");
+
+        std::string locals = dumpOf("def f(n:int) { var x:int = n; x }");
+        expect(locals.find("var") == std::string::npos &&
+                   locals.find("x:int slot=1") != std::string::npos,
+               "semantic-dump - local takes a slot after parameters");
+
+        std::string shadowed = dumpOf("def g() { var x:int = 1; { var x:int = 2; x } x }");
+        expect(shadowed.find("frame g (function) frameSize=2") != std::string::npos,
+               "semantic-dump - nested block shadowing takes a new frame slot");
+        expect(shadowed.find("bindings=4") != std::string::npos,
+               "semantic-dump - references bind to their own shadowed symbol");
+        expect(dumpOf("1 +") == "<error>",
+               "semantic-dump - parse failure yields no program");
+
+        FC::setTraceStagesForTesting("semantic");
+        {
+            FCScanner scanner;
+            auto ast = scanner.analysis("def h(a:int) { a }");
+            expect(ast != nullptr, "semantic-dump - FC_TRACE=semantic keeps analysis working");
         }
         FC::setTraceStagesForTesting("");
     }

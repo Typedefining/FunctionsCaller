@@ -1,6 +1,7 @@
 #include "scanner.h"
 
 #include "ast_dump.h"
+#include "semantic_dump.h"
 #include "trace.h"
 
 #include <iostream>
@@ -36,6 +37,11 @@ FCScanner::analysis(const ::std::string &inputStr) {
     if (!analyzer.analyze(ast.get())) {
         m_hadSemanticError = true;
         return nullptr;
+    }
+
+    // 阶段3 的诊断输出：FC_TRACE=semantic 时打印每个函数帧的符号与槽位
+    if (FC::traceEnabled("semantic")) {
+        std::cerr << describeCompiledProgram(m_semanticContext.getCompiledProgram());
     }
 
     return ast;

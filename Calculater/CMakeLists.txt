@@ -51,6 +51,8 @@ target_include_directories(FunctionsEvaluator PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
 add_library(FunctionsSemantic STATIC
 	semantic.h
 	semantic.cc
+	semantic_dump.h
+	semantic_dump.cc
 	language_options.h
 )
 target_link_libraries(FunctionsSemantic PRIVATE FunctionsCore)
