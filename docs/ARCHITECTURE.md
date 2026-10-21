@@ -2,7 +2,7 @@
 
 > 基准分支：`refactor/var-symbol-binding`  
 > 文档日期：2026-10-21  
-> 当前状态：词法/语法/语义三阶段解耦完成；默认配置 782/782 断言通过，嵌套函数开关打开时 786/786；生产代码行覆盖率 95.66%  
+> 当前状态：词法/语法/语义三阶段解耦完成；默认配置 795/795 断言通过，嵌套函数开关打开时 799/799；生产代码行覆盖率 95.74%  
 > 语言标准：C++20（CMake 设定），LLVM 18.1.6（vcpkg），Windows + MSVC  
 > 关联文档：`docs/superpowers/plans/2025-06-20-lexer-parser-semantic-decoupling.md`（解耦方案）、`docs/superpowers/specs/2026-10-20-nested-functions-opt-in-design.md`（嵌套函数开关设计）、`docs/postmortems/2026-10-20-frame-anchor-and-separator-bugs.md`（三处设计缺陷复盘）
 
@@ -38,7 +38,7 @@
 ```
 ┌────────────────────────────────────────────────────────────────┐
 │  可执行目标                                                      │
-│  main.cc（最小入口）  unit_test.cc（782 断言测试）  shadow_repro  │
+│  main.cc（最小入口）  unit_test.cc（795 断言测试）  shadow_repro  │
 ├────────────────────────────────────────────────────────────────┤
 │  Facade 层                                                      │
 │  scanner.h/cc (35/49 行) — FCScanner                            │
@@ -94,9 +94,10 @@ runtime.h → token.h → lexer.h → parser.h
 | **Parser** | `parser.h/cc` (63/485) | FunctionsCore | `FC::Parser`：Token 流→纯语法 AST；递归下降 + 优先级爬升（`tokenPrecedence` 按 `FCBinaryOp`，非运算符返回 -1）；错误恢复返回 nullptr + `hadError()`；`tok_error` 的说明直接作为错误信息；构造不读取 token，`parseProgram()` 入口才进入解析阶段（`begin()`），`reset()` 复位阶段与错误标记，`started()` 可判定当前阶段；**零语义副作用** |
 | **AST Dump** | `ast_dump.h/cc` (18/168) | FunctionsCore | `describeAst()`：纯语法树→缩进文本（13 种节点），供 `FC_TRACE=ast` 诊断与解析层断言；不参与语义与后端数据流；**100% 行覆盖** |
 | **Semantic** | `semantic.h/cc` (240/534) | FunctionsSemantic | `FCSemanticContext`：作用域栈（RAII `ScopeGuard`/`FunctionScopeGuard`）、`declareVariable`（分配 slot + frameIndex）、`registerFunction`、`bindVariable/boundSymbol`；`SemanticAnalyzer`：AST 遍历分派（12 种节点），**帧布局唯一生产者**（CompiledFunction::frameSize/parametersIdx） |
+| **Semantic Dump** | `semantic_dump.h/cc` (13/79) | FunctionsCore | `describeCompiledProgram()`：编译结果→缩进文本（每个帧的大小、参数槽位、符号的 slot/depth/frameIndex、绑定条数），供 `FC_TRACE=semantic` 诊断；不参与数据流；**100% 行覆盖** |
 | **Evaluator** | `evaluator.h/cc` (60/445) | FunctionsEvaluator | `FCEvaluationContext`：全局帧 + 调用栈；`frameForSymbol`（frameIndex==-1→全局帧，否则栈顶帧）；`pushFrame` 帧大小从 `CompiledFunction::frameSize`（语义期输出）读取；树遍历求值，按 `symbol->slot` 读写 `frame->locals` |
 | **Codegen** | `codegen.h/cc` (51/983) | FunctionsCodegen | `FCCodegenContext`：`namedValues`（局部→Alloca）/`globalValues`（全局→GlobalVariable）按符号身份索引；`inferExprType` 类型推断；`codegenDeclaration` 按 `runtime.frameIndex==-1` 分派全局/局部分配；函数前向声明 + `__fc_main` 顶层包装 + verifyFunction/verifyModule |
-| **Scanner(Facade)** | `scanner.h/cc` (35/49) | FunctionsFrontend | `analysis()` = lexer.reset → parser.reset → parseProgram → `FC_TRACE=ast` 输出 → SemanticAnalyzer.analyze；`hadParseError()/hadSemanticError()` 阶段错误标记；`resetState()` 复位 Lexer/Parser/语义上下文（含解析错误标记）；**100% 行覆盖** |
+| **Scanner(Facade)** | `scanner.h/cc` (35/55) | FunctionsFrontend | `analysis()` = lexer.reset → parser.reset → parseProgram → `FC_TRACE=ast` 输出 → SemanticAnalyzer.analyze → `FC_TRACE=semantic` 输出；`hadParseError()/hadSemanticError()` 阶段错误标记；`resetState()` 复位 Lexer/Parser/语义上下文（含解析错误标记）；**100% 行覆盖** |
 
 构建目标依赖（`Calculater/CMakeLists.txt`）：
 
@@ -211,6 +212,7 @@ Evaluator/Codegen: switch (FCBinaryOp) 分派
 | `runAstDumpTests` | 19 断言 | 仅 Facade + `describeAst`，不看语义 | 三类容器节点（Program/Block/Seq）/优先级树形/if 三支顺序/for 带与不带 step/call 实参/字符串与浮点字面量/未特化节点兜底/未知运算符 `?`/解析失败无树 |
 | `runLexerTests` | 66 断言 | 仅 `FC::Lexer`，零依赖 | 关键字/标识符/数字/字符串/未闭合串与未识别字符的 `tok_error`/注释跳过/行列号（含列号边界）/标点与运算符枚举/`binaryOpOf` 映射/trace 开关匹配/peek 的游标副本（跨注释跨行、重复 peek 稳定）/reset/空输入 |
 | `runParserTests` | 17 断言 | 仅 Lexer→Parser，零语义 | 优先级子树（`x+(1*2)`）/纯语法变量节点/函数原型+块体/for 四元组/错误路径 hadError/顶层序列折叠 vs Program 包装 |
+| `runSemanticDumpTests` | 13 断言 | Facade + `describeCompiledProgram`，不看后端 | 全局帧与函数帧的 frameSize/参数槽位/符号 slot-depth-frameIndex/绑定条数/遮蔽用例的绑定分离/解析失败无编译结果 |
 | `runSemanticAnalyzerTests` | 22 断言 | 手工构造 AST → analyze | 全局/顶层块/括号序列 var 均为 frameIndex=-1；函数局部 frameIndex≥0；shadowing 双符号；未声明变量拒绝；for 变量局部；if 分支声明 |
 | `runScannerFacade`（scanner 组内） | 7 断言 | Facade 级 | hadParseError/hadSemanticError 互斥标记；resetState 复用与解析错误标记复位 |
 
@@ -226,15 +228,16 @@ Evaluator/Codegen: switch (FCBinaryOp) 分派
 | scanner.cc | 100.00% | Facade 全路径 |
 | trace.cc | 100.00% | 阶段匹配全分支 |
 | ast_dump.cc | 100.00% | 三类容器、if/for/call、字面量与兜底节点（120/120） |
+| semantic_dump.cc | 100.00% | 帧与符号输出全分支（37/37） |
 | parser.cc | 97.90% | 剩余为不可达防御分支 |
 | semantic.cc | 96.15% | SemanticAnalyzer + 上下文 |
 | evaluator.cc | 97.32% | 错误分支经边界用例覆盖 |
 | codegen.cc | 90.97% | LLVM 错误注入路径为主 |
-| **Overall** | **95.66%** | **≥95% 门禁达标（默认配置）** |
+| **Overall** | **95.74%** | **≥95% 门禁达标（默认配置）** |
 
 统计口径：`pwsh -NoProfile -File tools/coverage.ps1 -BuildDir build-strict`（Microsoft.CodeCoverage.Console），排除 `unit_test.cc/main.cc`。
 
-测试总量：**782 断言，0 失败**（默认配置）；`-DFC_ENABLE_NESTED_FUNCTIONS=ON` 时 **786 断言，0 失败**。
+测试总量：**795 断言，0 失败**（默认配置）；`-DFC_ENABLE_NESTED_FUNCTIONS=ON` 时 **799 断言，0 失败**。
 两种配置由 `tools/verify-configurations.ps1` 统一验证。
 
 ---
@@ -301,7 +304,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\coverage.ps1 `
 
 ```
 build-debug/Calculater/Debug/FunctionsCalculater.exe   # 最小入口
-build-debug/Calculater/Debug/FunctionsUnitTest.exe    # 782 断言测试套件（默认配置）
+build-debug/Calculater/Debug/FunctionsUnitTest.exe    # 795 断言测试套件（默认配置）
 build-debug/Calculater/Debug/ShadowRepro.exe          # 遮蔽行为复现工具
 ```
 
@@ -323,11 +326,12 @@ FunctionsCaller/
 │   ├── parser.h/cc  (63/485)  # FC::Parser   [阶段2 · 纯语法]
 │   ├── ast_dump.h/cc (18/168) # 纯语法树→缩进文本 [阶段2 诊断输出]
 │   ├── semantic.h/cc(240/534) # FCSemanticContext + SemanticAnalyzer [阶段3]
-│   ├── scanner.h/cc (35/49)   # FCScanner Facade [三阶段编排]
+│   ├── semantic_dump.h/cc (13/79) # 编译结果→缩进文本 [阶段3 诊断输出]
+│   ├── scanner.h/cc (35/55)   # FCScanner Facade [三阶段编排]
 │   ├── evaluator.h/cc(60/445) # 树遍历解释器 [后端A]
 │   ├── codegen.h/cc (51/983)  # LLVM IR 生成 [后端B]
 │   ├── main.cc      (9)       # 最小入口
-│   ├── unit_test.cc (3265)    # 综合断言套件
+│   ├── unit_test.cc (3326)    # 综合断言套件
 │   └── shadow_repro.cc (38)   # 遮蔽行为复现
 ├── tools/
 │   ├── coverage.ps1            # 行覆盖率（95% 门禁）
@@ -337,6 +341,7 @@ FunctionsCaller/
     ├── ARCHITECTURE.md
     ├── walkthrough/01-lexer.md                                    # 代码阅读第 1 段：词法分析
     ├── walkthrough/02-parser.md                                   # 代码阅读第 2 段：语法分析
+    ├── walkthrough/03-semantic.md                                 # 代码阅读第 3 段：语义分析
     ├── postmortems/2026-10-20-frame-anchor-and-separator-bugs.md  # 三处设计缺陷复盘
     ├── superpowers/plans/
     │   ├── 2025-06-20-symbol-identity-runtime.md          # 符号身份重构方案
@@ -346,7 +351,7 @@ FunctionsCaller/
     └── superpowers/specs/2026-10-20-nested-functions-opt-in-design.md
 ```
 
-提交历史：119 commits（本分支领先 origin 4），最近演进序列：
+提交历史：121 commits（本分支领先 origin 2），最近演进序列：
 
 ```
 36261ee fix: 分隔符只能跟在非块终结的表达式之后，块结束后禁止再写分号
@@ -366,7 +371,7 @@ bb9916a feat: 新增按阶段启用的诊断输出开关，修正词法层四处
 ---
 
 > 文档生成：2026-10-21（Asia/Shanghai），基于 `refactor/var-symbol-binding@36261ee` 实测代码结构与质量指标  
-> 验证口径：cmake 3.20+ / MSVC / LLVM 18.1.6 / 默认配置 782 断言、开关打开 786 断言 / coverage 95.66%
+> 验证口径：cmake 3.20+ / MSVC / LLVM 18.1.6 / 默认配置 795 断言、开关打开 799 断言 / coverage 95.74%
 
 
 
