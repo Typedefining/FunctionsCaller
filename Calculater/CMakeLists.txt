@@ -82,6 +82,7 @@ target_link_libraries(${PROJECT_NAME}
 	PRIVATE
 	FunctionsFrontend
 	FunctionsEvaluator
+	FunctionsCodegen
 )
 
 add_executable(FunctionsUnitTest unit_test.cc)

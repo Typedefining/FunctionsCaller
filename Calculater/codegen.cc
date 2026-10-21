@@ -981,3 +981,17 @@ llvm::Value* FCExprClass::codegen(const FCExprAST* expression,
 {
 	return FCExprClass::codegen(const_cast<FCExprAST*>(expression), context);
 }
+
+llvm::Value* FCExprClass::codegenTopLevel(const FCExprAST* expression,
+	FCCodegenContext& context)
+{
+	if (expression == nullptr)
+		return nullptr;
+	// 程序包装与函数/原型定义各自负责建立模块内容；其余顶层表达式
+	// 统一包进 __fc_main，保证每个程序都有入口函数。
+	if (dynamic_cast<const FCProgramAST*>(expression) != nullptr ||
+		dynamic_cast<const FCFunctionAST*>(expression) != nullptr ||
+		dynamic_cast<const FCPrototypeAST*>(expression) != nullptr)
+		return codegen(expression, context);
+	return codegenStandaloneTopLevel(expression, context);
+}

@@ -1,13 +1,19 @@
+#include "codegen.h"
 #include "evaluator.h"
 #include "scanner.h"
 
+#include "llvm/Support/raw_ostream.h"
+
 #include <cstdio>
+#include <cstring>
 
 using namespace FCExprClass;
 using FCMarks::FCValue;
 using FCMarks::FCValueCategory;
 
 namespace {
+const char *kDefaultSource = "def add(a:int, b:int) { a + b } add(2, 3)";
+
 void printValue(const FCValue &value) {
   switch (value.type) {
   case FCValueCategory::Integer:
@@ -25,18 +31,39 @@ void printValue(const FCValue &value) {
     break;
   }
 }
+
+// 把语义分析结果接到代码生成上下文：编译记录与“AST 节点 → 符号”侧表。
+void attachSemanticOutput(FCCodegenContext &context, const FCScanner &scanner) {
+  context.compiledProgram = scanner.semanticContext().getCompiledProgram();
+  context.semantic = &scanner.semanticContext();
+}
 } // namespace
 
-// 最小入口：分析一段源码并求值，结果打印到 stdout。
-// 源码由第一个命令行参数给出，省略时使用内置示例。
+// 最小入口：
+//   默认   分析源码并求值，结果打印为 [result] ...
+//   --emit-ir 分析源码并生成 LLVM IR，模块文本打印到 stdout
+// 源码取自最后一个命令行参数，省略时使用内置示例。
 int main(int argc, char *argv[]) {
-  const char *source =
-      argc > 1 ? argv[1] : "def add(a:int, b:int) { a + b } add(2, 3)";
+  const bool emitIr = argc > 1 && std::strcmp(argv[1], "--emit-ir") == 0;
+  const char *source = nullptr;
+  if (emitIr)
+    source = argc > 2 ? argv[2] : kDefaultSource;
+  else
+    source = argc > 1 ? argv[1] : kDefaultSource;
 
   FCScanner scanner;
   auto ast = scanner.analysis(source);
   if (ast == nullptr)
     return 1;
+
+  if (emitIr) {
+    FCCodegenContext context("fc_module", scanner.semanticContext().getCompiledProgram());
+    attachSemanticOutput(context, scanner);
+    if (codegenTopLevel(ast.get(), context) == nullptr)
+      return 2;
+    context.module->print(llvm::outs(), nullptr);
+    return 0;
+  }
 
   FCEvaluationContext context(scanner.semanticContext().getCompiledProgram());
   printValue(evaluate(ast.get(), context));

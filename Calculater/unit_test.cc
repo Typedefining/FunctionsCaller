@@ -1327,6 +1327,27 @@ private:
             expect(!llvm::verifyFunction(*fn, &llvm::errs()), "codegen-api - function verifies");
         }
 
+        // 程序级入口：顶层裸表达式也生成 __fc_main
+        {
+            FCCodegenContext cc("TopLevelApi", {});
+            auto number = std::make_unique<FCNumberExprAST>(7);
+            auto* entry = codegenTopLevel(number.get(), cc);
+            auto* mainFn = cc.module->getFunction("__fc_main");
+            expect(entry != nullptr && entry == mainFn,
+                "codegen-api - top-level expression creates __fc_main");
+
+            const bool wellFormed = mainFn != nullptr && mainFn->size() == 1 &&
+                mainFn->getEntryBlock().getTerminator() != nullptr;
+            expect(wellFormed, "codegen-api - top-level entry block terminated");
+            if (wellFormed)
+            {
+                auto* ret = llvm::dyn_cast<llvm::ReturnInst>(mainFn->getEntryBlock().getTerminator());
+                auto* value = ret != nullptr ? llvm::dyn_cast<llvm::ConstantInt>(ret->getReturnValue()) : nullptr;
+                expect(value != nullptr && value->getValue() == 7,
+                    "codegen-api - top-level constant returned");
+            }
+        }
+
         // 直接 codegen 一个 prototype 声明，再 codegen 同名同签名函数（复用已有声明）
         {
             FCCodegenContext cc("ReuseApi", {});
