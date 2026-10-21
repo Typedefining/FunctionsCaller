@@ -4,7 +4,6 @@
 #include "semantic.h"
 #include "language_options.h"
 #include "token.h"
-#include <algorithm>
 
 namespace FCMarks {
 

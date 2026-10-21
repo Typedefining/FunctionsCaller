@@ -78,21 +78,21 @@ Remove-Item Env:\FC_TRACE
 
 | 字段 | 回答的问题 | 谁写它 |
 |---|---|---|
-| `frame <name> (global\|function)` | 这是哪一个栈帧 | `reset()` 建立 `<global>`（`semantic.cc:17-35`）；`registerFunction()` 移交函数帧（`semantic.cc:176-208`） |
+| `frame <name> (global\|function)` | 这是哪一个栈帧 | `reset()` 建立 `<global>`（`semantic.cc:17-34`）；`registerFunction()` 移交函数帧（`semantic.cc:174-207`） |
 | `frameSize=N` | 这个帧需要多少个值槽位 | `FrameLayout::allocateSlot()` 每次声明加一（`semantic.h:43-62`）；函数帧在分析结束时回填（`semantic.cc:481-485`） |
 | `maxTempSlots=M` | 分析期间该帧同时占用的槽位峰值 | 同上，`FrameLayout` 记录峰值 |
 | `params=[0, 1]` | 形参在帧里的槽位，按声明顺序 | `registerFunction()`（`semantic.cc:197-204`） |
 | `slot=S` | 该变量在所属帧中的下标 | `declareVariable()` 分配（`semantic.cc:153`） |
 | `depth=D` | 声明时作用域栈的深度 | `Scope::depth`（`semantic.h:36-39`） |
-| `frameIndex=F` | 运行期用第几个栈帧取值：`-1` 表示全局帧，`0` 表示当前函数帧 | `declareVariable()`（`semantic.cc:158`） |
+| `frameIndex=F` | 运行期用第几个栈帧取值：`-1` 表示全局帧，`0` 表示当前函数帧 | `declareVariable()`（`semantic.cc:157`） |
 | `bindings=K` | 绑定表里记录了多少条“AST 节点 → 符号” | `bindVariable()`（`semantic.cc:292-298`） |
 
 几个容易误读的地方：
 
 - **`<global>` 的 `frameSize=0`，但 `a` 的 `slot=0`。** 全局变量确实占槽位，只是全局帧记录不保存帧大小：求值阶段建全局帧时按 `globalSymbols.size()` 定长（第 4 段会看到）。这是本段的一个悬而未决处，先记住现象。
-- **参数 `n` 的 `depth=0`，而函数体的块是 `depth=3`。** `pushFunctionScope()` 压入的是一个全新的空作用域（`semantic.cc:47-63`），参数声明在其中，深度为 0；函数体的 `{ ... }` 又经由 `pushScope()` 压入子作用域，栈里此时已有全局、函数两个作用域，于是深度为 3。`s` 与 `i` 落在函数体块与 `for` 作用域里，深度分别是 3、4。
+- **参数 `n` 的 `depth=0`，而函数体的块是 `depth=3`。** `pushFunctionScope()` 压入的是一个全新的空作用域（`semantic.cc:46-62`），参数声明在其中，深度为 0；函数体的 `{ ... }` 又经由 `pushScope()` 压入子作用域，栈里此时已有全局、函数两个作用域，于是深度为 3。`s` 与 `i` 落在函数体块与 `for` 作用域里，深度分别是 3、4。
 - **`bindings` 数为 2 的程序是“一个声明 + 一次引用”。** `var a:int = ...` 的声明节点绑定一次，`a` 的引用节点绑定一次。`sum` 的 8 条则是声明（`s`、`i`）、引用（`n`、`s`、`i`、`s`、`i`、`s`）等节点各一条。
-- **遮蔽时符号表只剩一个 `x`，绑定表仍有 4 条。** 符号表（`SymbolTable`）是“名字 → 符号”的字典，同名不重复登记（`semantic.cc:262-271`）；绑定表（`SemanticBinding`）是“AST 节点指针 → 符号”的映射（`token.h:153-171`）。解析一个引用的语义时，真正决定它指向哪个声明的是绑定表；符号表更像“某个帧里出现过哪些名字”的摘要。
+- **遮蔽时符号表只剩一个 `x`，绑定表仍有 4 条。** 符号表（`SymbolTable`）是“名字 → 符号”的字典，同名不重复登记（`semantic.cc:260-269`）；绑定表（`SemanticBinding`）是“AST 节点指针 → 符号”的映射（`token.h:153-171`）。解析一个引用的语义时，真正决定它指向哪个声明的是绑定表；符号表更像“某个帧里出现过哪些名字”的摘要。
 
 ---
 
@@ -101,46 +101,46 @@ Remove-Item Env:\FC_TRACE
 | 顺序 | 位置 | 作用 |
 |---|---|---|
 | 1 | `Calculater/scanner.cc:35-45` | 把纯语法树交给 `SemanticAnalyzer::analyze()`，成功后打印 |
-| 2 | `Calculater/semantic.cc:323-328` | `analyze()`：入口，复位后分析整棵树 |
-| 3 | `Calculater/semantic.cc:17-35` | `reset()`：建立 `<global>` 作用域与帧记录 |
-| 4 | `Calculater/semantic.cc:330-361` | `analyzeExpr()`：`dynamic_cast` 分派 12 种节点 |
-| 5 | `Calculater/semantic.cc:363-380` | `analyzeProgram()` / `analyzeBlock()`：逐条语句分析 |
-| 6 | `Calculater/semantic.cc:391-401` | `analyzeVarDecl()`：声明一个变量并绑定声明节点 |
-| 7 | `Calculater/semantic.cc:138-170` | `declareVariable()`：分配槽位、登记符号表、写 `frameIndex` |
-| 8 | `Calculater/semantic.cc:103-111` | `lookupVariableShared()`：自栈顶向下找名字 |
-| 9 | `Calculater/semantic.cc:504-524` | `resolveVariable()`：自栈顶向下解析名字，拒绝跨帧捕获 |
-| 10 | `Calculater/semantic.cc:452-494` | `analyzeFunction()`：声明参数 → 注册函数 → 分析函数体 → 回填帧大小 |
-| 11 | `Calculater/semantic.cc:176-208` | `registerFunction()`：把当前帧记录移交给函数名 |
-| 12 | `Calculater/semantic.cc:292-303` | `bindVariable()` / `boundSymbol()`：写、读绑定表 |
+| 2 | `Calculater/semantic.cc:321-326` | `analyze()`：入口，复位后分析整棵树 |
+| 3 | `Calculater/semantic.cc:17-34` | `reset()`：建立 `<global>` 作用域与帧记录 |
+| 4 | `Calculater/semantic.cc:328-359` | `analyzeExpr()`：`dynamic_cast` 分派 12 种节点 |
+| 5 | `Calculater/semantic.cc:361-378` | `analyzeProgram()` / `analyzeBlock()`：逐条语句分析 |
+| 6 | `Calculater/semantic.cc:389-399` | `analyzeVarDecl()`：声明一个变量并绑定声明节点 |
+| 7 | `Calculater/semantic.cc:137-168` | `declareVariable()`：分配槽位、登记符号表、写 `frameIndex` |
+| 8 | `Calculater/semantic.cc:102-110` | `lookupVariableShared()`：自栈顶向下找名字 |
+| 9 | `Calculater/semantic.cc:502-513` | `resolveVariable()`：自栈顶向下解析名字，内层函数可引用外层名字 |
+| 10 | `Calculater/semantic.cc:450-492` | `analyzeFunction()`：声明参数 → 注册函数 → 分析函数体 → 回填帧大小 |
+| 11 | `Calculater/semantic.cc:174-207` | `registerFunction()`：把当前帧记录移交给函数名 |
+| 12 | `Calculater/semantic.cc:290-301` | `bindVariable()` / `boundSymbol()`：写、读绑定表 |
 
-### `reset()`（`semantic.cc:17-35`）
+### `reset()`（`semantic.cc:17-34`）
 
-每次分析开始都重建一个 `<global>` 帧：压入空作用域、重置帧布局、把帧记录登记到 `functions["<global>"]`。它同时把 `m_frameAnchor` 归零，`isCurrentFrameGlobal()` 因此为真（`semantic.cc:84-87`）——全局区的声明全部落在这一帧上。
+每次分析开始都重建一个 `<global>` 帧：压入空作用域、重置帧布局、把帧记录登记到 `functions["<global>"]`。它同时把 `m_frameAnchor` 归零，`isCurrentFrameGlobal()` 因此为真（`semantic.cc:83-86`）——全局区的声明全部落在这一帧上。
 
-### `declareVariable()`（`semantic.cc:138-170`）
+### `declareVariable()`（`semantic.cc:137-168`）
 
 声明一个变量的全部动作都在这里，顺序固定：
 
-1. 在当前作用域登记符号（`SymbolTable::addSymbol()`，`semantic.cc:262-271`；同名不覆盖，直接返回已存在的符号）；
-2. 在**当前帧**的布局里分配槽位 `slot`（`semantic.cc:153`）；
-3. 写 `runtime.frameIndex`：当前帧是全局帧则 `-1`，否则 `0`（`semantic.cc:158`）；
+1. 在当前作用域登记符号（`SymbolTable::addSymbol()`，`semantic.cc:260-269`；同名不覆盖，直接返回已存在的符号）；
+2. 在**当前帧**的布局里分配槽位 `slot`（`semantic.cc:152`）；
+3. 写 `runtime.frameIndex`：当前帧是全局帧则 `-1`，否则 `0`（`semantic.cc:157`）；
 4. 返回符号，调用方把它绑定到声明节点。
 
 第 3 步的 `-1/0` 是本段最值得注意的设计：它**不是真实的帧编号**，而是“全局帧 / 当前函数帧”的二值标记。求值阶段据此选择 `callStack[0]` 或 `callStack.back()`（第 4 段展开）。
 
-### `resolveVariable()`（`semantic.cc:504-524`）
+### `resolveVariable()`（`semantic.cc:502-513`）
 
-引用一个名字时只有一条查找路径：`lookupVariableShared()`（`semantic.cc:103-111`）自栈顶向下遍历整个作用域栈，全局作用域也在栈里，因此全局变量与局部变量共用同一次查找；找不到时报 `variable 'x' is not declared`（`semantic.cc:406`）。找到符号后还有一道检查：如果符号所属帧不是当前帧，则拒绝（`semantic.cc:513-515`）——本项目不支持闭包，函数不能引用外层函数的局部变量。
+引用一个名字时只有一条查找路径：`lookupVariableShared()`（`semantic.cc:102-110`）自栈顶向下遍历整个作用域栈，全局作用域也在栈里，因此全局变量与局部变量共用同一次查找；找不到时报 `variable 'x' is not declared`（`semantic.cc:404`）。找到符号后直接返回：作用域栈连续，内层函数因此能引用外层函数的局部变量与全局变量；能否执行由求值器与 codegen 决定，二者都拒绝在帧内执行函数定义。
 
-### `analyzeFunction()`（`semantic.cc:452-494`）
+### `analyzeFunction()`（`semantic.cc:450-492`）
 
 函数定义的分析顺序是固定的五段，任何一步都不能换序：
 
-1. 嵌套守卫：默认配置下函数内不允许再定义函数（`semantic.cc:454-460`）；
-2. `FunctionScopeGuard` 压入新帧（`semantic.cc:462`）；
-3. 声明形参，于是形参先占槽位（`semantic.cc:465-470`）；
-4. `registerFunction()` 把当前帧记录交给函数名（`semantic.cc:473`）；
-5. 分析函数体（`semantic.cc:478`），结束后回填 `frameSize` 与 `maxTempSlots`（`semantic.cc:481-485`）。
+1. 嵌套守卫：默认配置下函数内不允许再定义函数（`semantic.cc:452-458`）；
+2. `FunctionScopeGuard` 压入新帧（`semantic.cc:460`）；
+3. 声明形参，于是形参先占槽位（`semantic.cc:463-468`）；
+4. `registerFunction()` 把当前帧记录交给函数名（`semantic.cc:471`）；
+5. 分析函数体（`semantic.cc:476`），结束后回填 `frameSize` 与 `maxTempSlots`（`semantic.cc:479-483`）。
 
 顺序的含义：形参必须比函数体里的局部变量先分配槽位（`params=[0, 1]` 因此稳定为前缀），而函数记录必须在分析函数体之前就登记好，递归调用才能查到自己的签名。
 
@@ -160,9 +160,9 @@ Remove-Item Env:\FC_TRACE
 
 ## 第 5 步：这一层曾经踩过的四个坑（都已修掉）
 
-1. **两个函数共享同一条帧记录**：早期用占位名登记帧，注册函数名时“改名 + 移动”逻辑错位，`isEven` 与 `isOdd` 一度指向同一个 `CompiledFunction`（`params=[0, 0]`、`frameSize=2`）。现在 `registerFunction()` 把当前帧记录**移交**给函数名（`semantic.cc:186-188`），每个函数独立持有自己的记录。
-2. **两个深度共用一个计数器**：帧基址曾取 `m_scopeStack.size()`，而帧记录数组只按函数帧增长——函数体内再定义函数时，下标越界，Debug 下断言失败。现在帧基址用帧计数域（`m_frameRecords.size()`），同时保存进入时的作用域深度用于弹出（`semantic.cc:47-63`）。
-3. **声明节点没有绑定**：`analyzeVarDecl()` 曾只声明不绑定，语义分析照样通过，求值阶段才因为取不到符号返回 `Dangle`。现在声明后立刻 `bindVariable()`（`semantic.cc:396`）。
+1. **两个函数共享同一条帧记录**：早期用占位名登记帧，注册函数名时“改名 + 移动”逻辑错位，`isEven` 与 `isOdd` 一度指向同一个 `CompiledFunction`（`params=[0, 0]`、`frameSize=2`）。现在 `registerFunction()` 把当前帧记录**移交**给函数名（`semantic.cc:184-186`），每个函数独立持有自己的记录。
+2. **两个深度共用一个计数器**：帧基址曾取 `m_scopeStack.size()`，而帧记录数组只按函数帧增长——函数体内再定义函数时，下标越界，Debug 下断言失败。现在帧基址用帧计数域（`m_frameRecords.size()`），同时保存进入时的作用域深度用于弹出（`semantic.cc:46-62`）。
+3. **声明节点没有绑定**：`analyzeVarDecl()` 曾只声明不绑定，语义分析照样通过，求值阶段才因为取不到符号返回 `Dangle`。现在声明后立刻 `bindVariable()`（`semantic.cc:394`）。
 4. **符号表同名不覆盖**：`SymbolTable::addSymbol()` 遇到同名直接返回已有符号，而 `declareVariable()` 不检查返回值——遮蔽时内层声明在符号表里“消失”，只有绑定表还保留两条不同的绑定。这个行为是刻意的（符号表用于摘要），但读代码时容易误判成丢符号。
 
 ---
@@ -173,7 +173,7 @@ Remove-Item Env:\FC_TRACE
 
 **实验 1：让全局变量也标成当前帧**
 
-在 `semantic.cc:158` 把
+在 `semantic.cc:157` 把
 
 ```cpp
 symbol->runtime.frameIndex = isCurrentFrameGlobal() ? -1 : 0;
@@ -190,11 +190,11 @@ symbol->runtime.frameIndex = isCurrentFrameGlobal() ? -1 : 0;
 
 **实验 2：删掉声明节点的绑定**
 
-把 `analyzeVarDecl()` 里的 `m_ctx.bindVariable(node, symbol);`（`semantic.cc:396`）删掉，再跑第 1 步的程序，实测 `bindings` 从 2 降到 1；`sum` 从 8 降到 6（少了 `s`、`i` 两个声明），遮蔽用例从 4 降到 2。语义分析依旧通过，因为没有“每个声明都必须有绑定”的检查。
+把 `analyzeVarDecl()` 里的 `m_ctx.bindVariable(node, symbol);`（`semantic.cc:394`）删掉，再跑第 1 步的程序，实测 `bindings` 从 2 降到 1；`sum` 从 8 降到 6（少了 `s`、`i` 两个声明），遮蔽用例从 4 降到 2。语义分析依旧通过，因为没有“每个声明都必须有绑定”的检查。
 
 **实验 3：让名字查找只看当前作用域**
 
-把 `lookupVariableShared()`（`semantic.cc:103-111`）改成只查 `m_scopeStack.back()`，再跑第 1 步的程序，实测：
+把 `lookupVariableShared()`（`semantic.cc:102-110`）改成只查 `m_scopeStack.back()`，再跑第 1 步的程序，实测：
 
 ```text
 def add(a:int, b:int) { a + b } add(2, 3)   → rejected，Error: variable 'a' is not declared
@@ -213,7 +213,7 @@ def outer() { var x:int = 1; { x } }        → rejected，Error: variable 'x' i
 
 <details><summary>答案</summary>
 
-不是帧编号，是二值标记：`-1` 表示全局帧，`0` 表示当前函数帧。求值阶段据此选择 `callStack[0]` 或 `callStack.back()`。本项目不支持闭包，函数不会引用外层函数的局部变量，因此不需要真实的帧编号。
+不是帧编号，是二值标记：`-1` 表示全局帧，`0` 表示当前函数帧。求值阶段据此选择 `callStack[0]` 或 `callStack.back()`。名字解析允许内层函数引用外层名字，但执行嵌套函数本身被求值器与 codegen 拒绝，因此不需要真实的帧编号。
 
 </details>
 

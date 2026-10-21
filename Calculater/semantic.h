@@ -142,9 +142,6 @@ public:
             m_ctx.popScope();
         }
 
-        ScopeGuard(const ScopeGuard &) = delete;
-        ScopeGuard &operator=(const ScopeGuard &) = delete;
-
     private:
         FCSemanticContext &m_ctx;
     };
@@ -159,8 +156,6 @@ public:
           m_ctx.popFunctionScope();
       }
 
-      FunctionScopeGuard(const FunctionScopeGuard &) = delete;
-      FunctionScopeGuard &operator=(const FunctionScopeGuard &) = delete;
   private:
       FCSemanticContext &m_ctx;
   };

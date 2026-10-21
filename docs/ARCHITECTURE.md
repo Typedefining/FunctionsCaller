@@ -2,7 +2,7 @@
 
 > 基准分支：`refactor/var-symbol-binding`  
 > 文档日期：2026-10-21  
-> 当前状态：词法/语法/语义三阶段解耦完成；默认配置 795/795 断言通过，嵌套函数开关打开时 799/799；生产代码行覆盖率 95.74%  
+> 当前状态：词法/语法/语义三阶段解耦完成；默认配置 795/795 断言通过，嵌套函数开关打开时 799/799；生产代码行覆盖率 95.84%  
 > 语言标准：C++20（CMake 设定），LLVM 18.1.6（vcpkg），Windows + MSVC  
 > 关联文档：`docs/superpowers/plans/2025-06-20-lexer-parser-semantic-decoupling.md`（解耦方案）、`docs/superpowers/specs/2026-10-20-nested-functions-opt-in-design.md`（嵌套函数开关设计）、`docs/postmortems/2026-10-20-frame-anchor-and-separator-bugs.md`（三处设计缺陷复盘）
 
@@ -48,7 +48,7 @@
 │  前端三阶段（独立）    │  语义核心            │  后端（双实现）      │
 │                      │                     │                   │
 │  lexer.h/cc (52/186)  │  semantic.h/cc      │  evaluator.h/cc   │
-│  FC::Lexer           │  (240/534)          │  (60/445)         │
+│  FC::Lexer           │  (238/523)          │  (60/445)         │
 │  字符流→Token流        │  FCSemanticContext  │  FCEvaluationCtx  │
 │                      │  SemanticAnalyzer   │  树遍历求值         │
 │  parser.h/cc (63/485)│  作用域/槽位/绑定     │                   │
@@ -93,7 +93,7 @@ runtime.h → token.h → lexer.h → parser.h
 | **Trace** | `trace.h/cc` (16/56) | FunctionsCore | `traceEnabled(stage)`：按环境变量 `FC_TRACE` 的逗号分隔阶段列表判断是否输出诊断；各阶段只在入口/出口调用，业务分支不含打印；**100% 行覆盖** |
 | **Parser** | `parser.h/cc` (63/485) | FunctionsCore | `FC::Parser`：Token 流→纯语法 AST；递归下降 + 优先级爬升（`tokenPrecedence` 按 `FCBinaryOp`，非运算符返回 -1）；错误恢复返回 nullptr + `hadError()`；`tok_error` 的说明直接作为错误信息；构造不读取 token，`parseProgram()` 入口才进入解析阶段（`begin()`），`reset()` 复位阶段与错误标记，`started()` 可判定当前阶段；**零语义副作用** |
 | **AST Dump** | `ast_dump.h/cc` (18/168) | FunctionsCore | `describeAst()`：纯语法树→缩进文本（13 种节点），供 `FC_TRACE=ast` 诊断与解析层断言；不参与语义与后端数据流；**100% 行覆盖** |
-| **Semantic** | `semantic.h/cc` (240/534) | FunctionsSemantic | `FCSemanticContext`：作用域栈（RAII `ScopeGuard`/`FunctionScopeGuard`）、`declareVariable`（分配 slot + frameIndex）、`registerFunction`、`bindVariable/boundSymbol`；`SemanticAnalyzer`：AST 遍历分派（12 种节点），**帧布局唯一生产者**（CompiledFunction::frameSize/parametersIdx） |
+| **Semantic** | `semantic.h/cc` (238/523) | FunctionsSemantic | `FCSemanticContext`：作用域栈（RAII `ScopeGuard`/`FunctionScopeGuard`）、`declareVariable`（分配 slot + frameIndex）、`registerFunction`、`bindVariable/boundSymbol`；`SemanticAnalyzer`：AST 遍历分派（12 种节点），**帧布局唯一生产者**（CompiledFunction::frameSize/parametersIdx） |
 | **Semantic Dump** | `semantic_dump.h/cc` (13/79) | FunctionsCore | `describeCompiledProgram()`：编译结果→缩进文本（每个帧的大小、参数槽位、符号的 slot/depth/frameIndex、绑定条数），供 `FC_TRACE=semantic` 诊断；不参与数据流；**100% 行覆盖** |
 | **Evaluator** | `evaluator.h/cc` (60/445) | FunctionsEvaluator | `FCEvaluationContext`：全局帧 + 调用栈；`frameForSymbol`（frameIndex==-1→全局帧，否则栈顶帧）；`pushFrame` 帧大小从 `CompiledFunction::frameSize`（语义期输出）读取；树遍历求值，按 `symbol->slot` 读写 `frame->locals` |
 | **Codegen** | `codegen.h/cc` (51/983) | FunctionsCodegen | `FCCodegenContext`：`namedValues`（局部→Alloca）/`globalValues`（全局→GlobalVariable）按符号身份索引；`inferExprType` 类型推断；`codegenDeclaration` 按 `runtime.frameIndex==-1` 分派全局/局部分配；函数前向声明 + `__fc_main` 顶层包装 + verifyFunction/verifyModule |
@@ -230,10 +230,10 @@ Evaluator/Codegen: switch (FCBinaryOp) 分派
 | ast_dump.cc | 100.00% | 三类容器、if/for/call、字面量与兜底节点（120/120） |
 | semantic_dump.cc | 100.00% | 帧与符号输出全分支（37/37） |
 | parser.cc | 97.90% | 剩余为不可达防御分支 |
-| semantic.cc | 96.15% | SemanticAnalyzer + 上下文 |
+| semantic.cc | 96.69% | SemanticAnalyzer + 上下文 |
 | evaluator.cc | 97.32% | 错误分支经边界用例覆盖 |
 | codegen.cc | 90.97% | LLVM 错误注入路径为主 |
-| **Overall** | **95.74%** | **≥95% 门禁达标（默认配置）** |
+| **Overall** | **95.84%** | **≥95% 门禁达标（默认配置）** |
 
 统计口径：`pwsh -NoProfile -File tools/coverage.ps1 -BuildDir build-strict`（Microsoft.CodeCoverage.Console），排除 `unit_test.cc/main.cc`。
 
@@ -246,7 +246,7 @@ Evaluator/Codegen: switch (FCBinaryOp) 分派
 
 - 分隔符只有 `;`，且只能跟在**非块终结**的表达式之后：块（`}`）已终止语句，其后写 `;` 报 `';' must not follow a block terminator`，下一条语句直接开始（`def f() { 1 } f()` 合法）
 - 不支持：`return`、`extern`、布尔字面量、除 `<` 外的比较/逻辑运算、一元负号、数组/结构体、字符串转义、下划线标识符、闭包
-- 嵌套 `def` 是**前端编译期选项**（`FC_ENABLE_NESTED_FUNCTIONS`，默认 OFF）：关闭时语义期直接拒绝；打开时前端允许表示与登记，但求值器与 codegen 一律拒绝执行，内层函数引用外层局部一律按捕获拒绝（`semantic.cc` 的 `m_symbolOwnerFrame` 判定）
+- 嵌套 `def` 是**前端编译期选项**（`FC_ENABLE_NESTED_FUNCTIONS`，默认 OFF）：关闭时语义期直接拒绝；打开时前端允许表示与登记，名字解析照常跨作用域栈查找（内层可引用外层局部与全局），求值器与 codegen 一律拒绝执行帧内函数定义
 - 打开态下嵌套 `def` 仍不可调用：`FCFunctionRegistry::index` 只登记顶层函数，调用会落到 “unknown function” 失败路径
 - 顶层块中的 `def` 不受该开关影响（帧基址仍为 0）
 - 循环变量仅 `int`；浮点循环报错
@@ -259,7 +259,7 @@ Evaluator/Codegen: switch (FCBinaryOp) 分派
 
 ## 9. 后续演进方向
 
-1. **闭包捕获**：`isCaptured` 字段与帧基址模型已就绪；开关打开后前端已能表示嵌套 `def`，下一步需要 upvalue 链并同时修正四处 `frameIndex` 单值假设，才能让内层函数安全引用外层局部
+1. **闭包捕获**：`isCaptured` 字段与帧基址模型已就绪；名字解析已允许内层函数引用外层名字（`resolveVariable` 不再拦截），下一步需要真实帧编号与 upvalue 链，并同时修正四处 `frameIndex` 单值假设，才能让这类引用在运行期正确寻址
 2. **Codegen 覆盖率**：90.97% 的缺口集中在 LLVM 验证失败注入路径，可补充针对性错误构造
 3. **位置信息接入错误报告**：`line/column` 目前只被单元测试断言，未被任何错误信息消费；接入点集中在 `Parser::logError` 与各 `parse*` 分支
 4. **deprecated char 构造移除**：`FCBinaryExprAST(char,...)` 过渡重载待测试全部迁移后删除
@@ -325,7 +325,7 @@ FunctionsCaller/
 │   ├── trace.h/cc   (16/56)   # 按阶段启用的诊断输出（FC_TRACE）
 │   ├── parser.h/cc  (63/485)  # FC::Parser   [阶段2 · 纯语法]
 │   ├── ast_dump.h/cc (18/168) # 纯语法树→缩进文本 [阶段2 诊断输出]
-│   ├── semantic.h/cc(240/534) # FCSemanticContext + SemanticAnalyzer [阶段3]
+│   ├── semantic.h/cc(238/523) # FCSemanticContext + SemanticAnalyzer [阶段3]
 │   ├── semantic_dump.h/cc (13/79) # 编译结果→缩进文本 [阶段3 诊断输出]
 │   ├── scanner.h/cc (35/55)   # FCScanner Facade [三阶段编排]
 │   ├── evaluator.h/cc(60/445) # 树遍历解释器 [后端A]
@@ -351,7 +351,7 @@ FunctionsCaller/
     └── superpowers/specs/2026-10-20-nested-functions-opt-in-design.md
 ```
 
-提交历史：121 commits（本分支领先 origin 2），最近演进序列：
+提交历史：123 commits（本分支领先 origin 4），最近演进序列：
 
 ```
 36261ee fix: 分隔符只能跟在非块终结的表达式之后，块结束后禁止再写分号
@@ -371,7 +371,7 @@ bb9916a feat: 新增按阶段启用的诊断输出开关，修正词法层四处
 ---
 
 > 文档生成：2026-10-21（Asia/Shanghai），基于 `refactor/var-symbol-binding@36261ee` 实测代码结构与质量指标  
-> 验证口径：cmake 3.20+ / MSVC / LLVM 18.1.6 / 默认配置 795 断言、开关打开 799 断言 / coverage 95.74%
+> 验证口径：cmake 3.20+ / MSVC / LLVM 18.1.6 / 默认配置 795 断言、开关打开 799 断言 / coverage 95.84%
 
 
 
