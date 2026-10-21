@@ -74,7 +74,13 @@ pwsh -NoProfile -File .\tools\verify-configurations.ps1
 build-debug/Calculater/Debug/FunctionsCalculater.exe
 ```
 
-该程序（`main.cc`）目前只是解析一段硬编码示例的最小入口。测试程序位于：
+该程序（`main.cc`）是端到端入口：分析一段源码并求值，把结果打印为 `[result] ...`。源码由第一个命令行参数给出，省略时使用内置示例：
+
+```powershell
+& .\build-debug\Calculater\Debug\FunctionsCalculater.exe 'def add(a:int, b:int) { a + b } add(2, 3)'
+```
+
+测试程序位于：
 
 ```text
 build-debug/Calculater/Debug/FunctionsUnitTest.exe
@@ -444,7 +450,7 @@ ctest --test-dir build-debug -C Debug --output-on-failure
 在 Windows + Visual Studio 环境中，可以使用仓库中的脚本收集生产实现文件（`*.cc`）的行覆盖率。脚本会排除测试驱动（`unit_test.cc` / `call_ast_test.cc`）和 `main.cc`，并在低于 95% 时返回失败：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\coverage.ps1 `
+pwsh -NoProfile -File .\tools\coverage.ps1 `
     -BuildDir .\build-debug -Configuration Debug
 ```
 
@@ -489,7 +495,7 @@ Calculater/
 ├── evaluator.h/.cc   解释执行（evaluate）与 FCFunctionRegistry
 ├── codegen.h/.cc     LLVM IR 生成（codegen）
 ├── unit_test.cc      综合测试套件（FunctionsUnitTest）
-└── main.cc           最小可执行入口（FunctionsCalculater，硬编码示例）
+└── main.cc           最小可执行入口（FunctionsCalculater，分析并求值）
 
 tools/
 └── coverage.ps1      行覆盖率收集脚本（默认阈值 95%）
