@@ -11,6 +11,7 @@
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Instructions.h"
 #include "semantic.h"
+#include "diagnostic.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
@@ -36,6 +37,8 @@ namespace FCExprClass
 		CompiledProgram compiledProgram;
 		const FCSemanticContext* semantic = nullptr;
 		FCMarks::SemanticBinding localBinding;
+		// 结构化诊断通道：codegen 错误进此处，不再 fprintf stderr
+		FC::FCDiagnostics diagnostics;
 
 		std::shared_ptr<VariableSymbol> boundSymbol(const void* astNode) const
 		{

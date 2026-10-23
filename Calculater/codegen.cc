@@ -21,9 +21,9 @@ llvm::Type* stringType(FCCodegenContext& context)
 	return llvm::PointerType::getUnqual(context.llvmContext);
 }
 
-llvm::Value* logCodegenError(const char* message)
+llvm::Value* logCodegenError(FCCodegenContext& context, const char* message)
 {
-	fprintf(stderr, "Codegen error: %s\n", message);
+	context.diagnostics.add("codegen", {}, message);
 	return nullptr;
 }
 
@@ -273,7 +273,7 @@ llvm::Value* codegenVariable(const FCVariableExprAST* expression,
 {
 	auto variableSymbol = context.boundSymbol(expression);
 	if (variableSymbol == nullptr)
-		return logCodegenError("variable is not resolved to a symbol");
+		return logCodegenError(context, "variable is not resolved to a symbol");
 
 	auto it = context.namedValues.find(variableSymbol);
 	if (it != context.namedValues.end())
@@ -284,7 +284,7 @@ llvm::Value* codegenVariable(const FCVariableExprAST* expression,
 
 	auto global = context.globalValues.find(variableSymbol);
 	if (global == context.globalValues.end())
-		return logCodegenError("global variable is not declared");
+		return logCodegenError(context, "global variable is not declared");
 	return context.builder.CreateLoad(
 		global->second->getValueType(), global->second, expression->name);
 }
@@ -297,7 +297,7 @@ llvm::Value* codegenBinary(const FCBinaryExprAST* expression,
 		auto* variable = dynamic_cast<const FCVariableExprAST*>(expression->getLHS());
 		auto lhsSymbol = context.boundSymbol(variable);
 		if (variable == nullptr || lhsSymbol == nullptr)
-			return logCodegenError("left side of assignment must be a resolved variable");
+			return logCodegenError(context, "left side of assignment must be a resolved variable");
 
 		llvm::Value* address = nullptr;
 		llvm::Type* valueType = nullptr;
@@ -321,7 +321,7 @@ llvm::Value* codegenBinary(const FCBinaryExprAST* expression,
 
 		if (!address || !valueType)
 		{
-			return logCodegenError("assigned variable is not allocated");
+			return logCodegenError(context, "assigned variable is not allocated");
 		}
 
 		auto* rhs = codegen(expression->getRHS(), context);
@@ -329,7 +329,7 @@ llvm::Value* codegenBinary(const FCBinaryExprAST* expression,
 			return nullptr;
 		rhs = castValue(context, rhs, valueType);
 		if (rhs == nullptr)
-			return logCodegenError("assignment type mismatch");
+			return logCodegenError(context, "assignment type mismatch");
 
 		context.builder.CreateStore(rhs, address);
 		return rhs;
@@ -344,7 +344,7 @@ llvm::Value* codegenBinary(const FCBinaryExprAST* expression,
 	{
 		if (expression->getOperator() != FCBinaryOp::Add || !lhs->getType()->isPointerTy() ||
 			!rhs->getType()->isPointerTy())
-			return logCodegenError("only string concatenation is supported");
+			return logCodegenError(context, "only string concatenation is supported");
 
 		auto* i8Pointer = stringType(context);
 		auto* sizeType = llvm::Type::getInt64Ty(context.llvmContext);
@@ -374,7 +374,7 @@ llvm::Value* codegenBinary(const FCBinaryExprAST* expression,
 		lhs = castValue(context, lhs, llvm::Type::getDoubleTy(context.llvmContext));
 		rhs = castValue(context, rhs, llvm::Type::getDoubleTy(context.llvmContext));
 		if (lhs == nullptr || rhs == nullptr)
-			return logCodegenError("numeric type conversion failed");
+			return logCodegenError(context, "numeric type conversion failed");
 
 		switch (expression->getOperator())
 		{
@@ -415,7 +415,7 @@ llvm::Value* codegenBinary(const FCBinaryExprAST* expression,
 		}
 	}
 
-	return logCodegenError("unknown binary operator");
+	return logCodegenError(context, "unknown binary operator");
 }
 
 llvm::Value* codegenCall(const FCCallExprAST* expression,
@@ -424,12 +424,14 @@ llvm::Value* codegenCall(const FCCallExprAST* expression,
 	auto* function = context.module->getFunction(expression->getName());
 	if (function == nullptr)
 	{
-		fprintf(stderr, "Codegen error: function not found: %s\n", expression->getName().c_str());
+		context.diagnostics.add("codegen", {},
+			std::string("function not found: ") + expression->getName());
 		return nullptr;
 	}
 	if (expression->getArgs().size() != function->arg_size())
 	{
-		fprintf(stderr, "Codegen error: argument count mismatch in %s\n", expression->getName().c_str());
+		context.diagnostics.add("codegen", {},
+			std::string("argument count mismatch in ") + expression->getName());
 		return nullptr;
 	}
 
@@ -443,7 +445,7 @@ llvm::Value* codegenCall(const FCCallExprAST* expression,
 			return nullptr;
 		value = castValue(context, value, function->getArg(index)->getType());
 		if (value == nullptr)
-			return logCodegenError("call argument type mismatch");
+			return logCodegenError(context, "call argument type mismatch");
 		arguments.push_back(value);
 		++index;
 	}
@@ -488,7 +490,7 @@ llvm::Value* codegenFunction(FCFunctionAST* expression,
 			context.namedValues = std::move(oldNamedValues);
 			context.currentFunction = oldFunction;
 			context.builder.restoreIP(oldInsertPoint);
-			return logCodegenError("function parameter declaration is missing");
+			return logCodegenError(context, "function parameter declaration is missing");
 		}
 
 		auto* alloca = context.createEntryBlockAlloca(
@@ -502,7 +504,7 @@ llvm::Value* codegenFunction(FCFunctionAST* expression,
 			context.namedValues = std::move(oldNamedValues);
 			context.currentFunction = oldFunction;
 			context.builder.restoreIP(oldInsertPoint);
-			return logCodegenError("function parameter symbol is missing");
+			return logCodegenError(context, "function parameter symbol is missing");
 		}
 		// 未注册的手工构造函数（无语义期符号）容错跳过登记，函数体引用参数时会显式报错
 		if (parameterSymbol != nullptr)
@@ -526,7 +528,7 @@ llvm::Value* codegenFunction(FCFunctionAST* expression,
 		context.namedValues = std::move(oldNamedValues);
 		context.currentFunction = oldFunction;
 		context.builder.restoreIP(oldInsertPoint);
-		return logCodegenError("function return type mismatch");
+		return logCodegenError(context, "function return type mismatch");
 	}
 	context.builder.CreateRet(returnValue);
 
@@ -548,11 +550,11 @@ llvm::Value* codegenIf(const FCIfExprAST* expression,
 	FCCodegenContext& context)
 {
 	if (context.currentFunction == nullptr)
-		return logCodegenError("if expression is outside a function");
+		return logCodegenError(context, "if expression is outside a function");
 
 	auto* condition = createCondition(context, codegen(expression->getCondition(), context));
 	if (condition == nullptr)
-		return logCodegenError("if condition must be numeric");
+		return logCodegenError(context, "if condition must be numeric");
 
 	auto* function = context.currentFunction;
 	auto* thenBlock = llvm::BasicBlock::Create(context.llvmContext, "then", function);
@@ -589,7 +591,7 @@ llvm::Value* codegenIf(const FCIfExprAST* expression,
 	thenValue = castValue(context, thenValue, phiType);
 	elseValue = castValue(context, elseValue, phiType);
 	if (thenValue == nullptr || elseValue == nullptr)
-		return logCodegenError("if branch types do not match");
+		return logCodegenError(context, "if branch types do not match");
 
 	auto* phi = context.builder.CreatePHI(phiType, 2, "iftmp");
 	phi->addIncoming(thenValue, thenBlock);
@@ -601,10 +603,10 @@ llvm::Value* codegenFor(const FCForExprAST* expression,
 	FCCodegenContext& context)
 {
 	if (context.currentFunction == nullptr || expression->getDecl() == nullptr)
-		return logCodegenError("for expression is outside a function");
+		return logCodegenError(context, "for expression is outside a function");
 	const auto forSymbol = context.boundSymbol(expression);
 	if (forSymbol == nullptr)
-		return logCodegenError("for variable is not resolved to a symbol");
+		return logCodegenError(context, "for variable is not resolved to a symbol");
 	auto oldIt = context.namedValues.find(forSymbol);
 	llvm::AllocaInst* oldAddress = oldIt == context.namedValues.end()
 		? nullptr : oldIt->second;
@@ -616,7 +618,7 @@ llvm::Value* codegenFor(const FCForExprAST* expression,
 	auto* start = codegen(expression->getStart(), context);
 	start = castValue(context, start, variable->getAllocatedType());
 	if (start == nullptr)
-		return logCodegenError("for start value type mismatch");
+		return logCodegenError(context, "for start value type mismatch");
 	context.builder.CreateStore(start, variable);
 
 	auto* function = context.currentFunction;
@@ -628,7 +630,7 @@ llvm::Value* codegenFor(const FCForExprAST* expression,
 	auto* end = codegen(expression->getEnd(), context);
 	auto* condition = createCondition(context, end);
 	if (condition == nullptr)
-		return logCodegenError("for end condition must be numeric");
+		return logCodegenError(context, "for end condition must be numeric");
 	auto* bodyBlock = llvm::BasicBlock::Create(context.llvmContext, "loopbody");
 	context.builder.CreateCondBr(condition, bodyBlock, afterBlock);
 
@@ -644,7 +646,7 @@ llvm::Value* codegenFor(const FCForExprAST* expression,
 			: codegen(expression->getStep(), context);
 		step = castValue(context, step, variable->getAllocatedType());
 		if (step == nullptr)
-			return logCodegenError("for step value type mismatch");
+			return logCodegenError(context, "for step value type mismatch");
 
 		auto* current = context.builder.CreateLoad(
 			variable->getAllocatedType(), variable, expression->getDecl()->name);
@@ -685,11 +687,11 @@ llvm::Value* codegenDeclaration(const FCVarDeclExprAST* expression,
 	FCCodegenContext& context)
 {
 	if (context.currentFunction == nullptr || expression->decl == nullptr)
-		return logCodegenError("variable declaration is outside a function");
+		return logCodegenError(context, "variable declaration is outside a function");
 
 	auto declSymbol = context.boundSymbol(expression);
 	if (declSymbol == nullptr)
-		return logCodegenError("variable declaration is not resolved to a symbol");
+		return logCodegenError(context, "variable declaration is not resolved to a symbol");
 
 	// 变量符号自身携带运行时定位：frameIndex == -1 为全局，其余为局部
 	const bool isGlobal = declSymbol->runtime.frameIndex == -1;
@@ -701,7 +703,7 @@ llvm::Value* codegenDeclaration(const FCVarDeclExprAST* expression,
 		{
 			auto* globalValue = declareGlobal(declSymbol, context);
 			if (globalValue == nullptr)
-				return logCodegenError("global variable declaration failed");
+				return logCodegenError(context, "global variable declaration failed");
 			context.globalValues.emplace(declSymbol, globalValue);
 			global = context.globalValues.find(declSymbol);
 		}
@@ -712,7 +714,7 @@ llvm::Value* codegenDeclaration(const FCVarDeclExprAST* expression,
 			: codegen(expression->initExpr.get(), context);
 		initialValue = castValue(context, initialValue, globalValue->getValueType());
 		if (initialValue == nullptr)
-			return logCodegenError("global variable initializer type mismatch");
+			return logCodegenError(context, "global variable initializer type mismatch");
 
 		context.builder.CreateStore(initialValue, globalValue);
 		return initialValue;
@@ -722,7 +724,7 @@ llvm::Value* codegenDeclaration(const FCVarDeclExprAST* expression,
 		auto local = context.namedValues.find(declSymbol);
 		if (local != context.namedValues.end())
 		{
-			return logCodegenError("variable has defiened in function!");
+			return logCodegenError(context, "variable already defined in function");
 		}
 
 		auto* variable = context.createEntryBlockAlloca(
@@ -735,7 +737,7 @@ llvm::Value* codegenDeclaration(const FCVarDeclExprAST* expression,
 			: codegen(expression->initExpr.get(), context);
 		initialValue = castValue(context, initialValue, variable->getAllocatedType());
 		if (initialValue == nullptr)
-			return logCodegenError("variable initializer type mismatch");
+			return logCodegenError(context, "variable initializer type mismatch");
 
 		context.builder.CreateStore(initialValue, variable);
 		return initialValue;
@@ -917,6 +919,8 @@ llvm::Value* codegenBlock(const FCBlockExprAST* expression, FCCodegenContext& co
     }
 
     context.namedValues = std::move(oldNamedValues);
+    if (expression->getExpressions().empty())
+        return logCodegenError(context, "function body block is empty");
     return lastValue;
 }
 
@@ -943,7 +947,7 @@ llvm::Value* FCExprClass::codegen(FCExprAST* expression,
 		// 若照旧落到 codegenFunction，它会返回一个 llvm::Function* 值，
 		// 外层把它当表达式值使用，错误要到类型转换时才暴露
 		if (context.currentFunction != nullptr)
-			return logCodegenError(
+			return logCodegenError(context,
 				"nested function definition is not supported by codegen");
 		return codegenFunction(function, context);
 	}

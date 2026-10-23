@@ -619,6 +619,44 @@ private:
                    && context.diagnostics.items()[0].message.find("assignment") != std::string::npos,
                    "diag: bad assignment recorded");
         }
+        // 15. codegen 错误：赋值左侧非变量
+        {
+            // 手工 AST（沿用 runCodegenErrorTests 的既有构造方式）：
+            // Binary(Assign, Number(1), Number(2))
+            FCCodegenContext context("diagModule", CompiledProgram{});
+            auto assign = std::make_unique<FCBinaryExprAST>(
+                FCBinaryOp::Assign, std::make_unique<FCNumberExprAST>(1),
+                std::make_unique<FCNumberExprAST>(2));
+            expect(codegenTopLevel(assign.get(), context) == nullptr,
+                   "diag: codegen assign fails");
+            expect(!context.diagnostics.empty()
+                   && context.diagnostics.items()[0].stage == "codegen"
+                   && context.diagnostics.items()[0].message.find("assignment") != std::string::npos,
+                   "diag: codegen assign error recorded");
+        }
+        // 16. codegen 错误：调用不存在的函数
+        {
+            // Call("nosuchfn", []) 手工 AST（沿用既有 FCCallExprAST 构造）
+            FCCodegenContext context("diagModule", CompiledProgram{});
+            auto call = std::make_unique<FCCallExprAST>(
+                "nosuchfn", std::vector<std::unique_ptr<FCExprAST>>{});
+            expect(codegenTopLevel(call.get(), context) == nullptr,
+                   "diag: codegen call fails");
+            expect(!context.diagnostics.empty()
+                   && context.diagnostics.items()[0].message.find("nosuchfn") != std::string::npos,
+                   "diag: codegen unknown function recorded");
+        }
+        // 17. 空函数体 codegen 失败（README:265 已知行为：语法可解析，LLVM codegen 失败）
+        //     analysis 本身成功（semantic 对空块放行），失败发生在 codegenBlock。
+        {
+            FCScanner scanner;
+            auto ast = scanner.analysis("def f() { }");
+            expect(ast != nullptr, "diag: empty body parses");
+            FCCodegenContext context("diagModule", scanner.semanticContext().getCompiledProgram());
+            context.semantic = &scanner.semanticContextMutable();
+            expect(codegenTopLevel(ast.get(), context) == nullptr, "diag: empty body fails");
+            expect(!context.diagnostics.empty(), "diag: empty body error recorded");
+        }
     }
 
     // ==================== Semantic Tests ====================
