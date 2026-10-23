@@ -534,6 +534,8 @@ llvm::Value* codegenFunction(FCFunctionAST* expression,
 
 	if (llvm::verifyFunction(*function, &llvm::errs()))
 	{
+		context.diagnostics.add("codegen", {},
+			"LLVM function verification failed: " + expression->getProto()->getProtoName());
 		context.namedValues = std::move(oldNamedValues);
 		context.currentFunction = oldFunction;
 		context.builder.restoreIP(oldInsertPoint);
@@ -855,6 +857,9 @@ llvm::Value* codegenProgram(const FCProgramAST* expression,
   context.builder.CreateRet(last);
 
 	const bool invalid = llvm::verifyFunction(*mainFunction, &llvm::errs());
+	if (invalid)
+		context.diagnostics.add("codegen", {},
+			"LLVM function verification failed: __fc_main");
 	context.namedValues = std::move(oldNamedValues);
 	context.currentFunction = oldFunction;
 	context.builder.restoreIP(oldInsertPoint);
@@ -900,11 +905,14 @@ llvm::Value* codegenStandaloneTopLevel(const FCExprAST* expression,
     value = llvm::ConstantInt::get(integerType(context), 0);
   context.builder.CreateRet(value);
 
-	const bool invalid = llvm::verifyFunction(*mainFunction, &llvm::errs());
-	context.namedValues = std::move(oldNamedValues);
-	context.currentFunction = oldFunction;
-	context.builder.restoreIP(oldInsertPoint);
-	return invalid ? nullptr : mainFunction;
+  const bool invalid = llvm::verifyFunction(*mainFunction, &llvm::errs());
+  if (invalid)
+    context.diagnostics.add("codegen", {},
+      "LLVM function verification failed: __fc_main");
+  context.namedValues = std::move(oldNamedValues);
+  context.currentFunction = oldFunction;
+  context.builder.restoreIP(oldInsertPoint);
+  return invalid ? nullptr : mainFunction;
 }
 
 llvm::Value* codegenBlock(const FCBlockExprAST* expression, FCCodegenContext& context)
@@ -920,7 +928,7 @@ llvm::Value* codegenBlock(const FCBlockExprAST* expression, FCCodegenContext& co
 
     context.namedValues = std::move(oldNamedValues);
     if (expression->getExpressions().empty())
-        return logCodegenError(context, "function body block is empty");
+        return logCodegenError(context, "block is empty");
     return lastValue;
 }
 
