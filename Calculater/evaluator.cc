@@ -183,7 +183,8 @@ FCValue evaluateBinary(const FCBinaryExprAST *expression,
     auto *variable =
         dynamic_cast<const FCVariableExprAST *>(expression->getLHS());
     if (variable == nullptr || variable->name.empty()) {
-      std::fprintf(stderr, "LogError: LHS of assignment must be a variable\n");
+      context.diagnostics.add("evaluator", {},
+                               "LHS of assignment must be a variable");
       return makeDangleValue();
     }
 
@@ -193,15 +194,16 @@ FCValue evaluateBinary(const FCBinaryExprAST *expression,
 
     std::shared_ptr<VariableSymbol> lhsSymbol = context.boundSymbol(variable);
     if (lhsSymbol == nullptr) {
-      std::fprintf(stderr, "LogError: LHS of assignment is not bound to a symbol\n");
+      context.diagnostics.add("evaluator", {},
+                               "LHS of assignment is not bound to a symbol");
       return makeDangleValue();
     }
 
     Frame *frame = context.frameForSymbol(*lhsSymbol);
     if (frame == nullptr || lhsSymbol->slot < 0 ||
         lhsSymbol->slot >= static_cast<int>(frame->locals.size())) {
-      std::fprintf(stderr, "LogError: Invalid slot for %s\n",
-                   variable->name.c_str());
+      context.diagnostics.add("evaluator", {},
+                               "Invalid slot for " + variable->name);
       return makeDangleValue();
     }
 
@@ -232,7 +234,7 @@ FCValue evaluateBinary(const FCBinaryExprAST *expression,
       result.evaluteVal.intVal = lhs.evaluteVal.intVal < rhs.evaluteVal.intVal;
       break;
     default:
-      std::fprintf(stderr, "LogError: unknown binary operator\n");
+      context.diagnostics.add("evaluator", {}, "unknown binary operator");
       return makeDangleValue();
     }
     return result;
@@ -260,7 +262,7 @@ FCValue evaluateBinary(const FCBinaryExprAST *expression,
           lhs.evaluteVal.doubleVal / rhs.evaluteVal.doubleVal;
       break;
     default:
-      std::fprintf(stderr, "LogError: unknown binary operator\n");
+      context.diagnostics.add("evaluator", {}, "unknown binary operator");
       return makeDangleValue();
     }
     return result;
@@ -278,15 +280,15 @@ FCValue evaluateCall(const FCCallExprAST *expression,
                      FCEvaluationContext &context) {
   auto *function = context.functions.findFunction(expression->getName());
   if (function == nullptr) {
-    std::fprintf(stderr, "Function not found: %s\n",
-                 expression->getName().c_str());
+    context.diagnostics.add("evaluator", {},
+                            "Function not found: " + expression->getName());
     return makeDangleValue();
   }
 
   const auto &prototype = function->getProto();
   if (expression->getArgs().size() != prototype->getArgs().size()) {
-    std::fprintf(stderr, "Argument count mismatch in %s\n",
-                 expression->getName().c_str());
+    context.diagnostics.add("evaluator", {},
+                            "Argument count mismatch in " + expression->getName());
     return makeDangleValue();
   }
 
@@ -305,8 +307,9 @@ FCValue evaluateCall(const FCCallExprAST *expression,
   // 调用前先确认语义期记录存在（帧布局与参数符号都来自它）
   auto func = context.compiledProgram.getFunction(expression->getName());
   if (func == nullptr) {
-    std::fprintf(stderr, "Error: no compiled record for '%s'\n",
-                 expression->getName().c_str());
+    context.diagnostics.add(
+        "evaluator", {},
+        "Error: no compiled record for '" + expression->getName() + "'");
     context.popFrame();
     return makeDangleValue();
   }
@@ -321,8 +324,9 @@ FCValue evaluateCall(const FCCallExprAST *expression,
     auto symbol = func->symbols.lookupShared(parameter->name);
     if (symbol == nullptr || symbol->slot < 0 ||
         symbol->slot >= static_cast<int>(frame.locals.size())) {
-      fprintf(stderr, "Error: unresolved parameter '%s'\n",
-              expression->getName().c_str());
+      context.diagnostics.add(
+          "evaluator", {},
+          "Error: unresolved parameter '" + expression->getName() + "'");
       context.popFrame();
       return makeDangleValue();
     }
@@ -391,10 +395,10 @@ FCValue evaluateExpression(const FCExprAST *expression,
   if (auto *node = dynamic_cast<const FCFunctionAST *>(expression)) {
     // callStack 栈底恒为 <global> 帧，故“多于一帧”才说明正处于函数调用中
     if (context.callStack.size() > 1) {
-      fprintf(stderr,
-              "Error: nested function definition '%s' is not supported by the "
-              "evaluator\n",
-              node->getProtoName().c_str());
+      context.diagnostics.add(
+          "evaluator", {},
+          "Error: nested function definition '" + node->getProtoName()
+              + "' is not supported by the evaluator");
       return makeDangleValue();
     }
     context.functions.registerFunction(const_cast<FCFunctionAST *>(node));

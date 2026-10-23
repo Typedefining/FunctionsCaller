@@ -1,5 +1,6 @@
 #pragma once
 
+#include "diagnostic.h"
 #include "token.h"
 #include "semantic.h"
 // runtime.h（FCValue/Frame）经 token.h 传递，无需重复包含
@@ -21,6 +22,8 @@ struct FCEvaluationContext {
   std::vector<Frame> callStack;
   CompiledProgram compiledProgram;
   FCMarks::SemanticBinding localBinding;
+  // 运行期诊断通道：求值错误写这里（编译期错误在 scanner 持有的通道里）
+  FC::FCDiagnostics diagnostics;
 
   // 按符号身份解析变量：符号既携带槽位，也携带声明时的作用域深度。
   // 全局变量在顶层帧（callStack[0]）中，局部变量在当前调用帧中。
