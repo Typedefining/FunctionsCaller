@@ -1,4 +1,5 @@
 #include "codegen.h"
+#include "diagnostic.h"
 #include "evaluator.h"
 #include "scanner.h"
 
@@ -37,6 +38,12 @@ void attachSemanticOutput(FCCodegenContext &context, const FCScanner &scanner) {
   context.compiledProgram = scanner.semanticContext().getCompiledProgram();
   context.semantic = &scanner.semanticContext();
 }
+
+// 结构化诊断统一出口：stderr 逐条打印。
+void printDiagnostics(const FC::FCDiagnostics &diagnostics) {
+  for (const auto &diagnostic : diagnostics.items())
+    std::fprintf(stderr, "%s\n", FC::formatDiagnostic(diagnostic).c_str());
+}
 } // namespace
 
 // 最小入口：
@@ -53,19 +60,25 @@ int main(int argc, char *argv[]) {
 
   FCScanner scanner;
   auto ast = scanner.analysis(source);
-  if (ast == nullptr)
+  if (ast == nullptr) {
+    printDiagnostics(scanner.diagnostics());
     return 1;
+  }
 
   if (emitIr) {
     FCCodegenContext context("fc_module", scanner.semanticContext().getCompiledProgram());
     attachSemanticOutput(context, scanner);
-    if (codegenTopLevel(ast.get(), context) == nullptr)
+    if (codegenTopLevel(ast.get(), context) == nullptr) {
+      printDiagnostics(context.diagnostics);
       return 2;
+    }
     context.module->print(llvm::outs(), nullptr);
     return 0;
   }
 
   FCEvaluationContext context(scanner.semanticContext().getCompiledProgram());
-  printValue(evaluate(ast.get(), context));
+  const FCValue result = evaluate(ast.get(), context);
+  printValue(result);
+  printDiagnostics(context.diagnostics);
   return 0;
 }
