@@ -142,8 +142,7 @@ FCSemanticContext::declareVariable(VarDeclPtr declaration) {
   Scope &scope = m_scopeStack.back();
 
   if (scope.variables.find(declaration->name) != scope.variables.end()) {
-    fprintf(stderr, "Error: variable '%s' already declared in current scope\n",
-            declaration->name.c_str());
+    // 失败静默：报告职责在调用方（SemanticAnalyzer），此处只返回失败值
     return nullptr;
   }
 
@@ -173,8 +172,7 @@ bool FCSemanticContext::hasFunction(const std::string &functionName) const {
 bool FCSemanticContext::registerFunction(const std::string &functionName,
                                          const FCFunctionAST *function) {
   if (hasFunction(functionName)) {
-    fprintf(stderr, "Error: function '%s' already defined\n",
-            functionName.c_str());
+    // 失败静默：报告职责在调用方（SemanticAnalyzer），此处只返回失败值
     return false;
   }
 
@@ -314,8 +312,13 @@ void SymbolTable::dump() const {
 
 // ==================== SemanticAnalyzer ====================
 
-FCSemanticContext::SemanticAnalyzer::SemanticAnalyzer(FCSemanticContext &ctx)
-    : m_ctx(ctx) {}
+FCSemanticContext::SemanticAnalyzer::SemanticAnalyzer(FCSemanticContext &ctx,
+                                                       FC::FCDiagnostics &diagnostics)
+    : m_ctx(ctx), m_diagnostics(diagnostics) {}
+
+void FCSemanticContext::SemanticAnalyzer::reportError(const std::string &message) {
+  m_diagnostics.add("semantic", {}, message);
+}
 
 bool FCSemanticContext::SemanticAnalyzer::analyze(const FCExprClass::FCExprAST *root) {
   if (!root) {
@@ -388,6 +391,7 @@ bool FCSemanticContext::SemanticAnalyzer::analyzeSeq(const FCExprClass::FCSeqExp
 bool FCSemanticContext::SemanticAnalyzer::analyzeVarDecl(const FCExprClass::FCVarDeclExprAST *node) {
   auto symbol = m_ctx.declareVariable(node->decl);
   if (!symbol) {
+    reportError("Error: variable '" + node->decl->name + "' already declared in current scope");
     return false;
   }
   m_ctx.bindVariable(node, symbol);
@@ -400,7 +404,7 @@ bool FCSemanticContext::SemanticAnalyzer::analyzeVarDecl(const FCExprClass::FCVa
 bool FCSemanticContext::SemanticAnalyzer::analyzeVariable(const FCExprClass::FCVariableExprAST *node) {
   auto symbol = resolveVariable(node->name);
   if (!symbol) {
-    fprintf(stderr, "Error: variable '%s' is not declared\n", node->name.c_str());
+    reportError("Error: variable '" + node->name + "' is not declared");
     return false;
   }
   return m_ctx.bindVariable(node, symbol);
@@ -411,6 +415,7 @@ bool FCSemanticContext::SemanticAnalyzer::analyzeFor(const FCExprClass::FCForExp
 
   auto symbol = m_ctx.declareVariable(node->getDecl());
   if (!symbol) {
+    reportError("Error: variable '" + node->getDecl()->name + "' already declared in current scope");
     return false;
   }
   m_ctx.bindVariable(node, symbol);
@@ -449,10 +454,8 @@ bool FCSemanticContext::SemanticAnalyzer::analyzeBinary(const FCExprClass::FCBin
 bool FCSemanticContext::SemanticAnalyzer::analyzeFunction(const FCExprClass::FCFunctionAST *node) {
   // 守卫必须在压帧与声明参数之前：被拒绝时不得留下任何帧副作用
   if (!m_ctx.mayDefineFunctionHere()) {
-    fprintf(stderr,
-            "Error: nested function definition '%s' requires "
-            "FC_ENABLE_NESTED_FUNCTIONS\n",
-            node->getProtoName().c_str());
+    reportError("Error: nested function definition '" + node->getProtoName()
+                + "' requires FC_ENABLE_NESTED_FUNCTIONS");
     return false;
   }
 
@@ -462,12 +465,14 @@ bool FCSemanticContext::SemanticAnalyzer::analyzeFunction(const FCExprClass::FCF
   for (const auto &arg : node->getProto()->getArgs()) {
     auto symbol = m_ctx.declareVariable(arg);
     if (!symbol) {
+      reportError("Error: variable '" + arg->name + "' already declared in current scope");
       return false;
     }
   }
 
   // 注册函数：此时 frameLayout 已反映参数个数，frameSize/parametersIdx 可正确填充
   if (!m_ctx.registerFunction(node->getProtoName(), node)) {
+    reportError("Error: function '" + node->getProtoName() + "' already defined");
     return false;
   }
 

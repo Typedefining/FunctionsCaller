@@ -512,6 +512,76 @@ private:
             expect(FC::formatDiagnostic(d2) == "error[semantic]: msg",
                    "diag: formatDiagnostic without location");
         }
+        // 7. 语义错误：重复声明
+        {
+            FCScanner scanner;
+            auto ast = scanner.analysis("def f() { var x:int = 1; var x:int = 2; x }");
+            expect(ast == nullptr, "diag: duplicate var fails");
+            const auto& diags = scanner.diagnostics();
+            expect(!diags.empty() && diags[0].stage == "semantic"
+                   && diags[0].message.find("'x'") != std::string::npos,
+                   "diag: duplicate var recorded with name");
+        }
+        // 8. 语义错误：未声明变量
+        {
+            FCScanner scanner;
+            auto ast = scanner.analysis("def f() { y }");
+            expect(ast == nullptr, "diag: undeclared variable fails");
+            const auto& diags = scanner.diagnostics();
+            expect(!diags.empty() && diags[0].message.find("'y'") != std::string::npos,
+                   "diag: undeclared variable recorded");
+        }
+        // 9. 语义错误：重复函数
+        {
+            FCScanner scanner;
+            auto ast = scanner.analysis("def f() { 1 } def f() { 2 }");
+            expect(ast == nullptr, "diag: duplicate function fails");
+            const auto& diags = scanner.diagnostics();
+            expect(!diags.empty() && diags[0].message.find("'f'") != std::string::npos,
+                   "diag: duplicate function recorded");
+        }
+        // 10. 语义错误：嵌套 def（默认配置）
+        //     经 scanner 的路径：parser 无 tok_def 表达式产生式，块内 def 在
+        //     解析期即被拒（语义守卫不可达，诊断 stage 为 parser）；
+        //     语义守卫本身用手工 AST 验证（下一块）。
+        {
+            FCScanner scanner;
+            auto ast = scanner.analysis("def f() { def g() { 1 } g() }");
+            expect(ast == nullptr, "diag: nested def rejected");
+            const auto& diags = scanner.diagnostics();
+            expect(!diags.empty() && diags[0].stage == "parser",
+                   "diag: in-block def rejected at parser stage");
+        }
+        // 10b. 语义守卫（mayDefineFunctionHere）：手工 AST 触发嵌套拒绝，
+        //      诊断进通道且 stage 为 semantic（仅默认配置；开启嵌套时守卫放行）
+        if constexpr (!FCMarks::kNestedFunctionDefinitions)
+        {
+            FCSemanticContext ctx;
+            FC::FCDiagnostics diagnostics;
+            FCSemanticContext::SemanticAnalyzer analyzer(ctx, diagnostics);
+            auto outerFn = std::make_unique<FCFunctionAST>(
+                std::make_unique<FCPrototypeAST>("outer", std::vector<VarDeclPtr>{}),
+                std::make_unique<FCBlockExprAST>([] {
+                    std::vector<std::unique_ptr<FCExprAST>> body;
+                    body.emplace_back(std::make_unique<FCFunctionAST>(
+                        std::make_unique<FCPrototypeAST>("inner", std::vector<VarDeclPtr>{}),
+                        std::make_unique<FCNumberExprAST>(1)));
+                    return body;
+                }()));
+            expect(!analyzer.analyze(outerFn.get()), "diag: nested def rejected by semantic guard");
+            expect(!diagnostics.empty()
+                   && diagnostics[0].stage == "semantic"
+                   && diagnostics[0].message.find("nested function definition") != std::string::npos,
+                   "diag: nested def recorded");
+        }
+        // 11. for 循环变量：analyzeFor 有独立作用域（ScopeGuard），同名外层变量被遮蔽而非冲突
+        //     （brief 原文假设 var i 后 for i 报重复，与 analyzeFor 的作用域语义不符，见 ledger ruling）
+        {
+            FCScanner scanner;
+            auto ast = scanner.analysis("def f() { var i:int = 0; for i = 0, i < 1 in i }");
+            expect(ast != nullptr && scanner.diagnostics().empty(),
+                   "diag: for-var shadows outer, no conflict");
+        }
     }
 
     // ==================== Semantic Tests ====================
@@ -885,7 +955,8 @@ private:
                     }()),
                 std::make_unique<FCVariableExprAST>(std::string("p")));
             {
-                FCSemanticContext::SemanticAnalyzer analyzer(sem);
+                FC::FCDiagnostics diagnostics;
+                FCSemanticContext::SemanticAnalyzer analyzer(sem, diagnostics);
                 expect(analyzer.analyze(fnAst.get()),
                        "evaluator - hollow function analyzed");
             }
@@ -2859,7 +2930,8 @@ private:
         // ============================================================
         {
             FCSemanticContext ctx;
-            FCSemanticContext::SemanticAnalyzer analyzer(ctx);
+            FC::FCDiagnostics diagnostics;
+            FCSemanticContext::SemanticAnalyzer analyzer(ctx, diagnostics);
 
             auto gDecl = std::make_shared<VarDecl>("g", "int");
             auto gVar = std::make_unique<FCVariableExprAST>(std::string("g"));
@@ -2881,7 +2953,8 @@ private:
         // ============================================================
         {
             FCSemanticContext ctx;
-            FCSemanticContext::SemanticAnalyzer analyzer(ctx);
+            FC::FCDiagnostics diagnostics;
+            FCSemanticContext::SemanticAnalyzer analyzer(ctx, diagnostics);
 
             auto blk = std::make_unique<FCBlockExprAST>(
                 [] {
@@ -2902,7 +2975,8 @@ private:
         // ============================================================
         {
             FCSemanticContext ctx;
-            FCSemanticContext::SemanticAnalyzer analyzer(ctx);
+            FC::FCDiagnostics diagnostics;
+            FCSemanticContext::SemanticAnalyzer analyzer(ctx, diagnostics);
 
             auto fn = std::make_unique<FCFunctionAST>(
                 std::make_unique<FCPrototypeAST>("f", std::vector<VarDeclPtr>{}),
@@ -2932,7 +3006,8 @@ private:
         // ============================================================
         {
             FCSemanticContext ctx;
-            FCSemanticContext::SemanticAnalyzer analyzer(ctx);
+            FC::FCDiagnostics diagnostics;
+            FCSemanticContext::SemanticAnalyzer analyzer(ctx, diagnostics);
 
             auto outer = std::make_unique<FCFunctionAST>(
                 std::make_unique<FCPrototypeAST>("outer", std::vector<VarDeclPtr>{}),
@@ -2967,7 +3042,8 @@ private:
         // ============================================================
         {
             FCSemanticContext ctx;
-            FCSemanticContext::SemanticAnalyzer analyzer(ctx);
+            FC::FCDiagnostics diagnostics;
+            FCSemanticContext::SemanticAnalyzer analyzer(ctx, diagnostics);
 
             auto bad = std::make_unique<FCVariableExprAST>(std::string("undeclared"));
             expect(!analyzer.analyze(bad.get()), "semantic-analyzer - undeclared variable rejected");
@@ -2978,7 +3054,8 @@ private:
         // ============================================================
         {
             FCSemanticContext ctx;
-            FCSemanticContext::SemanticAnalyzer analyzer(ctx);
+            FC::FCDiagnostics diagnostics;
+            FCSemanticContext::SemanticAnalyzer analyzer(ctx, diagnostics);
 
             auto gDecl = std::make_shared<VarDecl>("gb", "int");
             auto gvd = std::make_unique<FCVarDeclExprAST>(gDecl, nullptr);
@@ -2997,7 +3074,8 @@ private:
         // ============================================================
         {
             FCSemanticContext ctx;
-            FCSemanticContext::SemanticAnalyzer analyzer(ctx);
+            FC::FCDiagnostics diagnostics;
+            FCSemanticContext::SemanticAnalyzer analyzer(ctx, diagnostics);
 
             auto fLoop = std::make_unique<FCFunctionAST>(
                 std::make_unique<FCPrototypeAST>("loopfn", std::vector<VarDeclPtr>{}),
@@ -3021,7 +3099,8 @@ private:
         // ============================================================
         {
             FCSemanticContext ctx;
-            FCSemanticContext::SemanticAnalyzer analyzer(ctx);
+            FC::FCDiagnostics diagnostics;
+            FCSemanticContext::SemanticAnalyzer analyzer(ctx, diagnostics);
 
             auto br = std::make_unique<FCIfExprAST>(
                 std::make_unique<FCNumberExprAST>(1),
@@ -3058,7 +3137,8 @@ private:
             if constexpr (FCMarks::kNestedFunctionDefinitions)
             {
                 FCSemanticContext ctx;
-                FCSemanticContext::SemanticAnalyzer analyzer(ctx);
+                FC::FCDiagnostics diagnostics;
+                FCSemanticContext::SemanticAnalyzer analyzer(ctx, diagnostics);
 
                 auto outerFn = buildNested(false);
                 expect(analyzer.analyze(outerFn.get()),
@@ -3079,7 +3159,8 @@ private:
                 // 内层记录独立登记，执行期由求值器与 codegen 拒绝
                 {
                     FCSemanticContext captureCtx;
-                    FCSemanticContext::SemanticAnalyzer captureAnalyzer(captureCtx);
+                    FC::FCDiagnostics diagnostics;
+                    FCSemanticContext::SemanticAnalyzer captureAnalyzer(captureCtx, diagnostics);
                     auto captureFn = buildNested(true);
                     expect(captureAnalyzer.analyze(captureFn.get()),
                            "semantic-analyzer - nested capture resolved when enabled");
@@ -3090,7 +3171,8 @@ private:
                 // 同帧跨块仍可见：帧归属判定只在跨帧时生效
                 {
                     FCSemanticContext sameCtx;
-                    FCSemanticContext::SemanticAnalyzer sameAnalyzer(sameCtx);
+                    FC::FCDiagnostics diagnostics;
+                    FCSemanticContext::SemanticAnalyzer sameAnalyzer(sameCtx, diagnostics);
                     std::vector<std::unique_ptr<FCExprAST>> outerBlock;
                     outerBlock.emplace_back(std::make_unique<FCVarDeclExprAST>(
                         std::make_shared<VarDecl>("blockVar", "int"), nullptr));
@@ -3110,7 +3192,8 @@ private:
             else
             {
                 FCSemanticContext ctx;
-                FCSemanticContext::SemanticAnalyzer analyzer(ctx);
+                FC::FCDiagnostics diagnostics;
+                FCSemanticContext::SemanticAnalyzer analyzer(ctx, diagnostics);
 
                 auto outerFn = buildNested(false);
                 expect(!analyzer.analyze(outerFn.get()),
@@ -3135,7 +3218,8 @@ private:
         // ============================================================
         {
             FCSemanticContext ctx;
-            FCSemanticContext::SemanticAnalyzer analyzer(ctx);
+            FC::FCDiagnostics diagnostics;
+            FCSemanticContext::SemanticAnalyzer analyzer(ctx, diagnostics);
             expect(!analyzer.analyze(nullptr), "semantic-analyzer - null root rejected");
 
             std::vector<VarDeclPtr> dupArgs;

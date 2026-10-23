@@ -7,6 +7,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include "diagnostic.h"
+
 namespace FCExprClass
 {
   struct FCExprAST;
@@ -166,13 +168,17 @@ public:
   // 按 AST 遍历的语义分析器入口（步骤3：新增）
   class SemanticAnalyzer {
   public:
-    explicit SemanticAnalyzer(FCSemanticContext &ctx);
+    SemanticAnalyzer(FCSemanticContext &ctx, FC::FCDiagnostics &diagnostics);
 
     // 分析整个程序 AST，返回是否成功
     bool analyze(const FCExprClass::FCExprAST *root);
 
   private:
     FCSemanticContext &m_ctx;
+    FC::FCDiagnostics &m_diagnostics;
+
+    // 语义错误统一入口：stage 固定 "semantic"，位置固定未知 {}（AST 节点无位置字段）
+    void reportError(const std::string &message);
 
     bool analyzeExpr(const FCExprClass::FCExprAST *expr);
 

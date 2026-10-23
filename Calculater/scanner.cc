@@ -35,7 +35,7 @@ FCScanner::analysis(const ::std::string &inputStr) {
     }
 
     // 阶段3：SemanticAnalyzer — 纯语法 AST -> 语义绑定、frameIndex 赋值
-    FCSemanticContext::SemanticAnalyzer analyzer(m_semanticContext);
+    FCSemanticContext::SemanticAnalyzer analyzer(m_semanticContext, m_diagnostics);
     if (!analyzer.analyze(ast.get())) {
         m_hadSemanticError = true;
         return nullptr;
