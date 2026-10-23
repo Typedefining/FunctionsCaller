@@ -33,6 +33,7 @@ add_library(FunctionsCore STATIC
 	lexer.cc
 	trace.h
 	trace.cc
+	diagnostic.h
 	parser.h
 	parser.cc
 	ast_dump.h

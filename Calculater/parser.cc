@@ -1,15 +1,15 @@
 #include "parser.h"
 #include <cassert>
 #include <cctype>
-#include <cstdio>
 #include <tuple>
 
 using namespace FCExprClass;
 
 namespace FC {
 
-Parser::Parser(Lexer& lexer)
-	: m_lexer(lexer) {
+Parser::Parser(Lexer& lexer, FCDiagnostics& diagnostics)
+	: m_lexer(lexer)
+	, m_diagnostics(diagnostics) {
 }
 
 void Parser::reset() {
@@ -79,7 +79,7 @@ int Parser::tokenPrecedence(FCMarks::FCBinaryOp op) {
 
 std::unique_ptr<FCExprAST> Parser::logError(const char* msg) {
 	m_hadError = true;
-	fprintf(stderr, "LogError: %s\n", msg);
+	m_diagnostics.add("parser", {m_curTok.line, m_curTok.column}, msg);
 	return nullptr;
 }
 

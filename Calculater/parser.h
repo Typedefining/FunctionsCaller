@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <string>
+#include "diagnostic.h"
 #include "lexer.h"
 #include "token.h"
 
@@ -12,7 +13,7 @@ namespace FC {
 /// 可独立单元测试（可注入 Lexer，或直接构造 Token 流）
 class Parser {
 public:
-	explicit Parser(Lexer& lexer);
+	explicit Parser(Lexer& lexer, FCDiagnostics& diagnostics);
 
 	// 解析完整程序，返回语法树（FCProgramAST 或单个表达式）。
 	// 进入解析阶段并读取第一个 token；此前 Parser 不持有有效 token。
@@ -32,6 +33,7 @@ private:
 	// 语句分隔符 ';' 的合法位置：只能出现在非块终结的表达式之后。
 	// 块（'}'）已经终止当前语句，其后不得再有 ';'，下一条语句直接开始。
 	Lexer& m_lexer;
+	FCDiagnostics& m_diagnostics;
 	Token m_curTok;
 	int m_prevKind = -1;
 	bool m_hadError = false;

@@ -11,11 +11,13 @@ using namespace FCMarks;
 
 FCScanner::FCScanner()
     : m_lexer("")
-    , m_parser(m_lexer) {}
+    , m_diagnostics()
+    , m_parser(m_lexer, m_diagnostics) {}
 
 ::std::unique_ptr<FCExprAST>
 FCScanner::analysis(const ::std::string &inputStr) {
     m_hadSemanticError = false;
+    m_diagnostics.clear();
 
     // 阶段1：Lexer — 字符流 -> Token 流
     m_lexer.reset(inputStr);
@@ -52,4 +54,5 @@ void FCScanner::resetState() {
     m_parser.reset();
     m_semanticContext.reset();
     m_hadSemanticError = false;
+    m_diagnostics.clear();
 }
