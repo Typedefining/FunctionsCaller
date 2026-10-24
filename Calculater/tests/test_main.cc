@@ -56,6 +56,8 @@ void ComprehensiveTestSuite::runAllTests()
     // ============ Token / AST API Tests ============
     runTokenApiTests();
 
+    // ============ Type Mapping Tests (FCTypeId 与 VarDecl::type) ============
+    runTypeMappingTests();
 
     // ============ Lexer Tests (独立词法测试，不依赖 Parser/Semantic) ============
     runLexerTests();

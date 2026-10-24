@@ -50,7 +50,7 @@ namespace FCExprClass
 		FCMarks::SemanticBinding& semanticBinding() { return localBinding; }
 
 		explicit FCCodegenContext(const std::string& moduleName, const CompiledProgram& program);
-		llvm::Type* getType(const std::string& typeName);
+		llvm::Type* getType(FCTypeId type);
 		llvm::AllocaInst* createEntryBlockAlloca(llvm::Function* function,
 			const std::string& name, llvm::Type* type);
 	};

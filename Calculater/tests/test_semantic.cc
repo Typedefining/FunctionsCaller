@@ -1162,3 +1162,12 @@
         }
         FC::setTraceStagesForTesting("");
     }
+
+    // ==================== Type Mapping Tests (VarDecl::type 派生) ====================
+    void ComprehensiveTestSuite::runTypeMappingTests()
+    {
+        expect(VarDecl("a", "int").type == FCTypeId::Int, "type-map - int");
+        expect(VarDecl("a", "double").type == FCTypeId::Double, "type-map - double");
+        expect(VarDecl("a", "string").type == FCTypeId::String, "type-map - string");
+        expect(VarDecl("a", "bogus").type == FCTypeId::Error, "type-map - unknown maps to Error");
+    }

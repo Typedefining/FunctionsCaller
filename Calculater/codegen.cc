@@ -67,9 +67,10 @@ llvm::Type* inferExprType(const FCExprAST* expression,
 	{
 		// 语法节点只携带变量名，类型需通过语义绑定回到符号的声明上查询
 		auto symbol = context.boundSymbol(variable);
-		return symbol != nullptr && symbol->declaration != nullptr
-			? context.getType(symbol->declaration->typeName)
-			: integerType(context);
+		if (symbol == nullptr || symbol->declaration == nullptr)
+			return integerType(context);
+		auto* symbolType = context.getType(symbol->declaration->type);
+		return symbolType != nullptr ? symbolType : integerType(context);
 	}
 
 	if (auto* binary = dynamic_cast<const FCBinaryExprAST*>(expression))
@@ -127,9 +128,12 @@ llvm::Type* inferExprType(const FCExprAST* expression,
 	}
 
 	if (auto* declaration = dynamic_cast<const FCVarDeclExprAST*>(expression))
-		return declaration->decl == nullptr
-			? inferExprType(declaration->initExpr.get(), context, visitingFunctions)
-			: context.getType(declaration->decl->typeName);
+	{
+		if (declaration->decl == nullptr)
+			return inferExprType(declaration->initExpr.get(), context, visitingFunctions);
+		auto* declaredType = context.getType(declaration->decl->type);
+		return declaredType != nullptr ? declaredType : integerType(context);
+	}
 
 	if (auto* function = dynamic_cast<const FCFunctionAST*>(expression))
 		return inferFunctionReturnType(function, context, visitingFunctions);
@@ -194,9 +198,12 @@ llvm::Function* createFunctionDeclaration(FCCodegenContext& context,
 	argumentTypes.reserve(arguments.size());
 	for (const auto& argument : arguments)
 	{
-		argumentTypes.push_back(argument == nullptr
+		auto* argumentType = argument == nullptr
 			? integerType(context)
-			: context.getType(argument->typeName));
+			: context.getType(argument->type);
+		if (argumentType == nullptr)
+			return nullptr; // Error 类型已由 getType 报诊断
+		argumentTypes.push_back(argumentType);
 	}
 
 	auto* functionType = llvm::FunctionType::get(returnType, argumentTypes, false);
@@ -237,13 +244,17 @@ FCCodegenContext::FCCodegenContext(const std::string& moduleName, const Compiled
 {
 }
 
-llvm::Type* FCCodegenContext::getType(const std::string& typeName)
+llvm::Type* FCCodegenContext::getType(FCTypeId type)
 {
-	if (typeName == "double")
+	if (type == FCTypeId::Int)
+		return llvm::Type::getInt32Ty(llvmContext);
+	if (type == FCTypeId::Double)
 		return llvm::Type::getDoubleTy(llvmContext);
-	if (typeName == "string")
+	if (type == FCTypeId::String)
 		return llvm::PointerType::getUnqual(llvmContext);
-	return llvm::Type::getInt32Ty(llvmContext);
+	// FCTypeId::Error：报告诊断，空值由调用方传播
+	diagnostics.add("codegen", {}, "unknown variable type");
+	return nullptr;
 }
 
 llvm::AllocaInst* FCCodegenContext::createEntryBlockAlloca(
@@ -607,9 +618,11 @@ llvm::Value* codegenFor(const FCForExprAST* expression,
 	auto oldIt = context.namedValues.find(forSymbol);
 	llvm::AllocaInst* oldAddress = oldIt == context.namedValues.end()
 		? nullptr : oldIt->second;
+	auto* forType = context.getType(expression->getDecl()->type);
+	if (forType == nullptr)
+		return nullptr; // Error 类型已由 getType 报诊断
 	auto* variable = context.createEntryBlockAlloca(
-		context.currentFunction, expression->getDecl()->name,
-		context.getType(expression->getDecl()->typeName));
+		context.currentFunction, expression->getDecl()->name, forType);
 	context.namedValues[forSymbol] = variable;
 
 	auto* start = codegen(expression->getStart(), context);
@@ -724,9 +737,11 @@ llvm::Value* codegenDeclaration(const FCVarDeclExprAST* expression,
 			return logCodegenError(context, "variable already defined in function");
 		}
 
+		auto* declType = context.getType(expression->decl->type);
+		if (declType == nullptr)
+			return nullptr; // Error 类型已由 getType 报诊断
 		auto* variable = context.createEntryBlockAlloca(
-			context.currentFunction, expression->decl->name,
-			context.getType(expression->decl->typeName));
+			context.currentFunction, expression->decl->name, declType);
 		context.namedValues[declSymbol] = variable;
 
 		llvm::Value* initialValue = expression->initExpr == nullptr
@@ -752,7 +767,9 @@ llvm::GlobalVariable* declareGlobal(std::shared_ptr<VariableSymbol> symbol,
 		return existing->second;
 
 	const auto* declaration = symbol->declaration.get();
-	auto* type = context.getType(declaration->typeName);
+	auto* type = context.getType(declaration->type);
+	if (type == nullptr)
+		return nullptr; // Error 类型已由 getType 报诊断；空值传播给调用方
 	auto* global = new llvm::GlobalVariable(
 		*context.module,
 		type,

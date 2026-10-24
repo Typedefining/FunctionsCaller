@@ -267,11 +267,70 @@
         // FCCodegenContext::getType
         {
             FCCodegenContext cc("TypeApi", {});
-            expect(cc.getType("double")->isDoubleTy(), "codegen-api - getType double");
-            expect(cc.getType("string")->isPointerTy(), "codegen-api - getType string");
-            expect(cc.getType("int")->isIntegerTy(), "codegen-api - getType int");
-            expect(cc.getType("bool")->isIntegerTy(), "codegen-api - getType unknown defaults int");
-            expect(cc.getType("")->isIntegerTy(), "codegen-api - getType empty defaults int");
+            expect(cc.getType(FCTypeId::Double)->isDoubleTy(), "codegen-api - getType Double enum");
+            expect(cc.getType(FCTypeId::String)->isPointerTy(), "codegen-api - getType String enum");
+            expect(cc.getType(FCTypeId::Int)->isIntegerTy(), "codegen-api - getType Int enum");
+        }
+
+        // getType(FCTypeId::Error) 报 codegen 诊断并返回 nullptr
+        {
+            FCCodegenContext cc("TypeErrorApi", {});
+            expect(cc.getType(FCTypeId::Error) == nullptr, "codegen-api - getType Error returns null");
+            expect(!cc.diagnostics.empty(), "codegen-api - getType Error reports diagnostic");
+        }
+
+        // Error 类型经 VarDecl 构造传播：局部声明/for 变量/函数形参/全局变量
+        // 各自的空值传播路径（类型错误一律报诊断，不产生 LLVM 结构）
+        {
+            FCCodegenContext cc("TypeErrorPath", {});
+            auto* ft = llvm::FunctionType::get(llvm::Type::getInt32Ty(cc.llvmContext), {}, false);
+            auto* fn = llvm::Function::Create(ft, llvm::Function::ExternalLinkage, "err_fn", cc.module.get());
+            auto* entry = llvm::BasicBlock::Create(cc.llvmContext, "entry", fn);
+            cc.builder.SetInsertPoint(entry);
+            cc.currentFunction = fn;
+
+            // 局部变量声明：decl->type == Error → codegen 返回 nullptr + 诊断
+            auto badLocal = std::make_shared<VarDecl>("bad", "bogus");
+            auto localDecl = std::make_unique<FCVarDeclExprAST>(
+                badLocal, std::make_unique<FCNumberExprAST>(1));
+            auto localSymbol = std::make_shared<VariableSymbol>(badLocal, 0, 0);
+            cc.semanticBinding().bind(localDecl.get(), localSymbol);
+            expect(codegen(localDecl.get(), cc) == nullptr,
+                   "codegen-api - local declaration with bad type reports null");
+            expect(!cc.diagnostics.empty(),
+                   "codegen-api - local declaration with bad type reports diagnostic");
+
+            // for 变量：decl->type == Error → codegen 返回 nullptr
+            auto badForDecl = std::make_shared<VarDecl>("badloop", "bogus");
+            auto forExpr = std::make_unique<FCForExprAST>(
+                badForDecl, std::make_unique<FCNumberExprAST>(0),
+                std::make_unique<FCNumberExprAST>(1), nullptr,
+                std::make_unique<FCNumberExprAST>(1));
+            auto forSymbol = std::make_shared<VariableSymbol>(badForDecl, 1, 1);
+            cc.semanticBinding().bind(forExpr.get(), forSymbol);
+            expect(codegen(forExpr.get(), cc) == nullptr,
+                   "codegen-api - for variable with bad type reports null");
+
+            // 函数形参：arg->type == Error → 声明生成返回 nullptr
+            // （FCPrototypeAST standalone 恒为 null，须经 FCFunctionAST 才到达参数类型分支）
+            std::vector<VarDeclPtr> badArgs;
+            badArgs.push_back(std::make_shared<VarDecl>("p", "bogus"));
+            auto badFn = std::make_unique<FCFunctionAST>(
+                std::make_unique<FCPrototypeAST>("badparam", std::move(badArgs)),
+                std::make_unique<FCNumberExprAST>(1));
+            expect(codegen(badFn.get(), cc) == nullptr,
+                   "codegen-api - function parameter with bad type reports null");
+
+            // 全局变量：declaration->type == Error → declareGlobal 空值传播
+            auto badGlobal = std::make_shared<VarDecl>("badg", "bogus");
+            auto globalSymbol = std::make_shared<VariableSymbol>(badGlobal, 0, 0);
+            auto globalDecl = std::make_unique<FCVarDeclExprAST>(
+                badGlobal, std::make_unique<FCNumberExprAST>(1));
+            cc.semanticBinding().bind(globalDecl.get(), globalSymbol);
+            cc.compiledProgram.globalSymbols.push_back(globalSymbol);
+            cc.compiledProgram.m_binding->bind(globalDecl.get(), globalSymbol);
+            expect(codegen(globalDecl.get(), cc) == nullptr,
+                   "codegen-api - global variable with bad type reports null");
         }
 
         // 在函数上下文内直接生成各种字面量与二元运算
@@ -305,7 +364,7 @@
             expect(cv != nullptr, "codegen-api - binary compare");
 
             // createEntryBlockAlloca
-            auto* alloca = cc.createEntryBlockAlloca(fn, "tmp", cc.getType("int"));
+            auto* alloca = cc.createEntryBlockAlloca(fn, "tmp", cc.getType(FCTypeId::Int));
             expect(alloca != nullptr && alloca->getAllocatedType()->isIntegerTy(),
                 "codegen-api - createEntryBlockAlloca");
 
@@ -313,7 +372,7 @@
             auto decl = std::make_shared<VarDecl>("loc", "int");
             auto sym = std::make_shared<VariableSymbol>(decl, 0, 1);
             auto locSymbol = sym;
-            auto* locAlloca = cc.createEntryBlockAlloca(fn, "loc", cc.getType("int"));
+            auto* locAlloca = cc.createEntryBlockAlloca(fn, "loc", cc.getType(FCTypeId::Int));
             cc.namedValues[locSymbol] = locAlloca;
 
             auto var = std::make_unique<FCVariableExprAST>(std::string("loc"));

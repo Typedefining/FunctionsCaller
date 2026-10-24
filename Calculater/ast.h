@@ -24,12 +24,23 @@ struct VariableSymbol;
 namespace FCExprClass {
 using VarDeclPtr = std::shared_ptr<struct VarDecl>;
 
-// 参数/变量声明：名字 + 类型名（类型检查在语义期执行，此处只承载文本）
+// 语义类型标识：类型名到类型值的枚举（派生映射点在 VarDecl 构造函数，
+// 是全仓库唯一的字符串到 FCTypeId 的映射处）
+enum struct FCTypeId { Int, Double, String, Error };
+
+// 参数/变量声明：名字 + 类型名 + 由类型名派生的权威类型值
+// typeName 保留供 dump/测试消费；语义消费方一律读 type。
 struct VarDecl {
   std::string name;
   std::string typeName;
+  FCTypeId type;
 
-  VarDecl(const std::string &n, const std::string &t) : name(n), typeName(t) {}
+  VarDecl(const std::string &n, const std::string &t)
+      : name(n), typeName(t),
+        type(t == "int" ? FCTypeId::Int
+                        : t == "double" ? FCTypeId::Double
+                                        : t == "string" ? FCTypeId::String
+                                                        : FCTypeId::Error) {}
 };
 } // namespace FCExprClass
 

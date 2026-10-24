@@ -131,6 +131,7 @@ private:
     void runAstInfoTests();
     void runAstDumpTests();
     void runTokenApiTests();
+    void runTypeMappingTests();
     void runDiagnosticTests();
     void runLexerTests();
     void runParserTests();
