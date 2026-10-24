@@ -33,7 +33,6 @@ namespace FCExprClass
 		std::unique_ptr<llvm::Module> module;
 		std::map<std::shared_ptr<VariableSymbol>, llvm::AllocaInst*> namedValues;
 		std::map<std::shared_ptr<VariableSymbol>, llvm::GlobalVariable*> globalValues;
-		std::unordered_map<std::string, FCFunctionAST*> definitions;
 		llvm::Function* currentFunction = nullptr;
 		CompiledProgram compiledProgram;
 		const FCSemanticContext* semantic = nullptr;

@@ -88,9 +88,11 @@ llvm::Type* inferExprType(const FCExprAST* expression,
 
 	if (auto* call = dynamic_cast<const FCCallExprAST*>(expression))
 	{
-		auto definition = context.definitions.find(call->getName());
-		if (definition != context.definitions.end())
-			return inferFunctionReturnType(definition->second, context, visitingFunctions);
+		// 单一数据源：优先语义期记录（CompiledFunction::ast）；
+		// 无记录再走 LLVM 模块签名回退
+		const auto* record = context.compiledProgram.getFunction(call->getName());
+		if (record != nullptr && record->ast != nullptr)
+			return inferFunctionReturnType(record->ast, context, visitingFunctions);
 
 		if (auto* function = context.module->getFunction(call->getName()))
 			return function->getReturnType();
@@ -782,12 +784,6 @@ llvm::Value* codegenProgram(const FCProgramAST* expression,
 {
 	// 全局变量由语义期已按声明顺序收集，在此统一声明
 	declareGlobalsInExpression(context);
-
-	for (const auto& statement : expression->getStatements())
-	{
-		if (auto* function = dynamic_cast<FCFunctionAST*>(statement.get()))
-			context.definitions[function->getProtoName()] = function;
-	}
 
 	for (const auto& statement : expression->getStatements())
 	{
