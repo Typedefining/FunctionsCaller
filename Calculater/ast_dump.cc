@@ -6,6 +6,26 @@
 #include <sstream>
 #include <string>
 
+namespace {
+
+struct KindVisitor {
+  const char* visit(const FCExprClass::FCPrototypeAST&)   { return "Prototype"; }
+  const char* visit(const FCExprClass::FCProgramAST&)     { return "Program"; }
+  const char* visit(const FCExprClass::FCBlockExprAST&)   { return "Block"; }
+  const char* visit(const FCExprClass::FCSeqExprAST&)     { return "Seq"; }
+  const char* visit(const FCExprClass::FCVarDeclExprAST&) { return "VarDecl"; }
+  const char* visit(const FCExprClass::FCVariableExprAST&) { return "Variable"; }
+  const char* visit(const FCExprClass::FCForExprAST&)     { return "For"; }
+  const char* visit(const FCExprClass::FCIfExprAST&)      { return "If"; }
+  const char* visit(const FCExprClass::FCCallExprAST&)    { return "Call"; }
+  const char* visit(const FCExprClass::FCBinaryExprAST&)  { return "Binary"; }
+  const char* visit(const FCExprClass::FCFunctionAST&)    { return "Function"; }
+  const char* visit(const FCExprClass::FCNumberExprAST&)  { return "Number"; }
+  const char* visit(const FCExprClass::FCStringExprAST&)  { return "String"; }
+};
+
+} // namespace
+
 namespace FCMarks {
 using namespace FCExprClass;
 
@@ -180,3 +200,16 @@ std::string describeAst(const FCExprAST &node) {
 }
 
 } // namespace FCMarks
+
+namespace FCExprClass {
+
+const char* nodeKindName(const FCExprAST& node) {
+  KindVisitor v;
+  try {
+    return dispatchAST(node, v);
+  } catch (...) {
+    return "Expr";
+  }
+}
+
+} // namespace FCExprClass

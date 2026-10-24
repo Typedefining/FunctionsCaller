@@ -1,5 +1,4 @@
 #include "ast.h"
-#include <iostream>
 
 using namespace FCExprClass;
 
@@ -11,30 +10,13 @@ FCNumberExprAST::FCNumberExprAST(double val)
 	: m_intVal(0), m_doubleVal(val), m_isFloating(true)
 {
 }
-void FCNumberExprAST::info()
-{
-	if (!m_isFloating)
-		::std::cout << "FCNumberExprAST Val is Integer: " << m_intVal << ::std::endl;
-	else
-		::std::cout << "FCNumberExprAST Val is Floating: " << m_doubleVal << ::std::endl;
-	return;
-}
 
 FCStringExprAST::FCStringExprAST(std::string val) : m_stringVal(val)
 {
 }
-void FCStringExprAST::info()
-{
-	::std::cout << "FCStringExprAST Val: " << m_stringVal << ::std::endl;
-}
 
 FCVariableExprAST::FCVariableExprAST(std::string varName) : name(std::move(varName))
 {
-}
-
-void FCVariableExprAST::info()
-{
-	::std::cout << "FCVariableExprAST Name: " << name << ::std::endl;
 }
 
 FCBinaryExprAST::FCBinaryExprAST(FCBinaryOp op,
@@ -56,29 +38,12 @@ const char* binaryOpName(FCBinaryOp op) {
 	}
 }
 
-void FCBinaryExprAST::info()
-{
-	::std::cout << "FCBinaryExprAST Op: " << binaryOpName(m_Op) << " LHS: ";
-	mup_LHS->info();
-	::std::cout << " RHS: " << ::std::endl;
-	mup_RHS->info();
-}
-
 FCCallExprAST::FCCallExprAST(const std::string& callee,
 	std::vector<std::unique_ptr<FCExprAST>> args)
 	: m_callee(callee), m_args(std::move(args))
 {
 }
-void FCCallExprAST::info()
-{
-	::std::cout << "FCCallExprAST Callee: " << m_callee;
-	::std::cout << " Args: " << ::std::endl;
-	for (auto& i : m_args)
-	{
-		::std::cout << "\t\t";
-		i->info();
-	}
-}
+
 const ::std::string& FCCallExprAST::getName() const
 {
 	return m_callee;
@@ -91,15 +56,6 @@ const std::vector<std::unique_ptr<FCExprAST>>& FCCallExprAST::getArgs() const
 FCPrototypeAST::FCPrototypeAST(const std::string& name, std::vector<VarDeclPtr> args)
 	: m_funcName(name), m_funcArgsVar(std::move(args))
 {
-}
-void FCPrototypeAST::info()
-{
-	::std::cout << "FCPrototypeAST Name: " << m_funcName;
-	::std::cout << " Args: " << ::std::endl;
-	for (auto& i : m_funcArgsVar)
-	{
-		std::cout << "FCVarDeclExprAST Name: " << i->name << " Type: " << i->typeName << std::endl;
-	}
 }
 
 ::std::string FCPrototypeAST::getProtoName() const
@@ -117,37 +73,7 @@ FCFunctionAST::FCFunctionAST(std::unique_ptr<FCPrototypeAST> proto,
 	return mup_funcProto->getProtoName();
 }
 
-void FCFunctionAST::info()
-{
-	::std::cout << "FCFunctionAST Proto: ";
-	mup_funcProto->info();
-	::std::cout << " Body: ";
-	mup_funcBody->info();
-}
-
 const FCExprAST* FCFunctionAST::getBody() const
 {
 	return mup_funcBody.get();
-}
-void FCIfExprAST::info()
-{
-	::std::cout << "FCIfExprAST Cond: ";
-	Cond->info();
-	::std::cout << " Then: ";
-	Then->info();
-	::std::cout << " Else: ";
-	Else->info();
-}
-
-void FCForExprAST::info()
-{
-
-}
-
-void FCVarDeclExprAST::info() {
-	std::cout << "FCVarDeclExprAST Name: " << decl->name << " Type: " << decl->typeName << std::endl;
-	if (initExpr) {
-		std::cout << " Init: ";
-		initExpr->info();
-	}
 }

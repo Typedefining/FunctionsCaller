@@ -33,18 +33,7 @@ struct VarDecl {
 };
 } // namespace FCExprClass
 
-namespace FCMarks {
-enum struct FCTypeDescribe {
-  Expr,         // 抽象表达式
-  NumberExpr,   // 数字字面量
-  StringExpr,   // 字符串字面量
-  VariableExpr, // 对象标识
-  BinaryExpr,   // 二元表达式
-  CallExpr,     // 可调用对象表达式
-  Prototype,    // 函数原型表达式,弃用
-  Function      // 函数定义
-};
-} // namespace FCMarks
+
 
 namespace FCExprClass {
 using namespace FCMarks;
@@ -52,9 +41,9 @@ struct FCExprAST {
 public:
   FCExprAST() = default;
   virtual ~FCExprAST() = default;
-  virtual void info() = 0;
-  FCTypeDescribe type = FCTypeDescribe::Expr;
 };
+
+const char* nodeKindName(const FCExprAST& node);
 struct FCNumberExprAST : public FCExprAST {
   int m_intVal;
   double m_doubleVal;
@@ -64,8 +53,6 @@ public:
   FCNumberExprAST(int val);
   FCNumberExprAST(double val);
   bool isFloating() const { return m_isFloating; }
-  FCTypeDescribe type = FCMarks::FCTypeDescribe::NumberExpr;
-  void info() override;
 };
 
 struct FCStringExprAST : public FCExprAST {
@@ -73,8 +60,6 @@ struct FCStringExprAST : public FCExprAST {
 
 public:
   FCStringExprAST(std::string val);
-  FCTypeDescribe type = FCMarks::FCTypeDescribe::StringExpr;
-  void info() override;
 };
 
 /// FCVariableExprAST - Expression struct for referencing a variable, like "a".
@@ -84,8 +69,6 @@ struct FCVariableExprAST : public FCExprAST {
 
 public:
   explicit FCVariableExprAST(std::string varName);
-  FCTypeDescribe type = FCMarks::FCTypeDescribe::VariableExpr;
-  void info() override;
 };
 
 /// FCBinaryExprAST - Expression struct for a binary operator.
@@ -96,8 +79,6 @@ struct FCBinaryExprAST : public FCExprAST {
 public:
   FCBinaryExprAST(FCBinaryOp op, ::std::unique_ptr<FCExprAST> lhs,
                   ::std::unique_ptr<FCExprAST> rhs);
-  FCTypeDescribe type = FCMarks::FCTypeDescribe::BinaryExpr;
-  void info() override;
   FCBinaryOp getOperator() const { return m_Op; }
   const FCExprAST *getLHS() const { return mup_LHS.get(); }
   const FCExprAST *getRHS() const { return mup_RHS.get(); }
@@ -113,8 +94,6 @@ public:
                 std::vector<std::unique_ptr<FCExprAST>> args);
   const ::std::string &getName() const;
   const std::vector<std::unique_ptr<FCExprAST>> &getArgs() const;
-  FCTypeDescribe type = FCMarks::FCTypeDescribe::CallExpr;
-  void info() override;
 };
 
 struct FCPrototypeAST : public FCExprAST {
@@ -123,9 +102,6 @@ struct FCPrototypeAST : public FCExprAST {
 
 public:
   FCPrototypeAST(const std::string &name, std::vector<VarDeclPtr> args);
-  FCTypeDescribe type = FCMarks::FCTypeDescribe::Prototype;
-
-  void info() override;
   ::std::string getProtoName() const;
   const std::vector<VarDeclPtr> &getArgs() const {
     return m_funcArgsVar;
@@ -141,13 +117,11 @@ struct FCFunctionAST : public FCExprAST {
 public:
   FCFunctionAST(std::unique_ptr<FCPrototypeAST> proto,
                 std::unique_ptr<FCExprAST> body);
-  FCTypeDescribe type = FCMarks::FCTypeDescribe::Function;
   ::std::string getProtoName() const;
   const FCExprAST *getBody() const;
   const std::unique_ptr<FCPrototypeAST> &getProto() const {
     return mup_funcProto;
   }
-  void info() override;
 };
 
 class FCIfExprAST : public FCExprAST {
@@ -158,7 +132,6 @@ public:
               std::unique_ptr<FCExprAST> Else)
       : Cond(std::move(Cond)), Then(std::move(Then)), Else(std::move(Else)) {}
 
-  void info() override;
   const FCExprAST *getCondition() const { return Cond.get(); }
   const FCExprAST *getThen() const { return Then.get(); }
   const FCExprAST *getElse() const { return Else.get(); }
@@ -175,7 +148,6 @@ public:
       : decl(std::move(decl)), Start(std::move(start)), End(std::move(end)),
         Step(std::move(step)), Body(std::move(body)) {}
 
-  void info() override;
   const VarDeclPtr &getDecl() const { return decl; }
   const FCExprAST *getStart() const { return Start.get(); }
   const FCExprAST *getEnd() const { return End.get(); }
@@ -188,11 +160,6 @@ struct FCSeqExprAST : public FCExprAST {
   FCSeqExprAST(std::vector<std::unique_ptr<FCExprAST>> e)
       : exprs(std::move(e)) {}
 
-  void info() override {
-    for (auto &i : exprs) {
-      i->info();
-    }
-  }
   const std::vector<std::unique_ptr<FCExprAST>> &getExpressions() const {
     return exprs;
   }
@@ -204,7 +171,6 @@ public:
   std::unique_ptr<FCExprAST> initExpr; // 初始化表达式
   FCVarDeclExprAST(VarDeclPtr d, std::unique_ptr<FCExprAST> init)
       : decl(std::move(d)), initExpr(std::move(init)) {}
-  void info() override;
 };
 
 class FCProgramAST : public FCExprAST {
@@ -214,14 +180,6 @@ private:
 public:
   FCProgramAST(std::vector<std::unique_ptr<FCExprAST>> statements)
       : m_statements(std::move(statements)) {}
-
-  void info() override {
-    std::cout << "FCProgramAST with " << m_statements.size()
-              << " statements:\n";
-    for (auto &stmt : m_statements) {
-      stmt->info();
-    }
-  }
 
   const std::vector<std::unique_ptr<FCExprAST>> &getStatements() const {
     return m_statements;
@@ -239,10 +197,6 @@ public:
     return m_expressions;
   }
 
-  void info() override {
-    std::cout << "FCBlockExprAST with " << m_expressions.size()
-              << " expressions" << std::endl;
-  }
 };
 
 /// 唯一节点分派点：Visitor 需提供 12 个 const 成员重载

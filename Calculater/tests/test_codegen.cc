@@ -242,8 +242,8 @@
             std::vector<VarDeclPtr> protoArgs;
             protoArgs.push_back(std::make_shared<VarDecl>("a", "int"));
             auto proto = std::make_unique<FCPrototypeAST>("proto", std::move(protoArgs));
-            expect(codegen(proto.get(), cc) != nullptr,
-                   "codegen-error - codegen standalone prototype");
+            expect(codegen(proto.get(), cc) == nullptr,
+                   "codegen-error - codegen standalone prototype returns null");
 
             auto emptyBody = std::make_unique<FCFunctionAST>(
                 std::make_unique<FCPrototypeAST>("empty", std::vector<VarDeclPtr>{}),
@@ -353,22 +353,16 @@
             }
         }
 
-        // 直接 codegen 一个 prototype 声明，再 codegen 同名同签名函数（复用已有声明）
+        // 直接 codegen 一个函数（原型不再独立代码生成）
         {
             FCCodegenContext cc("ReuseApi", {});
-            std::vector<VarDeclPtr> args;
-            args.push_back(std::make_shared<VarDecl>("x", "int"));
-            auto proto = std::make_unique<FCPrototypeAST>("reuse", std::move(args));
-            expect(codegen(proto.get(), cc) != nullptr, "codegen-api - prototype declares function");
-            expect(cc.module->getFunction("reuse") != nullptr, "codegen-api - declared function present");
-
-            // 同名同签名：完成预先声明的空函数体
             std::vector<VarDeclPtr> fnArgs;
             fnArgs.push_back(std::make_shared<VarDecl>("x", "int"));
             auto fn = std::make_unique<FCFunctionAST>(
                 std::make_unique<FCPrototypeAST>("reuse", std::move(fnArgs)),
                 std::make_unique<FCNumberExprAST>(1));
-            expect(codegen(fn.get(), cc) != nullptr, "codegen-api - completes pre-declared prototype");
+            expect(codegen(fn.get(), cc) != nullptr, "codegen-api - function declares and defines");
+            expect(cc.module->getFunction("reuse") != nullptr, "codegen-api - declared function present");
 
             // 同一个函数对象重复 codegen：直接复用已有实现
             auto fn2 = std::make_unique<FCFunctionAST>(

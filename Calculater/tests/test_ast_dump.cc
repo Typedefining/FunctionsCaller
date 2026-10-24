@@ -1,4 +1,5 @@
 #include "test_harness.h"
+#include <string_view>
 
     // ==================== AST Info Tests ====================
     void ComprehensiveTestSuite::runAstInfoTests()
@@ -9,81 +10,76 @@
 
         try
         {
-            std::make_unique<FCNumberExprAST>(42)->info();
-            std::make_unique<FCNumberExprAST>(3.14)->info();
-            std::make_unique<FCStringExprAST>("hello")->info();
+            expect(std::string_view(nodeKindName(FCNumberExprAST(42))) == "Number",
+                   "ast-info - number node kind");
+            expect(std::string_view(nodeKindName(FCNumberExprAST(3.14))) == "Number",
+                   "ast-info - float number node kind");
+            expect(std::string_view(nodeKindName(FCStringExprAST("hello"))) == "String",
+                   "ast-info - string node kind");
 
-            std::make_unique<FCVariableExprAST>(std::string("v"))->info();
-            std::make_unique<FCBinaryExprAST>(
+            expect(std::string_view(nodeKindName(FCVariableExprAST(std::string("v")))) == "Variable",
+                   "ast-info - variable node kind");
+            expect(std::string_view(nodeKindName(*std::make_unique<FCBinaryExprAST>(
                 FCBinaryOp::Add, std::make_unique<FCNumberExprAST>(1),
-                std::make_unique<FCNumberExprAST>(2))->info();
-            // 覆盖 binaryOpName 全部名称分支
-            std::make_unique<FCBinaryExprAST>(
-                FCBinaryOp::Assign, std::make_unique<FCNumberExprAST>(1),
-                std::make_unique<FCNumberExprAST>(2))->info();
-            std::make_unique<FCBinaryExprAST>(
-                FCBinaryOp::Less, std::make_unique<FCNumberExprAST>(1),
-                std::make_unique<FCNumberExprAST>(2))->info();
-            std::make_unique<FCBinaryExprAST>(
-                FCBinaryOp::Sub, std::make_unique<FCNumberExprAST>(1),
-                std::make_unique<FCNumberExprAST>(2))->info();
-            std::make_unique<FCBinaryExprAST>(
-                FCBinaryOp::Mul, std::make_unique<FCNumberExprAST>(1),
-                std::make_unique<FCNumberExprAST>(2))->info();
-            std::make_unique<FCBinaryExprAST>(
-                FCBinaryOp::Div, std::make_unique<FCNumberExprAST>(1),
-                std::make_unique<FCNumberExprAST>(2))->info();
-            std::make_unique<FCBinaryExprAST>(
-                FCBinaryOp::Unknown, std::make_unique<FCNumberExprAST>(1),
-                std::make_unique<FCNumberExprAST>(2))->info();
+                std::make_unique<FCNumberExprAST>(2)))) == "Binary",
+                   "ast-info - binary node kind");
 
             std::vector<std::unique_ptr<FCExprAST>> args;
             args.push_back(std::make_unique<FCNumberExprAST>(1));
-            std::make_unique<FCCallExprAST>("add", std::move(args))->info();
+            expect(std::string_view(nodeKindName(*std::make_unique<FCCallExprAST>("add", std::move(args)))) == "Call",
+                   "ast-info - call node kind");
 
             std::vector<VarDeclPtr> protoArgs;
             protoArgs.push_back(std::make_shared<VarDecl>("a", "int"));
             auto proto = std::make_unique<FCPrototypeAST>("f", std::move(protoArgs));
-            proto->info();
+            expect(std::string_view(nodeKindName(*proto)) == "Prototype",
+                   "ast-info - prototype node kind");
 
             auto fn = std::make_unique<FCFunctionAST>(
                 std::move(proto), std::make_unique<FCNumberExprAST>(1));
-            fn->info();
+            expect(std::string_view(nodeKindName(*fn)) == "Function",
+                   "ast-info - function node kind");
 
-            std::make_unique<FCIfExprAST>(
+            expect(std::string_view(nodeKindName(*std::make_unique<FCIfExprAST>(
                 std::make_unique<FCNumberExprAST>(1),
                 std::make_unique<FCNumberExprAST>(10),
-                std::make_unique<FCNumberExprAST>(20))->info();
+                std::make_unique<FCNumberExprAST>(20)))) == "If",
+                   "ast-info - if node kind");
 
-            std::make_unique<FCForExprAST>(
+            expect(std::string_view(nodeKindName(*std::make_unique<FCForExprAST>(
                 std::make_shared<VarDecl>("i", "int"),
                 std::make_unique<FCNumberExprAST>(0),
                 std::make_unique<FCNumberExprAST>(10),
                 nullptr,
-                std::make_unique<FCNumberExprAST>(1))->info();
+                std::make_unique<FCNumberExprAST>(1)))) == "For",
+                   "ast-info - for node kind");
 
-            std::make_unique<FCVarDeclExprAST>(
+            expect(std::string_view(nodeKindName(*std::make_unique<FCVarDeclExprAST>(
                 std::make_shared<VarDecl>("x", "int"),
-                std::make_unique<FCNumberExprAST>(5))->info();
+                std::make_unique<FCNumberExprAST>(5)))) == "VarDecl",
+                   "ast-info - vardecl node kind");
 
             std::vector<std::unique_ptr<FCExprAST>> seq;
             seq.push_back(std::make_unique<FCNumberExprAST>(1));
             seq.push_back(std::make_unique<FCNumberExprAST>(2));
-            std::make_unique<FCSeqExprAST>(std::move(seq))->info();
+            expect(std::string_view(nodeKindName(*std::make_unique<FCSeqExprAST>(std::move(seq)))) == "Seq",
+                   "ast-info - seq node kind");
 
             std::vector<std::unique_ptr<FCExprAST>> blk;
             blk.push_back(std::make_unique<FCNumberExprAST>(1));
-            std::make_unique<FCBlockExprAST>(std::move(blk))->info();
+            expect(std::string_view(nodeKindName(*std::make_unique<FCBlockExprAST>(std::move(blk)))) == "Block",
+                   "ast-info - block node kind");
 
             std::vector<std::unique_ptr<FCExprAST>> progStmts;
             progStmts.push_back(std::make_unique<FCNumberExprAST>(1));
-            std::make_unique<FCProgramAST>(std::move(progStmts))->info();
+            expect(std::string_view(nodeKindName(*std::make_unique<FCProgramAST>(std::move(progStmts)))) == "Program",
+                   "ast-info - program node kind");
 
-            expect(true, "ast-info - construct and dump all node types");
+            expect(true, "ast-info - construct and check node kind for all node types");
         }
         catch (...)
         {
-            expect(false, "ast-info - exception while dumping AST nodes");
+            expect(false, "ast-info - exception while checking AST node kinds");
         }
     }
     // ==================== AST Dump Tests ====================
@@ -210,7 +206,6 @@
         }
         {
             struct BareExprAST : FCExprAST {
-                void info() override {}
             };
             BareExprAST bare;
             expect(describeAst(bare) == "Expr\n",
@@ -254,7 +249,7 @@
         {
             FCNumberExprAST ni(42);
             expect(ni.m_intVal == 42 && !ni.isFloating(), "token-api - int literal value");
-            expect(ni.type == FCTypeDescribe::NumberExpr, "token-api - int literal type");
+            expect(std::string_view(nodeKindName(ni)) == "Number", "token-api - int literal type");
             FCNumberExprAST nd(3.5);
             expect(nd.m_doubleVal == 3.5 && nd.isFloating(), "token-api - double literal value");
         }
@@ -263,7 +258,7 @@
         {
             FCStringExprAST s("hello");
             expect(s.m_stringVal == "hello", "token-api - string value");
-            expect(s.type == FCTypeDescribe::StringExpr, "token-api - string type");
+            expect(std::string_view(nodeKindName(s)) == "String", "token-api - string type");
         }
 
         // 变量表达式
@@ -271,7 +266,7 @@
             auto decl = std::make_shared<VarDecl>("v", "double");
             FCVariableExprAST v(std::string("v"));
             expect(v.name == decl->name, "token-api - variable name");
-            expect(v.type == FCTypeDescribe::VariableExpr, "token-api - variable type");
+            expect(std::string_view(nodeKindName(v)) == "Variable", "token-api - variable type");
             expect(decl->name == "v" && decl->typeName == "double", "token-api - VarDecl fields");
         }
 
@@ -281,7 +276,7 @@
                 FCBinaryOp::Mul, std::make_unique<FCNumberExprAST>(3), std::make_unique<FCNumberExprAST>(4));
             expect(bin->getOperator() == FCBinaryOp::Mul, "token-api - binary operator");
             expect(bin->getLHS() != nullptr && bin->getRHS() != nullptr, "token-api - binary operands");
-            expect(bin->type == FCTypeDescribe::BinaryExpr, "token-api - binary type");
+            expect(std::string_view(nodeKindName(*bin)) == "Binary", "token-api - binary type");
         }
 
         // 调用表达式
@@ -292,7 +287,7 @@
             auto call = std::make_unique<FCCallExprAST>("foo", std::move(args));
             expect(call->getName() == "foo", "token-api - call callee");
             expect(call->getArgs().size() == 2, "token-api - call args count");
-            expect(call->type == FCTypeDescribe::CallExpr, "token-api - call type");
+            expect(std::string_view(nodeKindName(*call)) == "Call", "token-api - call type");
         }
 
         // 原型
@@ -305,7 +300,7 @@
             expect(proto->getArgs().size() == 2, "token-api - prototype args count");
             expect(proto->getArgs()[0]->name == "a" && proto->getArgs()[0]->typeName == "int",
                 "token-api - prototype arg fields");
-            expect(proto->type == FCTypeDescribe::Prototype, "token-api - prototype type");
+            expect(std::string_view(nodeKindName(*proto)) == "Prototype", "token-api - prototype type");
         }
 
         // 函数
@@ -316,7 +311,7 @@
             expect(fn->getProtoName() == "fn", "token-api - function proto name");
             expect(fn->getBody() != nullptr, "token-api - function body");
             expect(fn->getProto()->getProtoName() == "fn", "token-api - function getProto");
-            expect(fn->type == FCTypeDescribe::Function, "token-api - function type");
+            expect(std::string_view(nodeKindName(*fn)) == "Function", "token-api - function type");
         }
 
         // if / for 访问器
@@ -406,17 +401,5 @@
             expect(binding->find(node.get()) == sym, "token-api - binding find by node");
             expect(binding->find(static_cast<const void*>(node.get())) == sym,
                 "token-api - binding find by void pointer");
-        }
-
-        // FCTypeDescribe 枚举值
-        {
-            expect(static_cast<int>(FCTypeDescribe::Expr) == 0, "token-api - enum Expr");
-            expect(static_cast<int>(FCTypeDescribe::NumberExpr) == 1, "token-api - enum NumberExpr");
-            expect(static_cast<int>(FCTypeDescribe::StringExpr) == 2, "token-api - enum StringExpr");
-            expect(static_cast<int>(FCTypeDescribe::VariableExpr) == 3, "token-api - enum VariableExpr");
-            expect(static_cast<int>(FCTypeDescribe::BinaryExpr) == 4, "token-api - enum BinaryExpr");
-            expect(static_cast<int>(FCTypeDescribe::CallExpr) == 5, "token-api - enum CallExpr");
-            expect(static_cast<int>(FCTypeDescribe::Prototype) == 6, "token-api - enum Prototype");
-            expect(static_cast<int>(FCTypeDescribe::Function) == 7, "token-api - enum Function");
         }
     }

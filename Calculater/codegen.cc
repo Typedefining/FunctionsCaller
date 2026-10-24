@@ -455,13 +455,6 @@ llvm::Value* codegenCall(const FCCallExprAST* expression,
 	return context.builder.CreateCall(function, arguments, "calltmp");
 }
 
-llvm::Value* codegenPrototype(const FCPrototypeAST* expression,
-	FCCodegenContext& context)
-{
-	return createFunctionDeclaration(
-		context, expression->getProtoName(), expression->getArgs(), integerType(context));
-}
-
 llvm::Value* codegenFunction(const FCFunctionAST* expression,
 	FCCodegenContext& context)
 {
@@ -963,7 +956,7 @@ struct CodegenVisitor {
       return codegenDeclaration(&n, c);
     return codegenStandaloneTopLevel(&n, c);
   }
-  llvm::Value* visit(const FCPrototypeAST& n)   { return codegenPrototype(&n, c); }
+  llvm::Value* visit(const FCPrototypeAST& n)   { return logCodegenError(c, "prototype is not an expression"); }
   llvm::Value* visit(const FCProgramAST& n)     { return codegenProgram(&n, c); }
 };
 
