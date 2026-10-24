@@ -95,17 +95,17 @@ private:
     // 把 FCValue 渲染成与期望值比较的字符串（与原有测试一致）。
     static std::string valueToString(const FCValue& value)
     {
-        if (value.type == FCValueCategory::Integer)
-            return std::to_string(value.evaluteVal.intVal);
-        if (value.type == FCValueCategory::Floating)
+        if (value.category() == FCValueCategory::Integer)
+            return std::to_string(*value.asInteger());
+        if (value.category() == FCValueCategory::Floating)
         {
-            std::string str = std::to_string(value.evaluteVal.doubleVal);
+            std::string str = std::to_string(*value.asFloating());
             str.erase(str.find_last_not_of('0') + 1, std::string::npos);
             if (str.back() == '.') str += '0';
             return str;
         }
-        if (value.type == FCValueCategory::String)
-            return "\"" + value.evaluteVal.charVal->str + "\"";
+        if (value.category() == FCValueCategory::String)
+            return "\"" + *value.asString() + "\"";
         return "<dangle>";
     }
 

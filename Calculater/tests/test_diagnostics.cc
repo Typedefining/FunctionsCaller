@@ -143,7 +143,7 @@
             expect(ast != nullptr, "diag: eval case parses");
             FCEvaluationContext context(scanner.semanticContext().getCompiledProgram());
             FCValue v = evaluate(ast.get(), context);
-            expect(v.type == FCValueCategory::Dangle, "diag: eval error yields Dangle");
+            expect(v.category() == FCValueCategory::Dangle, "diag: eval error yields Dangle");
             expect(!context.diagnostics.empty()
                    && context.diagnostics.items()[0].stage == "evaluator"
                    && context.diagnostics.items()[0].message.find("undefinedfn") != std::string::npos,
@@ -156,7 +156,7 @@
             expect(ast != nullptr, "diag: arity case parses");
             FCEvaluationContext context(scanner.semanticContext().getCompiledProgram());
             FCValue v = evaluate(ast.get(), context);
-            expect(v.type == FCValueCategory::Dangle, "diag: arity error yields Dangle");
+            expect(v.category() == FCValueCategory::Dangle, "diag: arity error yields Dangle");
             expect(!context.diagnostics.empty()
                    && context.diagnostics.items()[0].message.find("Argument count mismatch") != std::string::npos,
                    "diag: arity mismatch recorded");
@@ -167,7 +167,7 @@
             auto ast = scanner.analysis("def f() { 1 = 2 } f()");
             FCEvaluationContext context(scanner.semanticContext().getCompiledProgram());
             FCValue v = evaluate(ast.get(), context);
-            expect(v.type == FCValueCategory::Dangle, "diag: bad assign yields Dangle");
+            expect(v.category() == FCValueCategory::Dangle, "diag: bad assign yields Dangle");
             expect(!context.diagnostics.empty()
                    && context.diagnostics.items()[0].message.find("assignment") != std::string::npos,
                    "diag: bad assignment recorded");

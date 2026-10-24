@@ -23,8 +23,8 @@ static void run(const char* src) {
     }
   }
   FCValue v = evaluate(ast.get(), ctx);
-  if (v.type == FCValueCategory::Integer) std::printf("result = %d\n", v.evaluteVal.intVal);
-  else if (v.type == FCValueCategory::Floating) std::printf("result = %f\n", v.evaluteVal.doubleVal);
+  if (const int* i = v.asInteger()) std::printf("result = %d\n", *i);
+  else if (const double* d = v.asFloating()) std::printf("result = %f\n", *d);
   else std::printf("result = <dangle/other>\n");
 }
 

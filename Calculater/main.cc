@@ -16,16 +16,15 @@ namespace {
 const char *kDefaultSource = "def add(a:int, b:int) { a + b } add(2, 3)";
 
 void printValue(const FCValue &value) {
-  switch (value.type) {
+  switch (value.category()) {
   case FCValueCategory::Integer:
-    std::printf("[result] %d\n", value.evaluteVal.intVal);
+    std::printf("[result] %d\n", *value.asInteger());
     break;
   case FCValueCategory::Floating:
-    std::printf("[result] %g\n", value.evaluteVal.doubleVal);
+    std::printf("[result] %g\n", *value.asFloating());
     break;
   case FCValueCategory::String:
-    std::printf("[result] \"%s\"\n",
-                value.evaluteVal.charVal ? value.evaluteVal.charVal->str.c_str() : "");
+    std::printf("[result] \"%s\"\n", value.asString()->c_str());
     break;
   case FCValueCategory::Dangle:
     std::printf("[result] Dangle\n");

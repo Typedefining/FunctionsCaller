@@ -26,18 +26,6 @@ FCBinaryExprAST::FCBinaryExprAST(FCBinaryOp op,
 {
 }
 
-const char* binaryOpName(FCBinaryOp op) {
-	switch (op) {
-	case FCBinaryOp::Assign: return "=";
-	case FCBinaryOp::Less: return "<";
-	case FCBinaryOp::Add: return "+";
-	case FCBinaryOp::Sub: return "-";
-	case FCBinaryOp::Mul: return "*";
-	case FCBinaryOp::Div: return "/";
-	default: return "?";
-	}
-}
-
 FCCallExprAST::FCCallExprAST(const std::string& callee,
 	std::vector<std::unique_ptr<FCExprAST>> args)
 	: m_callee(callee), m_args(std::move(args))

@@ -15,32 +15,21 @@ FCValue evaluateExpression(const FCExprAST *expression, FCEvaluationContext &con
 
 namespace {
 FCValue makeDangleValue() {
-  FCValue value;
-  value.type = FCValueCategory::Dangle;
-  value.evaluteVal.danglingVal = nullptr;
-  return value;
-}
-
-FCValue makeStringValue(const std::string &text) {
-  FCValue value;
-  value.type = FCValueCategory::String;
-  value.evaluteVal.charVal = new FCStringValue{text};
-  return value;
+  return FCValue{};
 }
 
 // 诊断输出用的值文本形式；与单元测试期望的格式保持一致。
 std::string formatValue(const FCValue &value) {
-  switch (value.type) {
+  switch (value.category()) {
   case FCValueCategory::Integer:
-    return std::to_string(value.evaluteVal.intVal);
+    return std::to_string(*value.asInteger());
   case FCValueCategory::Floating: {
     char buffer[32];
-    std::snprintf(buffer, sizeof(buffer), "%g", value.evaluteVal.doubleVal);
+    std::snprintf(buffer, sizeof(buffer), "%g", *value.asFloating());
     return std::string(buffer);
   }
   case FCValueCategory::String:
-    return value.evaluteVal.charVal ? "\"" + value.evaluteVal.charVal->str + "\""
-                                   : std::string("\"\"");
+    return "\"" + *value.asString() + "\"";
   case FCValueCategory::Dangle:
     break;
   }
@@ -48,15 +37,9 @@ std::string formatValue(const FCValue &value) {
 }
 
 FCValue evaluateNumber(const FCNumberExprAST *node) {
-  FCValue result;
-  if (node->isFloating()) {
-    result.type = FCValueCategory::Floating;
-    result.evaluteVal.doubleVal = node->m_doubleVal;
-  } else {
-    result.type = FCValueCategory::Integer;
-    result.evaluteVal.intVal = node->m_intVal;
-  }
-  return result;
+  if (node->isFloating())
+    return FCValue{node->m_doubleVal};
+  return FCValue{node->m_intVal};
 }
 
 FCValue evaluateVariable(const FCVariableExprAST *node, FCEvaluationContext &context) {
@@ -75,10 +58,10 @@ FCValue evaluateVariable(const FCVariableExprAST *node, FCEvaluationContext &con
 FCValue evaluateIf(const FCIfExprAST *node, FCEvaluationContext &context) {
   const auto condition = evaluateExpression(node->getCondition(), context);
   bool truthy = false;
-  if (condition.type == FCValueCategory::Integer)
-    truthy = condition.evaluteVal.intVal != 0;
-  else if (condition.type == FCValueCategory::Floating)
-    truthy = condition.evaluteVal.doubleVal != 0.0;
+  if (condition.category() == FCValueCategory::Integer)
+    truthy = *condition.asInteger() != 0;
+  else if (condition.category() == FCValueCategory::Floating)
+    truthy = *condition.asFloating() != 0.0;
   else
     return makeDangleValue();
   return evaluateExpression(truthy ? node->getThen() : node->getElse(),
@@ -93,17 +76,14 @@ FCValue evaluateFor(const FCForExprAST *node, FCEvaluationContext &context) {
   if (forSymbol->runtime.frameIndex == -1)
     return makeDangleValue();
   const auto start = evaluateExpression(node->getStart(), context);
-  FCValue step;
-  if (node->getStep() == nullptr) {
-    step.type = FCValueCategory::Integer;
-    step.evaluteVal.intVal = 1;
-  } else {
-    step = evaluateExpression(node->getStep(), context);
-  }
+  FCValue step = node->getStep() == nullptr
+                     ? FCValue{1}
+                     : evaluateExpression(node->getStep(), context);
 
-  if (start.type != FCValueCategory::Integer ||
-      step.type != FCValueCategory::Integer)
+  if (start.category() != FCValueCategory::Integer ||
+      step.category() != FCValueCategory::Integer)
     return makeDangleValue();
+  const int stepValue = *step.asInteger();
 
   const int slot = forSymbol->slot;
   size_t frameIdx = context.callStack.size() - 1;
@@ -113,11 +93,33 @@ FCValue evaluateFor(const FCForExprAST *node, FCEvaluationContext &context) {
   context.callStack[frameIdx].locals[slot] = start;
 
   FCValue result = start;
-  while (evaluateExpression(node->getEnd(), context).evaluteVal.intVal != 0) {
+  while (true) {
+    const auto end = evaluateExpression(node->getEnd(), context);
+    bool truthy;
+    if (const int *e = end.asInteger())
+      truthy = *e != 0;
+    else if (const double *e = end.asFloating())
+      truthy = *e != 0.0;
+    else {
+      // 终止条件必须数值（与 if 条件同一规则）；旧实现读 union 位模式
+      context.diagnostics.add("evaluator", {},
+                              "for end condition must be numeric");
+      return makeDangleValue();
+    }
+    if (!truthy)
+      break;
     result = evaluateExpression(node->getBody(), context);
-    if (result.type == FCValueCategory::Dangle)
+    if (result.category() == FCValueCategory::Dangle)
       return result;
-    context.callStack[frameIdx].locals[slot].evaluteVal.intVal += step.evaluteVal.intVal;
+    auto &counter = context.callStack[frameIdx].locals[slot];
+    const int *current = counter.asInteger();
+    if (current == nullptr) {
+      // 循环体可能把循环变量赋成非 int；旧实现此处做指针位模式整数加法
+      context.diagnostics.add("evaluator", {},
+                              "for loop variable must stay integer");
+      return makeDangleValue();
+    }
+    counter = FCValue{*current + stepValue};
   }
   return result;
 }
@@ -128,7 +130,7 @@ FCValue evaluateBlock(const FCBlockExprAST *node,
 
   for (const auto &expr : node->getExpressions()) {
     result = evaluateExpression(expr.get(), context);
-    if (result.type == FCValueCategory::Dangle)
+    if (result.category() == FCValueCategory::Dangle)
       return result;
   }
 
@@ -140,7 +142,7 @@ FCValue evaluateSequence(const FCSeqExprAST *node,
   FCValue result;
   for (const auto &expr : node->getExpressions()) {
     result = evaluateExpression(expr.get(), context);
-    if (result.type == FCValueCategory::Dangle)
+    if (result.category() == FCValueCategory::Dangle)
       return makeDangleValue();
   }
   return result;
@@ -153,7 +155,7 @@ FCValue evaluateDeclaration(const FCVarDeclExprAST *node,
     return makeDangleValue();
 
   const auto value = evaluateExpression(node->initExpr.get(), context);
-  if (value.type == FCValueCategory::Dangle)
+  if (value.category() == FCValueCategory::Dangle)
     return value;
   Frame *frame = context.frameForSymbol(*symbol);
   if (frame == nullptr || symbol->slot < 0 ||
@@ -174,6 +176,7 @@ FCValue evaluateProgram(const FCProgramAST *node,
   }
   return result;
 }
+
 } // namespace
 
 FCValue evaluateBinary(const FCBinaryExprAST *expression,
@@ -190,7 +193,7 @@ FCValue evaluateBinary(const FCBinaryExprAST *expression,
     }
 
     const auto value = evaluateExpression(expression->getRHS(), context);
-    if (value.type == FCValueCategory::Dangle)
+    if (value.category() == FCValueCategory::Dangle)
       return value;
 
     std::shared_ptr<VariableSymbol> lhsSymbol = context.boundSymbol(variable);
@@ -214,65 +217,45 @@ FCValue evaluateBinary(const FCBinaryExprAST *expression,
 
   const auto lhs = evaluateExpression(expression->getLHS(), context);
   const auto rhs = evaluateExpression(expression->getRHS(), context);
-  if (lhs.type == FCValueCategory::Integer &&
-      rhs.type == FCValueCategory::Integer) {
-    FCValue result;
-    result.type = FCValueCategory::Integer;
+  if (lhs.category() == FCValueCategory::Integer &&
+      rhs.category() == FCValueCategory::Integer) {
     switch (op) {
     case FCBinaryOp::Add:
-      result.evaluteVal.intVal = lhs.evaluteVal.intVal + rhs.evaluteVal.intVal;
-      break;
+      return FCValue{*lhs.asInteger() + *rhs.asInteger()};
     case FCBinaryOp::Sub:
-      result.evaluteVal.intVal = lhs.evaluteVal.intVal - rhs.evaluteVal.intVal;
-      break;
+      return FCValue{*lhs.asInteger() - *rhs.asInteger()};
     case FCBinaryOp::Mul:
-      result.evaluteVal.intVal = lhs.evaluteVal.intVal * rhs.evaluteVal.intVal;
-      break;
+      return FCValue{*lhs.asInteger() * *rhs.asInteger()};
     case FCBinaryOp::Div:
-      result.evaluteVal.intVal = lhs.evaluteVal.intVal / rhs.evaluteVal.intVal;
-      break;
+      return FCValue{*lhs.asInteger() / *rhs.asInteger()};
     case FCBinaryOp::Less:
-      result.evaluteVal.intVal = lhs.evaluteVal.intVal < rhs.evaluteVal.intVal;
-      break;
+      return FCValue{*lhs.asInteger() < *rhs.asInteger()};
     default:
       context.diagnostics.add("evaluator", {}, "unknown binary operator");
       return makeDangleValue();
     }
-    return result;
   }
 
-  if (lhs.type == FCValueCategory::Floating &&
-      rhs.type == FCValueCategory::Floating) {
-    FCValue result;
-    result.type = FCValueCategory::Floating;
+  if (lhs.category() == FCValueCategory::Floating &&
+      rhs.category() == FCValueCategory::Floating) {
     switch (op) {
     case FCBinaryOp::Add:
-      result.evaluteVal.doubleVal =
-          lhs.evaluteVal.doubleVal + rhs.evaluteVal.doubleVal;
-      break;
+      return FCValue{*lhs.asFloating() + *rhs.asFloating()};
     case FCBinaryOp::Sub:
-      result.evaluteVal.doubleVal =
-          lhs.evaluteVal.doubleVal - rhs.evaluteVal.doubleVal;
-      break;
+      return FCValue{*lhs.asFloating() - *rhs.asFloating()};
     case FCBinaryOp::Mul:
-      result.evaluteVal.doubleVal =
-          lhs.evaluteVal.doubleVal * rhs.evaluteVal.doubleVal;
-      break;
+      return FCValue{*lhs.asFloating() * *rhs.asFloating()};
     case FCBinaryOp::Div:
-      result.evaluteVal.doubleVal =
-          lhs.evaluteVal.doubleVal / rhs.evaluteVal.doubleVal;
-      break;
+      return FCValue{*lhs.asFloating() / *rhs.asFloating()};
     default:
       context.diagnostics.add("evaluator", {}, "unknown binary operator");
       return makeDangleValue();
     }
-    return result;
   }
 
-  if (lhs.type == FCValueCategory::String &&
-      rhs.type == FCValueCategory::String && op == FCBinaryOp::Add)
-    return makeStringValue(lhs.evaluteVal.charVal->str +
-                           rhs.evaluteVal.charVal->str);
+  if (lhs.category() == FCValueCategory::String &&
+      rhs.category() == FCValueCategory::String && op == FCBinaryOp::Add)
+    return FCValue{*lhs.asString() + *rhs.asString()};
 
   return makeDangleValue();
 }
@@ -303,7 +286,7 @@ FCValue evaluateCall(const FCCallExprAST *expression,
   argumentValues.reserve(expression->getArgs().size());
   for (const auto &argument : expression->getArgs()) {
     const auto value = evaluateExpression(argument.get(), context);
-    if (value.type == FCValueCategory::Dangle)
+    if (value.category() == FCValueCategory::Dangle)
       return value;
     argumentValues.push_back(value);
   }
@@ -366,7 +349,7 @@ struct EvaluatorVisitor {
   explicit EvaluatorVisitor(FCEvaluationContext& ctx) : c(ctx) {}
 
   FCValue visit(const FCNumberExprAST& n)   { return evaluateNumber(&n); }
-  FCValue visit(const FCStringExprAST& n)   { return makeStringValue(n.m_stringVal); }
+  FCValue visit(const FCStringExprAST& n)   { return FCValue{n.m_stringVal}; }
   FCValue visit(const FCVariableExprAST& n) { return evaluateVariable(&n, c); }
   FCValue visit(const FCBinaryExprAST& n)   { return evaluateBinary(&n, c); }
   FCValue visit(const FCCallExprAST& n)     { return evaluateCall(&n, c); }

@@ -105,7 +105,7 @@
                 auto endTime = std::chrono::high_resolution_clock::now();
                 auto duration = std::chrono::duration_cast<std::chrono::microseconds>(endTime - startTime);
 
-                bool ok = result.type != FCValueCategory::Dangle;
+                bool ok = result.category() != FCValueCategory::Dangle;
                 std::string actual = valueToString(result);
                 bool valueMatches = (actual == expected);
                 expect(ok && valueMatches, "evaluator - " + name);
@@ -153,7 +153,7 @@
                 auto rhs = std::make_unique<FCNumberExprAST>(42);
                 auto assign = std::make_unique<FCBinaryExprAST>(FCBinaryOp::Assign, std::move(unboundVar), std::move(rhs));
                 auto result = evaluate(assign.get(), ctx);
-                expect(result.type == FCValueCategory::Dangle, "evaluator - assignment unbound symbol returns dangle");
+                expect(result.category() == FCValueCategory::Dangle, "evaluator - assignment unbound symbol returns dangle");
             }
             else
             {
@@ -180,7 +180,7 @@
                 auto rhs = std::make_unique<FCNumberExprAST>(42);
                 auto assign = std::make_unique<FCBinaryExprAST>(FCBinaryOp::Assign, std::move(badVar), std::move(rhs));
                 auto result = evaluate(assign.get(), ctx);
-                expect(result.type == FCValueCategory::Dangle, "evaluator - assignment invalid slot returns dangle");
+                expect(result.category() == FCValueCategory::Dangle, "evaluator - assignment invalid slot returns dangle");
             }
             else
             {
@@ -201,7 +201,7 @@
                 auto rhs = std::make_unique<FCNumberExprAST>(2);
                 auto binop = std::make_unique<FCBinaryExprAST>(FCBinaryOp::Unknown, std::move(lhs), std::move(rhs));
                 auto result = evaluate(binop.get(), ctx);
-                expect(result.type == FCValueCategory::Dangle, "evaluator - unknown operator returns dangle");
+                expect(result.category() == FCValueCategory::Dangle, "evaluator - unknown operator returns dangle");
             }
             else
             {
@@ -238,7 +238,7 @@
                 auto forExpr = std::make_unique<FCForExprAST>(
                     std::move(varDecl), std::move(start), std::move(end), std::move(step), std::move(body));
                 auto result = evaluate(forExpr.get(), ctx);
-                expect(result.type == FCValueCategory::Dangle, "evaluator - for invalid slot returns dangle");
+                expect(result.category() == FCValueCategory::Dangle, "evaluator - for invalid slot returns dangle");
             }
             else
             {
@@ -257,7 +257,7 @@
             std::vector<std::unique_ptr<FCExprAST>> args;
             auto call = std::make_unique<FCCallExprAST>("ghost", std::move(args));
             auto result = evaluate(call.get(), ctx);
-            expect(result.type == FCValueCategory::Dangle,
+            expect(result.category() == FCValueCategory::Dangle,
                    "evaluator - call without compiled record returns dangle");
         }
 
@@ -289,7 +289,7 @@
             callArgs.push_back(std::make_unique<FCNumberExprAST>(1));
             auto call = std::make_unique<FCCallExprAST>("hollow", std::move(callArgs));
             auto result = evaluate(call.get(), ctx);
-            expect(result.type == FCValueCategory::Dangle,
+            expect(result.category() == FCValueCategory::Dangle,
                    "evaluator - unresolved parameter symbol returns dangle");
         }
 
@@ -314,14 +314,14 @@
             nestedCtx.functions.registerFunction(nestedOuter.get());
 
             // 顶层（无活动函数帧）仍走登记路径
-            expect(evaluate(nestedOuter.get(), nestedCtx).type == FCValueCategory::Dangle,
+            expect(evaluate(nestedOuter.get(), nestedCtx).category() == FCValueCategory::Dangle,
                    "evaluator - top-level definition still registers");
 
             // 进入函数体后遇到嵌套定义：明确拒绝，而不是静默沿用 Dangle 语义
             std::vector<std::unique_ptr<FCExprAST>> nestedArgs;
             auto nestedCall =
                 std::make_unique<FCCallExprAST>("nestedOuter", std::move(nestedArgs));
-            expect(evaluate(nestedCall.get(), nestedCtx).type == FCValueCategory::Dangle,
+            expect(evaluate(nestedCall.get(), nestedCtx).category() == FCValueCategory::Dangle,
                    "evaluator - nested definition rejected inside a frame");
         }
 
@@ -344,7 +344,7 @@
                 ctx.bindNode(manualVar.get(), manualSymbol);
                 // 求值手工节点：应读到全局帧 slot 0 的值 1（当前实现返回 Dangle）
                 FCValue v = evaluate(manualVar.get(), ctx);
-                expect(v.type == FCValueCategory::Integer && v.evaluteVal.intVal == 1,
+                expect(v.category() == FCValueCategory::Integer && *v.asInteger() == 1,
                        "evaluator - local binding visible when semantic binding nonempty");
             }
             else
@@ -380,7 +380,7 @@
             std::vector<std::unique_ptr<FCExprAST>> args;
             auto call = std::make_unique<FCCallExprAST>("conflict", std::move(args));
             FCValue v = evaluate(call.get(), ctx);
-            expect(v.type == FCValueCategory::Integer && v.evaluteVal.intVal == 7,
+            expect(v.category() == FCValueCategory::Integer && *v.asInteger() == 7,
                    "evaluator - call resolves by compiled program record");
         }
     }
@@ -432,7 +432,7 @@
                 try
                 {
                     FCValue result = evaluate(ast.get(), ctx);
-                    isDangle = (result.type == FCValueCategory::Dangle);
+                    isDangle = (result.category() == FCValueCategory::Dangle);
                 }
                 catch (...)
                 {
@@ -445,27 +445,27 @@
         // 直接驱动公共 API，覆盖 dispatch 的空指针 / 未知节点 / 帧查找错误分支
         {
             FCEvaluationContext ctx({});
-            expect(evaluate(static_cast<FCExprAST*>(nullptr), ctx).type == FCValueCategory::Dangle,
+            expect(evaluate(static_cast<FCExprAST*>(nullptr), ctx).category() == FCValueCategory::Dangle,
                    "evaluator-error - evaluate null");
 
             const FCExprAST* constNull = nullptr;
-            expect(evaluate(constNull, ctx).type == FCValueCategory::Dangle,
+            expect(evaluate(constNull, ctx).category() == FCValueCategory::Dangle,
                    "evaluator-error - const evaluate null");
 
             std::vector<VarDeclPtr> protoArgs;
             auto proto = std::make_unique<FCPrototypeAST>("p", std::move(protoArgs));
-            expect(evaluate(proto.get(), ctx).type == FCValueCategory::Dangle,
+            expect(evaluate(proto.get(), ctx).category() == FCValueCategory::Dangle,
                    "evaluator-error - evaluate prototype node");
 
             // 空序列 / 空块
             std::vector<std::unique_ptr<FCExprAST>> emptyItems;
             auto emptySeq = std::make_unique<FCSeqExprAST>(std::move(emptyItems));
-            expect(evaluate(emptySeq.get(), ctx).type == FCValueCategory::Dangle,
+            expect(evaluate(emptySeq.get(), ctx).category() == FCValueCategory::Dangle,
                    "evaluator-error - empty sequence");
 
             std::vector<std::unique_ptr<FCExprAST>> emptyBlk;
             auto emptyBlock = std::make_unique<FCBlockExprAST>(std::move(emptyBlk));
-            expect(evaluate(emptyBlock.get(), ctx).type == FCValueCategory::Dangle,
+            expect(evaluate(emptyBlock.get(), ctx).category() == FCValueCategory::Dangle,
                    "evaluator-error - empty block");
 
             // for 的 decl 为空
@@ -473,7 +473,7 @@
                 nullptr, std::make_unique<FCNumberExprAST>(0),
                 std::make_unique<FCNumberExprAST>(10), nullptr,
                 std::make_unique<FCNumberExprAST>(1));
-            expect(evaluate(nullFor.get(), ctx).type == FCValueCategory::Dangle,
+            expect(evaluate(nullFor.get(), ctx).category() == FCValueCategory::Dangle,
                    "evaluator-error - for with null decl");
 
             // 局部变量但无调用帧
@@ -483,7 +483,7 @@
             ctx.compiledProgram.globalSymbols.push_back(std::make_shared<VariableSymbol>(localSym));
             auto localVar = std::make_unique<FCVariableExprAST>(std::string("v"));
             ctx.bindNode(localVar.get(), std::make_shared<VariableSymbol>(localSym));
-            expect(evaluate(localVar.get(), ctx).type == FCValueCategory::Dangle,
+            expect(evaluate(localVar.get(), ctx).category() == FCValueCategory::Dangle,
                    "evaluator-error - local variable without frame");
 
             // 全局变量但槽位非法
@@ -493,7 +493,7 @@
             ctx.compiledProgram.globalSymbols.push_back(std::make_shared<VariableSymbol>(negSym));
             auto negVar = std::make_unique<FCVariableExprAST>(std::string("g"));
             ctx.bindNode(negVar.get(), std::make_shared<VariableSymbol>(negSym));
-            expect(evaluate(negVar.get(), ctx).type == FCValueCategory::Dangle,
+            expect(evaluate(negVar.get(), ctx).category() == FCValueCategory::Dangle,
                    "evaluator-error - global variable with negative slot");
 
             // 局部变量槽位超出帧大小
@@ -504,7 +504,7 @@
             auto oobVar = std::make_unique<FCVariableExprAST>(std::string("o"));
             ctx.bindNode(oobVar.get(), std::make_shared<VariableSymbol>(oobSym));
             ctx.pushFrame("oob");
-            expect(evaluate(oobVar.get(), ctx).type == FCValueCategory::Dangle,
+            expect(evaluate(oobVar.get(), ctx).category() == FCValueCategory::Dangle,
                    "evaluator-error - local variable slot out of range");
             ctx.popFrame();
 
@@ -568,25 +568,25 @@
         FC::setTraceStagesForTesting("evaluator");
 
         auto add = evaluateOf("def add(a:int, b:int) { a + b } add(2, 3)");
-        expect(add.type == FCValueCategory::Integer && add.evaluteVal.intVal == 5,
+        expect(add.category() == FCValueCategory::Integer && *add.asInteger() == 5,
                "evaluator-trace - integer call result");
 
         auto zero = evaluateOf("def two() { 2 } two()");
-        expect(zero.type == FCValueCategory::Integer && zero.evaluteVal.intVal == 2,
+        expect(zero.category() == FCValueCategory::Integer && *zero.asInteger() == 2,
                "evaluator-trace - zero-argument call");
 
         auto floating = evaluateOf("def half(x:double) { x / 2.0 } half(5.0)");
-        expect(floating.type == FCValueCategory::Floating &&
-                   floating.evaluteVal.doubleVal == 2.5,
+        expect(floating.category() == FCValueCategory::Floating &&
+                   *floating.asFloating() == 2.5,
                "evaluator-trace - floating result");
 
         auto text = evaluateOf("def join(a:string, b:string) { a + b } join(\"x\", \"y\")");
-        expect(text.type == FCValueCategory::String && text.evaluteVal.charVal != nullptr &&
-                   text.evaluteVal.charVal->str == "xy",
+        expect(text.category() == FCValueCategory::String && text.asString() != nullptr &&
+                   *text.asString() == "xy",
                "evaluator-trace - string result");
 
         auto dangling = evaluateOf("def bad() { missing() } bad()");
-        expect(dangling.type == FCValueCategory::Dangle,
+        expect(dangling.category() == FCValueCategory::Dangle,
                "evaluator-trace - dangle result");
 
         FC::setTraceStagesForTesting("");
@@ -629,7 +629,7 @@
             {
                 FCValue result = evaluate(ast.get(), ctx);
                 std::string actual = valueToString(result);
-                expect(result.type != FCValueCategory::Dangle && actual == expected,
+                expect(result.category() != FCValueCategory::Dangle && actual == expected,
                        "stress - " + name);
             }
             catch (...)
@@ -643,14 +643,14 @@
             FCScanner s1;
             auto ast1 = s1.analysis("def f1(x:int) { x + 1 } f1(1)");
             FCEvaluationContext ctx = makeEvalContext(s1);
-            expect(evaluate(ast1.get(), ctx).type == FCValueCategory::Integer,
+            expect(evaluate(ast1.get(), ctx).category() == FCValueCategory::Integer,
                    "stress - context reuse program 1");
 
             FCScanner s2;
             auto ast2 = s2.analysis("def g1(x:int) { x * 2 } g1(21)");
             ctx.compiledProgram = s2.semanticContext().getCompiledProgram();
             FCValue r2 = evaluate(ast2.get(), ctx);
-            expect(r2.type == FCValueCategory::Integer && r2.evaluteVal.intVal == 42,
+            expect(r2.category() == FCValueCategory::Integer && *r2.asInteger() == 42,
                    "stress - context reuse program 2");
         }
 
@@ -842,7 +842,7 @@
             args.push_back(std::make_unique<FCNumberExprAST>(1));
             auto call = std::make_unique<FCCallExprAST>("frameguard", std::move(args));
             FCValue v = evaluate(call.get(), ctx);
-            expect(v.type == FCValueCategory::Dangle,
+            expect(v.category() == FCValueCategory::Dangle,
                    "evaluator - frameguard error path returns dangle");
             // 后续求值若帧栈泄漏，frame.locals size 不匹配；断言栈深恢复
             expect(ctx.callStack.size() == 1,
