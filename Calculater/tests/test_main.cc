@@ -56,6 +56,7 @@ void ComprehensiveTestSuite::runAllTests()
     // ============ Token / AST API Tests ============
     runTokenApiTests();
 
+
     // ============ Lexer Tests (独立词法测试，不依赖 Parser/Semantic) ============
     runLexerTests();
 
@@ -85,6 +86,9 @@ void ComprehensiveTestSuite::runAllTests()
 
     // ============ Evaluator Error Tests ============
     runEvaluatorErrorTests();
+
+    // ============ Evaluator Value Semantics Tests (FCValue 变体迁移钉住) ============
+    runEvaluatorValueSemanticsTests();
 
     // ============ Stress Tests ============
     runStressTests();

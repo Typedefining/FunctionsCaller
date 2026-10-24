@@ -553,6 +553,70 @@
             }
         }
     }
+    // ==================== Evaluator Value Semantics Tests ====================
+    // 钉住 FCValue 变体迁移（92aef02）后的值语义行为，防止未来重构静默回退：
+    // - 终止条件非数值 / 循环变量被赋成字符串 → Dangle + 结构化诊断
+    //   （旧实现读 union 位模式做整数运算）
+    // - 字符串跨帧传递与赋值独立 → variant 按值深拷贝（旧实现为共享堆指针）
+    void ComprehensiveTestSuite::runEvaluatorValueSemanticsTests()
+    {
+        // 测试 A：for 终止条件求值结果非数值 → Dangle + 诊断。
+        // 注意：顶层 for 的循环变量落在全局帧（frameIndex == -1），
+        // evaluateFor 在帧守卫处提前返回，终止条件不求值；
+        // 须置于函数内才能命中被钉住的分支。
+        {
+            FCScanner scanner;
+            auto ast = scanner.analysis("def f() { for i = 0, \"a\", 1 in i } f()");
+            FCEvaluationContext ctx = makeEvalContext(scanner);
+            FCValue v = ast ? evaluate(ast.get(), ctx) : FCValue{};
+            expect(v.category() == FCValueCategory::Dangle,
+                   "value-semantics - for end condition must be numeric");
+            bool hasDiagnostic = false;
+            for (const auto& d : ctx.diagnostics.items())
+                if (d.message.find("for end condition must be numeric") != std::string::npos)
+                    hasDiagnostic = true;
+            expect(hasDiagnostic,
+                   "value-semantics - for end condition must be numeric - diagnostic");
+        }
+
+        // 测试 B：循环体把循环变量赋成字符串 → Dangle + 诊断，不做位模式加法。
+        {
+            FCScanner scanner;
+            auto ast = scanner.analysis("def f() { for i = 0, i < 3, 1 in i = \"s\" } f()");
+            FCEvaluationContext ctx = makeEvalContext(scanner);
+            FCValue v = ast ? evaluate(ast.get(), ctx) : FCValue{};
+            expect(v.category() == FCValueCategory::Dangle,
+                   "value-semantics - loop variable must stay integer");
+            bool hasDiagnostic = false;
+            for (const auto& d : ctx.diagnostics.items())
+                if (d.message.find("for loop variable must stay integer") != std::string::npos)
+                    hasDiagnostic = true;
+            expect(hasDiagnostic,
+                   "value-semantics - loop variable must stay integer - diagnostic");
+        }
+
+        // 测试 C：字符串跨帧值语义——返回值与参数在帧弹出后仍有效（深拷贝）。
+        {
+            FCScanner scanner;
+            auto ast = scanner.analysis("def make() { \"abc\" } def id(s:string) { s } id(make())");
+            FCEvaluationContext ctx = makeEvalContext(scanner);
+            FCValue v = ast ? evaluate(ast.get(), ctx) : FCValue{};
+            expect(v.category() == FCValueCategory::String && v.asString() != nullptr &&
+                       *v.asString() == "abc",
+                   "value-semantics - string survives frame pop");
+        }
+
+        // 测试 D：赋值独立性——b 的重绑不共享 a 的存储（防退回共享缓冲实现）。
+        {
+            FCScanner scanner;
+            auto ast = scanner.analysis("var a:string = \"x\"; var b:string = a; b = b + \"!\"; a");
+            FCEvaluationContext ctx = makeEvalContext(scanner);
+            FCValue v = ast ? evaluate(ast.get(), ctx) : FCValue{};
+            expect(v.category() == FCValueCategory::String && v.asString() != nullptr &&
+                       *v.asString() == "x",
+                   "value-semantics - assignment copies strings");
+        }
+    }
     // 求值阶段的诊断输出：只在 FC_TRACE 含 evaluator 时打印调用与返回
     void ComprehensiveTestSuite::runEvaluatorTraceTests()
     {
