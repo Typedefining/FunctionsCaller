@@ -231,4 +231,28 @@
             expect(ast == nullptr && parser.hadError(),
                    "parser - unterminated block is an error");
         }
+
+        // 畸形数字字面量不得抛异常逃出解析阶段：应产出诊断并返回 null
+        {
+            FC::Lexer lexer(".");
+            FC::FCDiagnostics diagnostics;
+            FC::Parser parser(lexer, diagnostics);
+            auto ast = parser.parseProgram();
+            expect(ast == nullptr && parser.hadError(),
+                   "parser - dot literal flags error instead of throwing");
+            expect(!diagnostics.empty(),
+                   "parser - dot literal records a diagnostic");
+            expect(diagnostics[0].stage == "parser",
+                   "parser - diagnostic stage is parser");
+        }
+        {
+            FC::Lexer lexer("99999999999999999999");
+            FC::FCDiagnostics diagnostics;
+            FC::Parser parser(lexer, diagnostics);
+            auto ast = parser.parseProgram();
+            expect(ast == nullptr && parser.hadError(),
+                   "parser - overflow integer literal flags error instead of throwing");
+            expect(!diagnostics.empty(),
+                   "parser - overflow integer records a diagnostic");
+        }
     }

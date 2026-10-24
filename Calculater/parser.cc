@@ -1,6 +1,8 @@
 #include "parser.h"
 #include <cassert>
 #include <cctype>
+#include <stdexcept>
+#include <string>
 #include <tuple>
 
 using namespace FCExprClass;
@@ -190,10 +192,17 @@ std::unique_ptr<FCExprAST> Parser::parseExpression() {
 std::unique_ptr<FCExprAST> Parser::parseNumberExpr() {
 	const bool isFloating = m_curTok.lexeme.find('.') != std::string::npos;
 	std::unique_ptr<FCNumberExprAST> result;
-	if (isFloating)
-		result = std::make_unique<FCNumberExprAST>(std::stod(m_curTok.lexeme));
-	else
-		result = std::make_unique<FCNumberExprAST>(std::stoi(m_curTok.lexeme));
+	try {
+		if (isFloating)
+			result = std::make_unique<FCNumberExprAST>(std::stod(m_curTok.lexeme));
+		else
+			result = std::make_unique<FCNumberExprAST>(std::stoi(m_curTok.lexeme));
+	} catch (const std::exception& e) {
+		m_diagnostics.add("parser", {m_curTok.line, m_curTok.column},
+			"invalid numeric literal '" + m_curTok.lexeme + "': " + e.what());
+		m_hadError = true;
+		return nullptr;
+	}
 	advance();
 	return result;
 }
