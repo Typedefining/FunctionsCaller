@@ -106,7 +106,9 @@ private:
         }
         if (value.category() == FCValueCategory::String)
             return "\"" + *value.asString() + "\"";
-        return "<dangle>";
+        if (value.isVoid())
+            return "<void>";
+        return "<error>";
     }
 
     // ==================== run* 成员函数在各 test_*.cc 中定义 ====================
@@ -122,6 +124,7 @@ private:
     void runEvaluatorEdgeCaseTests();
     void runEvaluatorErrorTests();
     void runEvaluatorValueSemanticsTests();
+    void runEvaluatorVoidTests();
     void runEvaluatorTraceTests();
     void runStressTests();
     void runRegistryTests();

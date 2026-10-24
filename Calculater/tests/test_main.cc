@@ -92,6 +92,9 @@ void ComprehensiveTestSuite::runAllTests()
     // ============ Evaluator Value Semantics Tests (FCValue 变体迁移钉住) ============
     runEvaluatorValueSemanticsTests();
 
+    // ============ Evaluator Void Tests (Dangle→Void/Error 拆分钉住) ============
+    runEvaluatorVoidTests();
+
     // ============ Stress Tests ============
     runStressTests();
 }

@@ -14,8 +14,14 @@ using namespace FCMarks;
 FCValue evaluateExpression(const FCExprAST *expression, FCEvaluationContext &context);
 
 namespace {
-FCValue makeDangleValue() {
+// Void：无值（空块/空序列/定义语句）；FCValue{} 默认构造即 Void
+FCValue makeVoidValue() {
   return FCValue{};
+}
+
+// Error：求值失败哨兵（Task 1 过渡态无诊断；Task 2 收口为带诊断重载）
+FCValue makeErrorValue() {
+  return FCValue{FCErrorValue{}};
 }
 
 // 诊断输出用的值文本形式；与单元测试期望的格式保持一致。
@@ -30,10 +36,12 @@ std::string formatValue(const FCValue &value) {
   }
   case FCValueCategory::String:
     return "\"" + *value.asString() + "\"";
-  case FCValueCategory::Dangle:
+  case FCValueCategory::Void:
+    return "Void";
+  case FCValueCategory::Error:
     break;
   }
-  return "Dangle";
+  return "Error";
 }
 
 FCValue evaluateNumber(const FCNumberExprAST *node) {
@@ -45,12 +53,12 @@ FCValue evaluateNumber(const FCNumberExprAST *node) {
 FCValue evaluateVariable(const FCVariableExprAST *node, FCEvaluationContext &context) {
   std::shared_ptr<VariableSymbol> symbol = context.boundSymbol(node);
   if (symbol == nullptr)
-    return makeDangleValue();
+    return makeErrorValue();
 
   Frame *frame = context.frameForSymbol(*symbol);
   if (frame == nullptr || symbol->slot < 0 ||
       symbol->slot >= static_cast<int>(frame->locals.size()))
-    return makeDangleValue();
+    return makeErrorValue();
 
   return frame->locals[symbol->slot];
 }
@@ -62,8 +70,10 @@ FCValue evaluateIf(const FCIfExprAST *node, FCEvaluationContext &context) {
     truthy = *condition.asInteger() != 0;
   else if (condition.category() == FCValueCategory::Floating)
     truthy = *condition.asFloating() != 0.0;
+  else if (condition.isError())
+    return condition;  // 错误传播；条件必须数值（Void/类别非法 → Error）
   else
-    return makeDangleValue();
+    return makeErrorValue();
   return evaluateExpression(truthy ? node->getThen() : node->getElse(),
                             context);
 }
@@ -71,10 +81,10 @@ FCValue evaluateIf(const FCIfExprAST *node, FCEvaluationContext &context) {
 FCValue evaluateFor(const FCForExprAST *node, FCEvaluationContext &context) {
   std::shared_ptr<VariableSymbol> forSymbol = context.boundSymbol(node);
   if (node->getDecl() == nullptr || forSymbol == nullptr || context.callStack.empty())
-    return makeDangleValue();
+    return makeErrorValue();
   // for 循环变量应为局部变量，不应落在全局帧（frameIndex == -1）上
   if (forSymbol->runtime.frameIndex == -1)
-    return makeDangleValue();
+    return makeErrorValue();
   const auto start = evaluateExpression(node->getStart(), context);
   FCValue step = node->getStep() == nullptr
                      ? FCValue{1}
@@ -82,13 +92,13 @@ FCValue evaluateFor(const FCForExprAST *node, FCEvaluationContext &context) {
 
   if (start.category() != FCValueCategory::Integer ||
       step.category() != FCValueCategory::Integer)
-    return makeDangleValue();
+    return makeErrorValue();
   const int stepValue = *step.asInteger();
 
   const int slot = forSymbol->slot;
   size_t frameIdx = context.callStack.size() - 1;
   if (slot < 0 || slot >= static_cast<int>(context.callStack[frameIdx].locals.size()))
-    return makeDangleValue();
+    return makeErrorValue();
 
   context.callStack[frameIdx].locals[slot] = start;
 
@@ -100,37 +110,39 @@ FCValue evaluateFor(const FCForExprAST *node, FCEvaluationContext &context) {
       truthy = *e != 0;
     else if (const double *e = end.asFloating())
       truthy = *e != 0.0;
+    else if (end.isError())
+      return end;  // 错误穿透循环（终止条件必须数值）
     else {
       // 终止条件必须数值（与 if 条件同一规则）；旧实现读 union 位模式
       context.diagnostics.add("evaluator", {},
                               "for end condition must be numeric");
-      return makeDangleValue();
+      return makeErrorValue();
     }
     if (!truthy)
       break;
     result = evaluateExpression(node->getBody(), context);
-    if (result.category() == FCValueCategory::Dangle)
-      return result;
+    if (result.isError())
+      return result;  // 仅错误中止；Void 流经继续循环
     auto &counter = context.callStack[frameIdx].locals[slot];
     const int *current = counter.asInteger();
     if (current == nullptr) {
       // 循环体可能把循环变量赋成非 int；旧实现此处做指针位模式整数加法
       context.diagnostics.add("evaluator", {},
                               "for loop variable must stay integer");
-      return makeDangleValue();
+      return makeErrorValue();
     }
     counter = FCValue{*current + stepValue};
   }
-  return result;
+  return result;  // 体全 Void 时返回 Void
 }
 
 FCValue evaluateBlock(const FCBlockExprAST *node,
                       FCEvaluationContext &context) {
-  FCValue result = makeDangleValue();
+  FCValue result = makeVoidValue();
 
   for (const auto &expr : node->getExpressions()) {
     result = evaluateExpression(expr.get(), context);
-    if (result.category() == FCValueCategory::Dangle)
+    if (result.isError())
       return result;
   }
 
@@ -142,8 +154,8 @@ FCValue evaluateSequence(const FCSeqExprAST *node,
   FCValue result;
   for (const auto &expr : node->getExpressions()) {
     result = evaluateExpression(expr.get(), context);
-    if (result.category() == FCValueCategory::Dangle)
-      return makeDangleValue();
+    if (result.isError())
+      return result;
   }
   return result;
 }
@@ -152,15 +164,15 @@ FCValue evaluateDeclaration(const FCVarDeclExprAST *node,
                             FCEvaluationContext &context) {
   std::shared_ptr<VariableSymbol> symbol = context.boundSymbol(node);
   if (symbol == nullptr || node->decl == nullptr || node->initExpr == nullptr)
-    return makeDangleValue();
+    return makeErrorValue();
 
   const auto value = evaluateExpression(node->initExpr.get(), context);
-  if (value.category() == FCValueCategory::Dangle)
+  if (value.isError())
     return value;
   Frame *frame = context.frameForSymbol(*symbol);
   if (frame == nullptr || symbol->slot < 0 ||
       symbol->slot >= static_cast<int>(frame->locals.size()))
-    return makeDangleValue();
+    return makeErrorValue();
   frame->locals[symbol->slot] = value;
   return value;
 }
@@ -168,7 +180,7 @@ FCValue evaluateDeclaration(const FCVarDeclExprAST *node,
 FCValue evaluateProgram(const FCProgramAST *node,
                         FCEvaluationContext &context) {
   context.functions.index(const_cast<FCProgramAST *>(node));
-  FCValue result = makeDangleValue();
+  FCValue result = makeVoidValue();
   for (const auto &statement : node->getStatements()) {
     if (dynamic_cast<const FCFunctionAST *>(statement.get()) != nullptr)
       continue;
@@ -189,18 +201,18 @@ FCValue evaluateBinary(const FCBinaryExprAST *expression,
     if (variable == nullptr || variable->name.empty()) {
       context.diagnostics.add("evaluator", {},
                                "LHS of assignment must be a variable");
-      return makeDangleValue();
+      return makeErrorValue();
     }
 
     const auto value = evaluateExpression(expression->getRHS(), context);
-    if (value.category() == FCValueCategory::Dangle)
+    if (value.isError())
       return value;
 
     std::shared_ptr<VariableSymbol> lhsSymbol = context.boundSymbol(variable);
     if (lhsSymbol == nullptr) {
       context.diagnostics.add("evaluator", {},
                                "LHS of assignment is not bound to a symbol");
-      return makeDangleValue();
+      return makeErrorValue();
     }
 
     Frame *frame = context.frameForSymbol(*lhsSymbol);
@@ -208,7 +220,7 @@ FCValue evaluateBinary(const FCBinaryExprAST *expression,
         lhsSymbol->slot >= static_cast<int>(frame->locals.size())) {
       context.diagnostics.add("evaluator", {},
                                "Invalid slot for " + variable->name);
-      return makeDangleValue();
+      return makeErrorValue();
     }
 
     frame->locals[lhsSymbol->slot] = value;
@@ -232,7 +244,7 @@ FCValue evaluateBinary(const FCBinaryExprAST *expression,
       return FCValue{*lhs.asInteger() < *rhs.asInteger()};
     default:
       context.diagnostics.add("evaluator", {}, "unknown binary operator");
-      return makeDangleValue();
+      return makeErrorValue();
     }
   }
 
@@ -249,7 +261,7 @@ FCValue evaluateBinary(const FCBinaryExprAST *expression,
       return FCValue{*lhs.asFloating() / *rhs.asFloating()};
     default:
       context.diagnostics.add("evaluator", {}, "unknown binary operator");
-      return makeDangleValue();
+      return makeErrorValue();
     }
   }
 
@@ -257,7 +269,7 @@ FCValue evaluateBinary(const FCBinaryExprAST *expression,
       rhs.category() == FCValueCategory::String && op == FCBinaryOp::Add)
     return FCValue{*lhs.asString() + *rhs.asString()};
 
-  return makeDangleValue();
+  return makeErrorValue();
 }
 
 FCValue evaluateCall(const FCCallExprAST *expression,
@@ -272,21 +284,21 @@ FCValue evaluateCall(const FCCallExprAST *expression,
   if (function == nullptr) {
     context.diagnostics.add("evaluator", {},
                             "Function not found: " + expression->getName());
-    return makeDangleValue();
+    return makeErrorValue();
   }
 
   const auto &prototype = function->getProto();
   if (expression->getArgs().size() != prototype->getArgs().size()) {
     context.diagnostics.add("evaluator", {},
                             "Argument count mismatch in " + expression->getName());
-    return makeDangleValue();
+    return makeErrorValue();
   }
 
   std::vector<FCValue> argumentValues;
   argumentValues.reserve(expression->getArgs().size());
   for (const auto &argument : expression->getArgs()) {
     const auto value = evaluateExpression(argument.get(), context);
-    if (value.category() == FCValueCategory::Dangle)
+    if (value.isError())
       return value;
     argumentValues.push_back(value);
   }
@@ -301,13 +313,13 @@ FCValue evaluateCall(const FCCallExprAST *expression,
     context.diagnostics.add(
         "evaluator", {},
         "Error: no compiled record for '" + expression->getName() + "'");
-    return makeDangleValue();
+    return makeErrorValue();
   }
 
   for (size_t i = 0; i < argumentValues.size(); ++i) {
     const auto &parameter = prototype->getArgs()[i];
     if (parameter == nullptr) {
-      return makeDangleValue();
+      return makeErrorValue();
     }
 
     auto symbol = record->symbols.lookupShared(parameter->name);
@@ -316,7 +328,7 @@ FCValue evaluateCall(const FCCallExprAST *expression,
       context.diagnostics.add(
           "evaluator", {},
           "Error: unresolved parameter '" + expression->getName() + "'");
-      return makeDangleValue();
+      return makeErrorValue();
     }
     frame.locals[symbol->slot] = argumentValues[i];
   }
@@ -366,19 +378,19 @@ struct EvaluatorVisitor {
           "evaluator", {},
           "Error: nested function definition '" + n.getProtoName()
               + "' is not supported by the evaluator");
-      return makeDangleValue();
+      return makeErrorValue();
     }
     c.functions.registerFunction(const_cast<FCFunctionAST*>(&n));
-    return makeDangleValue();
+    return makeVoidValue();  // 定义语句无值
   }
-  // FCPrototypeAST 不作为顶层语句出现；保持旧兜底行为（视为已处理）。
-  FCValue visit(const FCPrototypeAST& n) { return makeDangleValue(); }
+  // FCPrototypeAST 不作为顶层语句出现；不可达防御分支，按“未知节点”归类为 Error。
+  FCValue visit(const FCPrototypeAST& n) { return makeErrorValue(); }
 };
 
 FCValue evaluateExpression(const FCExprAST *expression,
                            FCEvaluationContext &context) {
   if (!expression)
-    return makeDangleValue();
+    return makeErrorValue();
 
   EvaluatorVisitor v{ context };
   return FCExprClass::dispatchAST(*expression, v);

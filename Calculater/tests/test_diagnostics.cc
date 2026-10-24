@@ -135,7 +135,7 @@
             expect(ast != nullptr && scanner.diagnostics().empty(),
                    "diag: for-var shadows outer, no conflict");
         }
-        // 12. 求值错误：函数不存在（诊断与 Dangle 并存）
+        // 12. 求值错误：函数不存在（诊断与 Error 并存）
         //     语义期不校验被调用函数是否存在（analyzeCall 仅查实参），源文本可通过分析。
         {
             FCScanner scanner;
@@ -143,7 +143,7 @@
             expect(ast != nullptr, "diag: eval case parses");
             FCEvaluationContext context(scanner.semanticContext().getCompiledProgram());
             FCValue v = evaluate(ast.get(), context);
-            expect(v.category() == FCValueCategory::Dangle, "diag: eval error yields Dangle");
+            expect(v.isError(), "diag: eval error yields Error");
             expect(!context.diagnostics.empty()
                    && context.diagnostics.items()[0].stage == "evaluator"
                    && context.diagnostics.items()[0].message.find("undefinedfn") != std::string::npos,
@@ -156,7 +156,7 @@
             expect(ast != nullptr, "diag: arity case parses");
             FCEvaluationContext context(scanner.semanticContext().getCompiledProgram());
             FCValue v = evaluate(ast.get(), context);
-            expect(v.category() == FCValueCategory::Dangle, "diag: arity error yields Dangle");
+            expect(v.isError(), "diag: arity error yields Error");
             expect(!context.diagnostics.empty()
                    && context.diagnostics.items()[0].message.find("Argument count mismatch") != std::string::npos,
                    "diag: arity mismatch recorded");
@@ -167,7 +167,7 @@
             auto ast = scanner.analysis("def f() { 1 = 2 } f()");
             FCEvaluationContext context(scanner.semanticContext().getCompiledProgram());
             FCValue v = evaluate(ast.get(), context);
-            expect(v.category() == FCValueCategory::Dangle, "diag: bad assign yields Dangle");
+            expect(v.isError(), "diag: bad assign yields Error");
             expect(!context.diagnostics.empty()
                    && context.diagnostics.items()[0].message.find("assignment") != std::string::npos,
                    "diag: bad assignment recorded");

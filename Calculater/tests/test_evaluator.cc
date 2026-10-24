@@ -105,7 +105,7 @@
                 auto endTime = std::chrono::high_resolution_clock::now();
                 auto duration = std::chrono::duration_cast<std::chrono::microseconds>(endTime - startTime);
 
-                bool ok = result.category() != FCValueCategory::Dangle;
+                bool ok = result.isValue();
                 std::string actual = valueToString(result);
                 bool valueMatches = (actual == expected);
                 expect(ok && valueMatches, "evaluator - " + name);
@@ -119,7 +119,7 @@
                 }
                 else
                 {
-                    std::cout << "      FAILED - Evaluator returned Dangle\n";
+                    std::cout << "      FAILED - Evaluator returned Error\n";
                 }
             }
             catch (const std::exception& e)
@@ -153,7 +153,7 @@
                 auto rhs = std::make_unique<FCNumberExprAST>(42);
                 auto assign = std::make_unique<FCBinaryExprAST>(FCBinaryOp::Assign, std::move(unboundVar), std::move(rhs));
                 auto result = evaluate(assign.get(), ctx);
-                expect(result.category() == FCValueCategory::Dangle, "evaluator - assignment unbound symbol returns dangle");
+                expect(result.isError(), "evaluator - assignment unbound symbol returns error");
             }
             else
             {
@@ -180,7 +180,7 @@
                 auto rhs = std::make_unique<FCNumberExprAST>(42);
                 auto assign = std::make_unique<FCBinaryExprAST>(FCBinaryOp::Assign, std::move(badVar), std::move(rhs));
                 auto result = evaluate(assign.get(), ctx);
-                expect(result.category() == FCValueCategory::Dangle, "evaluator - assignment invalid slot returns dangle");
+                expect(result.isError(), "evaluator - assignment invalid slot returns error");
             }
             else
             {
@@ -201,7 +201,7 @@
                 auto rhs = std::make_unique<FCNumberExprAST>(2);
                 auto binop = std::make_unique<FCBinaryExprAST>(FCBinaryOp::Unknown, std::move(lhs), std::move(rhs));
                 auto result = evaluate(binop.get(), ctx);
-                expect(result.category() == FCValueCategory::Dangle, "evaluator - unknown operator returns dangle");
+                expect(result.isError(), "evaluator - unknown operator returns error");
             }
             else
             {
@@ -229,7 +229,7 @@
                 auto step = std::make_unique<FCNumberExprAST>(1);
                 auto body = std::make_unique<FCVariableExprAST>(std::string("badfor"));
                 ctx.bindNode(badVar.get(), badSymbol);
-                // 为 body 变量也绑定符号（使其不返回 dangle）
+                // 为 body 变量也绑定符号（使其不返回错误）
                 auto bodySymbol = std::make_shared<VariableSymbol>();
                 bodySymbol->declaration = std::make_shared<VarDecl>("badfor", "int");
                 bodySymbol->slot = 0;
@@ -238,7 +238,7 @@
                 auto forExpr = std::make_unique<FCForExprAST>(
                     std::move(varDecl), std::move(start), std::move(end), std::move(step), std::move(body));
                 auto result = evaluate(forExpr.get(), ctx);
-                expect(result.category() == FCValueCategory::Dangle, "evaluator - for invalid slot returns dangle");
+                expect(result.isError(), "evaluator - for invalid slot returns error");
             }
             else
             {
@@ -257,8 +257,8 @@
             std::vector<std::unique_ptr<FCExprAST>> args;
             auto call = std::make_unique<FCCallExprAST>("ghost", std::move(args));
             auto result = evaluate(call.get(), ctx);
-            expect(result.category() == FCValueCategory::Dangle,
-                   "evaluator - call without compiled record returns dangle");
+            expect(result.isError(),
+                   "evaluator - call without compiled record returns error");
         }
 
         // 6. 调用的函数其形参未登记进 CompiledFunction 符号表
@@ -289,8 +289,8 @@
             callArgs.push_back(std::make_unique<FCNumberExprAST>(1));
             auto call = std::make_unique<FCCallExprAST>("hollow", std::move(callArgs));
             auto result = evaluate(call.get(), ctx);
-            expect(result.category() == FCValueCategory::Dangle,
-                   "evaluator - unresolved parameter symbol returns dangle");
+            expect(result.isError(),
+                   "evaluator - unresolved parameter symbol returns error");
         }
 
         // 7. 嵌套定义：求值器不提供执行能力（与语言开关无关，后端一律拒绝）
@@ -314,14 +314,14 @@
             nestedCtx.functions.registerFunction(nestedOuter.get());
 
             // 顶层（无活动函数帧）仍走登记路径
-            expect(evaluate(nestedOuter.get(), nestedCtx).category() == FCValueCategory::Dangle,
+            expect(evaluate(nestedOuter.get(), nestedCtx).isVoid(),
                    "evaluator - top-level definition still registers");
 
-            // 进入函数体后遇到嵌套定义：明确拒绝，而不是静默沿用 Dangle 语义
+            // 进入函数体后遇到嵌套定义：明确拒绝
             std::vector<std::unique_ptr<FCExprAST>> nestedArgs;
             auto nestedCall =
                 std::make_unique<FCCallExprAST>("nestedOuter", std::move(nestedArgs));
-            expect(evaluate(nestedCall.get(), nestedCtx).category() == FCValueCategory::Dangle,
+            expect(evaluate(nestedCall.get(), nestedCtx).isError(),
                    "evaluator - nested definition rejected inside a frame");
         }
 
@@ -342,7 +342,7 @@
                 manualSymbol->runtime.frameIndex = -1;   // 全局帧 slot 0，即上面 var x:int = 1 的槽位
                 auto manualVar = std::make_unique<FCVariableExprAST>(std::string("manual"));
                 ctx.bindNode(manualVar.get(), manualSymbol);
-                // 求值手工节点：应读到全局帧 slot 0 的值 1（当前实现返回 Dangle）
+                // 求值手工节点：应读到全局帧 slot 0 的值 1
                 FCValue v = evaluate(manualVar.get(), ctx);
                 expect(v.category() == FCValueCategory::Integer && *v.asInteger() == 1,
                        "evaluator - local binding visible when semantic binding nonempty");
@@ -376,7 +376,7 @@
             FCEvaluationContext ctx(program);
             ctx.functions.registerFunction(fakeAst.get());
             // 零实参调用：compiledProgram 原型（零参数）应执行成功返回 7；
-            // 旧实现按 registry 单参数原型报参数个数不匹配，返回 Dangle
+            // 旧实现按 registry 单参数原型报参数个数不匹配，返回 Error
             std::vector<std::unique_ptr<FCExprAST>> args;
             auto call = std::make_unique<FCCallExprAST>("conflict", std::move(args));
             FCValue v = evaluate(call.get(), ctx);
@@ -405,18 +405,17 @@
             {"1 = 2", "assignment to non-variable"},
             {"var x:int = 1; x = undefinedfn(); x", "assignment rhs error"},
             {"def f(a:int) { a } f(undefinedfn())", "call argument error"},
-            {"def f() { 1 }", "standalone function definition"},
             {"1.0 < 2.0", "float comparison"},
             // ---- 新增 ----
             {"1 + 2.0", "int plus double mismatch"},
             {"2.0 + 1", "double plus int mismatch"},
             {"\"a\" + 1", "string plus int"},
-            {"if undefinedfn() then 1 else 2", "dangle if condition"},
+            {"if undefinedfn() then 1 else 2", "error if condition"},
             {"def f() { 1.0 + 2 } f()", "mixed arithmetic inside function"},
             {"def f() { \"a\" * 2 } f()", "string multiplication"},
-            {"undefinedfn() + 1", "dangle lhs binary"},
-            {"def f(n:int) { for i = 0, i < n, undefinedfn() in i } f(3)", "dangle for step"},
-            {"def f() { if 1 then undefinedfn() else 2 } f()", "dangle then branch"},
+            {"undefinedfn() + 1", "error lhs binary"},
+            {"def f(n:int) { for i = 0, i < n, undefinedfn() in i } f(3)", "error for step"},
+            {"def f() { if 1 then undefinedfn() else 2 } f()", "error then branch"},
             {"def f() { var x:int = 1; x = x + \"s\"; x } f()", "mixed assignment rhs"},
             {"var g:int = 1; g + \"s\"", "global plus string"}
         };
@@ -426,46 +425,46 @@
             FCScanner scanner;
             auto ast = scanner.analysis(code);
             FCEvaluationContext ctx = makeEvalContext(scanner);
-            bool isDangle = true;
+            bool isError = true;
             if (ast)
             {
                 try
                 {
                     FCValue result = evaluate(ast.get(), ctx);
-                    isDangle = (result.category() == FCValueCategory::Dangle);
+                    isError = result.isError();
                 }
                 catch (...)
                 {
-                    isDangle = true;
+                    isError = true;
                 }
             }
-            expect(isDangle, "evaluator-error - " + name);
+            expect(isError, "evaluator-error - " + name);
         }
 
         // 直接驱动公共 API，覆盖 dispatch 的空指针 / 未知节点 / 帧查找错误分支
         {
             FCEvaluationContext ctx({});
-            expect(evaluate(static_cast<FCExprAST*>(nullptr), ctx).category() == FCValueCategory::Dangle,
+            expect(evaluate(static_cast<FCExprAST*>(nullptr), ctx).isError(),
                    "evaluator-error - evaluate null");
 
             const FCExprAST* constNull = nullptr;
-            expect(evaluate(constNull, ctx).category() == FCValueCategory::Dangle,
+            expect(evaluate(constNull, ctx).isError(),
                    "evaluator-error - const evaluate null");
 
             std::vector<VarDeclPtr> protoArgs;
             auto proto = std::make_unique<FCPrototypeAST>("p", std::move(protoArgs));
-            expect(evaluate(proto.get(), ctx).category() == FCValueCategory::Dangle,
+            expect(evaluate(proto.get(), ctx).isError(),
                    "evaluator-error - evaluate prototype node");
 
-            // 空序列 / 空块
+            // 空序列 / 空块 → Void
             std::vector<std::unique_ptr<FCExprAST>> emptyItems;
             auto emptySeq = std::make_unique<FCSeqExprAST>(std::move(emptyItems));
-            expect(evaluate(emptySeq.get(), ctx).category() == FCValueCategory::Dangle,
+            expect(evaluate(emptySeq.get(), ctx).isVoid(),
                    "evaluator-error - empty sequence");
 
             std::vector<std::unique_ptr<FCExprAST>> emptyBlk;
             auto emptyBlock = std::make_unique<FCBlockExprAST>(std::move(emptyBlk));
-            expect(evaluate(emptyBlock.get(), ctx).category() == FCValueCategory::Dangle,
+            expect(evaluate(emptyBlock.get(), ctx).isVoid(),
                    "evaluator-error - empty block");
 
             // for 的 decl 为空
@@ -473,7 +472,7 @@
                 nullptr, std::make_unique<FCNumberExprAST>(0),
                 std::make_unique<FCNumberExprAST>(10), nullptr,
                 std::make_unique<FCNumberExprAST>(1));
-            expect(evaluate(nullFor.get(), ctx).category() == FCValueCategory::Dangle,
+            expect(evaluate(nullFor.get(), ctx).isError(),
                    "evaluator-error - for with null decl");
 
             // 局部变量但无调用帧
@@ -483,7 +482,7 @@
             ctx.compiledProgram.globalSymbols.push_back(std::make_shared<VariableSymbol>(localSym));
             auto localVar = std::make_unique<FCVariableExprAST>(std::string("v"));
             ctx.bindNode(localVar.get(), std::make_shared<VariableSymbol>(localSym));
-            expect(evaluate(localVar.get(), ctx).category() == FCValueCategory::Dangle,
+            expect(evaluate(localVar.get(), ctx).isError(),
                    "evaluator-error - local variable without frame");
 
             // 全局变量但槽位非法
@@ -493,7 +492,7 @@
             ctx.compiledProgram.globalSymbols.push_back(std::make_shared<VariableSymbol>(negSym));
             auto negVar = std::make_unique<FCVariableExprAST>(std::string("g"));
             ctx.bindNode(negVar.get(), std::make_shared<VariableSymbol>(negSym));
-            expect(evaluate(negVar.get(), ctx).category() == FCValueCategory::Dangle,
+            expect(evaluate(negVar.get(), ctx).isError(),
                    "evaluator-error - global variable with negative slot");
 
             // 局部变量槽位超出帧大小
@@ -504,7 +503,7 @@
             auto oobVar = std::make_unique<FCVariableExprAST>(std::string("o"));
             ctx.bindNode(oobVar.get(), std::make_shared<VariableSymbol>(oobSym));
             ctx.pushFrame("oob");
-            expect(evaluate(oobVar.get(), ctx).category() == FCValueCategory::Dangle,
+            expect(evaluate(oobVar.get(), ctx).isError(),
                    "evaluator-error - local variable slot out of range");
             ctx.popFrame();
 
@@ -555,12 +554,12 @@
     }
     // ==================== Evaluator Value Semantics Tests ====================
     // 钉住 FCValue 变体迁移（92aef02）后的值语义行为，防止未来重构静默回退：
-    // - 终止条件非数值 / 循环变量被赋成字符串 → Dangle + 结构化诊断
+    // - 终止条件非数值 / 循环变量被赋成字符串 → Error + 结构化诊断
     //   （旧实现读 union 位模式做整数运算）
     // - 字符串跨帧传递与赋值独立 → variant 按值深拷贝（旧实现为共享堆指针）
     void ComprehensiveTestSuite::runEvaluatorValueSemanticsTests()
     {
-        // 测试 A：for 终止条件求值结果非数值 → Dangle + 诊断。
+        // 测试 A：for 终止条件求值结果非数值 → Error + 诊断。
         // 注意：顶层 for 的循环变量落在全局帧（frameIndex == -1），
         // evaluateFor 在帧守卫处提前返回，终止条件不求值；
         // 须置于函数内才能命中被钉住的分支。
@@ -569,7 +568,7 @@
             auto ast = scanner.analysis("def f() { for i = 0, \"a\", 1 in i } f()");
             FCEvaluationContext ctx = makeEvalContext(scanner);
             FCValue v = ast ? evaluate(ast.get(), ctx) : FCValue{};
-            expect(v.category() == FCValueCategory::Dangle,
+            expect(v.isError(),
                    "value-semantics - for end condition must be numeric");
             bool hasDiagnostic = false;
             for (const auto& d : ctx.diagnostics.items())
@@ -579,13 +578,13 @@
                    "value-semantics - for end condition must be numeric - diagnostic");
         }
 
-        // 测试 B：循环体把循环变量赋成字符串 → Dangle + 诊断，不做位模式加法。
+        // 测试 B：循环体把循环变量赋成字符串 → Error + 诊断，不做位模式加法。
         {
             FCScanner scanner;
             auto ast = scanner.analysis("def f() { for i = 0, i < 3, 1 in i = \"s\" } f()");
             FCEvaluationContext ctx = makeEvalContext(scanner);
             FCValue v = ast ? evaluate(ast.get(), ctx) : FCValue{};
-            expect(v.category() == FCValueCategory::Dangle,
+            expect(v.isError(),
                    "value-semantics - loop variable must stay integer");
             bool hasDiagnostic = false;
             for (const auto& d : ctx.diagnostics.items())
@@ -615,6 +614,98 @@
             expect(v.category() == FCValueCategory::String && v.asString() != nullptr &&
                        *v.asString() == "x",
                    "value-semantics - assignment copies strings");
+        }
+    }
+    // ==================== Evaluator Void Tests ====================
+    // 钉住 Dangle→Void/Error 拆分后的传播规则（2026-10-24 计划）：
+    // - Void 流经：序列/块继续、可存入槽位、循环体全 Void 返回 Void
+    // - Error 穿透：for 终止条件错误不再被 union 误读吞成常量
+    void ComprehensiveTestSuite::runEvaluatorVoidTests()
+    {
+        std::cout << "\n" << std::string(60, '=') << "\n";
+        std::cout << "EVALUATOR VOID TESTS\n";
+        std::cout << std::string(60, '=') << "\n";
+
+        // 1. 空块 → Void
+        {
+            FCEvaluationContext ctx({});
+            std::vector<std::unique_ptr<FCExprAST>> emptyBlk;
+            auto emptyBlock = std::make_unique<FCBlockExprAST>(std::move(emptyBlk));
+            expect(evaluate(emptyBlock.get(), ctx).isVoid(),
+                   "void - empty block yields Void");
+        }
+
+        // 2. 空序列 → Void
+        {
+            FCEvaluationContext ctx({});
+            std::vector<std::unique_ptr<FCExprAST>> emptyItems;
+            auto emptySeq = std::make_unique<FCSeqExprAST>(std::move(emptyItems));
+            expect(evaluate(emptySeq.get(), ctx).isVoid(),
+                   "void - empty sequence yields Void");
+        }
+
+        // 3. 仅含 def 的程序 → Void（原 errorCases 条目迁移）
+        {
+            FCScanner scanner;
+            auto ast = scanner.analysis("def f() { 1 }");
+            FCEvaluationContext ctx = makeEvalContext(scanner);
+            expect(ast && evaluate(ast.get(), ctx).isVoid(),
+                   "void - definitions-only program yields Void");
+        }
+
+        // 4. 序列遇 Void 继续：(1; v(); 2) → 2（行为变化点：旧实现 Dangle 中止）
+        //    计划原文 "(1; { }; 2)" 不合当前语法（parser 禁止 ';' 紧跟块终结符），
+        //    以返回空块（Void）的函数调用作序列中项，钉住同一传播行为。
+        {
+            FCScanner scanner;
+            auto ast = scanner.analysis("def v() { } (1; v(); 2)");
+            FCEvaluationContext ctx = makeEvalContext(scanner);
+            FCValue v = ast ? evaluate(ast.get(), ctx) : FCValue{};
+            expect(v.category() == FCValueCategory::Integer &&
+                       v.asInteger() != nullptr && *v.asInteger() == 2,
+                   "void - sequence continues past empty block");
+        }
+
+        // 5. for 体为空块：循环走完，结果 Void
+        {
+            FCScanner scanner;
+            auto ast = scanner.analysis("def f() { for i = 0, i < 2 in { } } f()");
+            FCEvaluationContext ctx = makeEvalContext(scanner);
+            FCValue v = ast ? evaluate(ast.get(), ctx) : FCValue{};
+            expect(v.isVoid(),
+                   "void - for with empty-block body yields Void");
+        }
+
+        // 6. for 终止条件为错误 → Error 传播（行为变化点：旧实现 union 误读返回 0）
+        {
+            FCScanner scanner;
+            auto ast = scanner.analysis("def f() { for i = 0, undefinedfn(), 1 in i } f()");
+            FCEvaluationContext ctx = makeEvalContext(scanner);
+            FCValue v = ast ? evaluate(ast.get(), ctx) : FCValue{};
+            expect(v.isError(),
+                   "error - for end condition error propagates");
+        }
+
+        // 7. if 条件为 Void → Error（条件必须数值）
+        {
+            FCScanner scanner;
+            auto ast = scanner.analysis("if { } then 1 else 2");
+            FCEvaluationContext ctx = makeEvalContext(scanner);
+            FCValue v = ast ? evaluate(ast.get(), ctx) : FCValue{};
+            expect(v.isError(),
+                   "error - void if condition is an error");
+        }
+
+        // 8. Void 存入槽位继续：var x:int = { } x → Void（行为变化点：旧实现中止）
+        //    计划原文 "var x:int = { }; x" 不合当前语法（';' 禁止紧跟块终结符），
+        //    块后直接跟表达式同语义：声明 init 为空块 → Void 存入 x，x 读出 Void。
+        {
+            FCScanner scanner;
+            auto ast = scanner.analysis("def f() { var x:int = { } x } f()");
+            FCEvaluationContext ctx = makeEvalContext(scanner);
+            FCValue v = ast ? evaluate(ast.get(), ctx) : FCValue{};
+            expect(v.isVoid(),
+                   "void - void initializer stores and flows");
         }
     }
     // 求值阶段的诊断输出：只在 FC_TRACE 含 evaluator 时打印调用与返回
@@ -649,9 +740,9 @@
                    *text.asString() == "xy",
                "evaluator-trace - string result");
 
-        auto dangling = evaluateOf("def bad() { missing() } bad()");
-        expect(dangling.category() == FCValueCategory::Dangle,
-               "evaluator-trace - dangle result");
+        auto failed = evaluateOf("def bad() { missing() } bad()");
+        expect(failed.isError(),
+               "evaluator-trace - error result");
 
         FC::setTraceStagesForTesting("");
     }
@@ -693,7 +784,7 @@
             {
                 FCValue result = evaluate(ast.get(), ctx);
                 std::string actual = valueToString(result);
-                expect(result.category() != FCValueCategory::Dangle && actual == expected,
+                expect(result.isValue() && actual == expected,
                        "stress - " + name);
             }
             catch (...)
@@ -906,8 +997,8 @@
             args.push_back(std::make_unique<FCNumberExprAST>(1));
             auto call = std::make_unique<FCCallExprAST>("frameguard", std::move(args));
             FCValue v = evaluate(call.get(), ctx);
-            expect(v.category() == FCValueCategory::Dangle,
-                   "evaluator - frameguard error path returns dangle");
+            expect(v.isError(),
+                   "evaluator - frameguard error path returns error");
             // 后续求值若帧栈泄漏，frame.locals size 不匹配；断言栈深恢复
             expect(ctx.callStack.size() == 1,
                    "evaluator - frameguard frame depth restored after error path");

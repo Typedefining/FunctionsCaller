@@ -26,8 +26,11 @@ void printValue(const FCValue &value) {
   case FCValueCategory::String:
     std::printf("[result] \"%s\"\n", value.asString()->c_str());
     break;
-  case FCValueCategory::Dangle:
-    std::printf("[result] Dangle\n");
+  case FCValueCategory::Void:
+    std::printf("[result] Void\n");
+    break;
+  case FCValueCategory::Error:
+    std::printf("[result] Error\n");
     break;
   }
 }
