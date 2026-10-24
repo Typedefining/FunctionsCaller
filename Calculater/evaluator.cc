@@ -1,4 +1,5 @@
 #include "evaluator.h"
+#include "runtime.h"
 #include "trace.h"
 
 #include <algorithm>

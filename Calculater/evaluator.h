@@ -1,9 +1,10 @@
 #pragma once
 
 #include "diagnostic.h"
-#include "token.h"
+#include "runtime.h"
+#include "ast.h"
+#include "symbol.h"
 #include "semantic.h"
-// runtime.h（FCValue/Frame）经 token.h 传递，无需重复包含
 
 namespace FCExprClass {
 class FCFunctionRegistry {

@@ -1,6 +1,6 @@
 #include "semantic_dump.h"
 
-#include "token.h"
+#include "symbol.h"
 
 #include <algorithm>
 #include <memory>

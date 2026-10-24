@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "diagnostic.h"
+#include "symbol.h"
 
 namespace FCExprClass
 {
@@ -28,12 +29,11 @@ namespace FCExprClass
 
 namespace FCMarks {
 
-struct VarDecl;
 struct VariableSymbol;
 struct CompiledFunction;
 struct CompiledProgram;
 struct SymbolTable;
-using VarDeclPtr = std::shared_ptr<VarDecl>;
+using VarDeclPtr = FCExprClass::VarDeclPtr;
 
 struct Scope {
     std::unordered_map<std::string, std::shared_ptr<VariableSymbol>> variables;

@@ -2,7 +2,8 @@
 
 #include <map>
 
-#include "token.h"
+#include "ast.h"
+#include "symbol.h"
 
 // 头文件只包含自身直接使用的 LLVM 组件；
 // BasicBlock/Constants/DerivedTypes/Verifier 由 codegen.cc 按需包含

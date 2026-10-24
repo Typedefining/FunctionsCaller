@@ -1,6 +1,6 @@
 #include "ast_dump.h"
 
-#include "token.h"
+#include "ast.h"
 
 #include <ostream>
 #include <sstream>

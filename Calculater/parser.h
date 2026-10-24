@@ -4,7 +4,7 @@
 #include <string>
 #include "diagnostic.h"
 #include "lexer.h"
-#include "token.h"
+#include "ast.h"
 
 namespace FC {
 

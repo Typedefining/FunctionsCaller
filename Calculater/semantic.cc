@@ -3,7 +3,7 @@
 
 #include "semantic.h"
 #include "language_options.h"
-#include "token.h"
+#include "symbol.h"
 
 namespace FCMarks {
 
@@ -253,36 +253,6 @@ void FCSemanticContext::dumpScopes() const {
     }
   }
 }
-
-bool SymbolTable::addSymbol(const std::string &name,
-                            std::shared_ptr<VariableSymbol> symbol) {
-  bool inserted = m_symbols.find(name) == m_symbols.end();
-  if (!inserted) {
-    // 不允许重定义同名符号
-    return false;
-  }
-  m_symbols.insert_or_assign(name, std::move(symbol));
-  return inserted;
-}
-
-std::shared_ptr<VariableSymbol>
-SymbolTable::lookupShared(const std::string &name) const {
-  auto it = m_symbols.find(name);
-  return it != m_symbols.end() ? it->second : nullptr;
-}
-
-bool SymbolTable::removeSymbol(const std::string &name) {
-  return m_symbols.erase(name) > 0;
-}
-
-const std::unordered_map<std::string, std::shared_ptr<VariableSymbol>> &
-SymbolTable::getAllSymbols() const {
-  return m_symbols;
-}
-
-void SymbolTable::clear() { m_symbols.clear(); }
-
-size_t SymbolTable::size() const { return m_symbols.size(); }
 
 bool FCSemanticContext::bindVariable(const void *astNode,
                                      std::shared_ptr<VariableSymbol> symbol) {

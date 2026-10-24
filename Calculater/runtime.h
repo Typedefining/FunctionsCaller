@@ -1,5 +1,7 @@
 #pragma once
 
+// 解释器运行时值表示。不依赖 token/ast/symbol（分层最底层）。
+
 #include <string>
 #include <vector>
 
@@ -24,10 +26,6 @@ namespace FCMarks
 		double doubleVal;
 		FCStringValue* charVal;
 		void* danglingVal;
-	};
-
-	struct VariableRuntimeInfo {
-		int frameIndex = -1;
 	};
 
 	struct FCValue

@@ -6,7 +6,7 @@
 #include "lexer.h"
 #include "parser.h"
 #include "semantic.h"
-#include "token.h"
+#include "symbol.h"
 #include "diagnostic.h"
 
 /// 扫描器 Facade：组合三个独立阶段

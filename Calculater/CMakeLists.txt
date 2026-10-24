@@ -28,7 +28,9 @@ llvm_map_components_to_libnames(LLVM_LIBS
 
 add_library(FunctionsCore STATIC
 	token.h
-	token.cc
+	ast.h
+	ast.cc
+	symbol.h
 	lexer.h
 	lexer.cc
 	trace.h
