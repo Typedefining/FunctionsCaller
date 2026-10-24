@@ -19,8 +19,11 @@ FCValue makeVoidValue() {
   return FCValue{};
 }
 
-// Error：求值失败哨兵（Task 1 过渡态无诊断；Task 2 收口为带诊断重载）
-FCValue makeErrorValue() {
+// Error：求值失败哨兵；构造时同步写入结构化诊断（Error/诊断耦合不变式：
+// evaluate 返回 Error ⇒ context.diagnostics 非空）。
+// 传播路径（`return value;` 直接上抛已带诊断的 Error）不经此函数。
+FCValue makeErrorValue(FCEvaluationContext &context, std::string message) {
+  context.diagnostics.add("evaluator", {}, std::move(message));
   return FCValue{FCErrorValue{}};
 }
 
@@ -53,12 +56,12 @@ FCValue evaluateNumber(const FCNumberExprAST *node) {
 FCValue evaluateVariable(const FCVariableExprAST *node, FCEvaluationContext &context) {
   std::shared_ptr<VariableSymbol> symbol = context.boundSymbol(node);
   if (symbol == nullptr)
-    return makeErrorValue();
+    return makeErrorValue(context, "variable '" + node->name + "' is not bound to a symbol");
 
   Frame *frame = context.frameForSymbol(*symbol);
   if (frame == nullptr || symbol->slot < 0 ||
       symbol->slot >= static_cast<int>(frame->locals.size()))
-    return makeErrorValue();
+    return makeErrorValue(context, "variable '" + node->name + "' has no valid slot");
 
   return frame->locals[symbol->slot];
 }
@@ -73,7 +76,7 @@ FCValue evaluateIf(const FCIfExprAST *node, FCEvaluationContext &context) {
   else if (condition.isError())
     return condition;  // 错误传播；条件必须数值（Void/类别非法 → Error）
   else
-    return makeErrorValue();
+    return makeErrorValue(context, "if condition must be numeric");
   return evaluateExpression(truthy ? node->getThen() : node->getElse(),
                             context);
 }
@@ -81,10 +84,10 @@ FCValue evaluateIf(const FCIfExprAST *node, FCEvaluationContext &context) {
 FCValue evaluateFor(const FCForExprAST *node, FCEvaluationContext &context) {
   std::shared_ptr<VariableSymbol> forSymbol = context.boundSymbol(node);
   if (node->getDecl() == nullptr || forSymbol == nullptr || context.callStack.empty())
-    return makeErrorValue();
+    return makeErrorValue(context, "for loop variable is not resolved");
   // for 循环变量应为局部变量，不应落在全局帧（frameIndex == -1）上
   if (forSymbol->runtime.frameIndex == -1)
-    return makeErrorValue();
+    return makeErrorValue(context, "for loop variable must be local to a function");
   const auto start = evaluateExpression(node->getStart(), context);
   FCValue step = node->getStep() == nullptr
                      ? FCValue{1}
@@ -92,13 +95,13 @@ FCValue evaluateFor(const FCForExprAST *node, FCEvaluationContext &context) {
 
   if (start.category() != FCValueCategory::Integer ||
       step.category() != FCValueCategory::Integer)
-    return makeErrorValue();
+    return makeErrorValue(context, "for start and step must be integers");
   const int stepValue = *step.asInteger();
 
   const int slot = forSymbol->slot;
   size_t frameIdx = context.callStack.size() - 1;
   if (slot < 0 || slot >= static_cast<int>(context.callStack[frameIdx].locals.size()))
-    return makeErrorValue();
+    return makeErrorValue(context, "for loop variable slot is out of range");
 
   context.callStack[frameIdx].locals[slot] = start;
 
@@ -114,9 +117,7 @@ FCValue evaluateFor(const FCForExprAST *node, FCEvaluationContext &context) {
       return end;  // 错误穿透循环（终止条件必须数值）
     else {
       // 终止条件必须数值（与 if 条件同一规则）；旧实现读 union 位模式
-      context.diagnostics.add("evaluator", {},
-                              "for end condition must be numeric");
-      return makeErrorValue();
+      return makeErrorValue(context, "for end condition must be numeric");
     }
     if (!truthy)
       break;
@@ -127,9 +128,7 @@ FCValue evaluateFor(const FCForExprAST *node, FCEvaluationContext &context) {
     const int *current = counter.asInteger();
     if (current == nullptr) {
       // 循环体可能把循环变量赋成非 int；旧实现此处做指针位模式整数加法
-      context.diagnostics.add("evaluator", {},
-                              "for loop variable must stay integer");
-      return makeErrorValue();
+      return makeErrorValue(context, "for loop variable must stay integer");
     }
     counter = FCValue{*current + stepValue};
   }
@@ -164,7 +163,7 @@ FCValue evaluateDeclaration(const FCVarDeclExprAST *node,
                             FCEvaluationContext &context) {
   std::shared_ptr<VariableSymbol> symbol = context.boundSymbol(node);
   if (symbol == nullptr || node->decl == nullptr || node->initExpr == nullptr)
-    return makeErrorValue();
+    return makeErrorValue(context, "declaration is not resolved to a symbol");
 
   const auto value = evaluateExpression(node->initExpr.get(), context);
   if (value.isError())
@@ -172,7 +171,7 @@ FCValue evaluateDeclaration(const FCVarDeclExprAST *node,
   Frame *frame = context.frameForSymbol(*symbol);
   if (frame == nullptr || symbol->slot < 0 ||
       symbol->slot >= static_cast<int>(frame->locals.size()))
-    return makeErrorValue();
+    return makeErrorValue(context, "declaration slot is out of range");
   frame->locals[symbol->slot] = value;
   return value;
 }
@@ -199,9 +198,8 @@ FCValue evaluateBinary(const FCBinaryExprAST *expression,
     auto *variable =
         dynamic_cast<const FCVariableExprAST *>(expression->getLHS());
     if (variable == nullptr || variable->name.empty()) {
-      context.diagnostics.add("evaluator", {},
-                               "LHS of assignment must be a variable");
-      return makeErrorValue();
+      return makeErrorValue(context,
+                            "LHS of assignment must be a variable");
     }
 
     const auto value = evaluateExpression(expression->getRHS(), context);
@@ -210,17 +208,14 @@ FCValue evaluateBinary(const FCBinaryExprAST *expression,
 
     std::shared_ptr<VariableSymbol> lhsSymbol = context.boundSymbol(variable);
     if (lhsSymbol == nullptr) {
-      context.diagnostics.add("evaluator", {},
-                               "LHS of assignment is not bound to a symbol");
-      return makeErrorValue();
+      return makeErrorValue(context,
+                            "LHS of assignment is not bound to a symbol");
     }
 
     Frame *frame = context.frameForSymbol(*lhsSymbol);
     if (frame == nullptr || lhsSymbol->slot < 0 ||
         lhsSymbol->slot >= static_cast<int>(frame->locals.size())) {
-      context.diagnostics.add("evaluator", {},
-                               "Invalid slot for " + variable->name);
-      return makeErrorValue();
+      return makeErrorValue(context, "Invalid slot for " + variable->name);
     }
 
     frame->locals[lhsSymbol->slot] = value;
@@ -243,8 +238,7 @@ FCValue evaluateBinary(const FCBinaryExprAST *expression,
     case FCBinaryOp::Less:
       return FCValue{*lhs.asInteger() < *rhs.asInteger()};
     default:
-      context.diagnostics.add("evaluator", {}, "unknown binary operator");
-      return makeErrorValue();
+      return makeErrorValue(context, "unknown binary operator");
     }
   }
 
@@ -260,8 +254,7 @@ FCValue evaluateBinary(const FCBinaryExprAST *expression,
     case FCBinaryOp::Div:
       return FCValue{*lhs.asFloating() / *rhs.asFloating()};
     default:
-      context.diagnostics.add("evaluator", {}, "unknown binary operator");
-      return makeErrorValue();
+      return makeErrorValue(context, "unknown binary operator");
     }
   }
 
@@ -269,7 +262,8 @@ FCValue evaluateBinary(const FCBinaryExprAST *expression,
       rhs.category() == FCValueCategory::String && op == FCBinaryOp::Add)
     return FCValue{*lhs.asString() + *rhs.asString()};
 
-  return makeErrorValue();
+  return makeErrorValue(
+      context, "binary operator requires numeric or string operands");
 }
 
 FCValue evaluateCall(const FCCallExprAST *expression,
@@ -282,16 +276,14 @@ FCValue evaluateCall(const FCCallExprAST *expression,
                                 : context.functions.findFunction(
                                       expression->getName());
   if (function == nullptr) {
-    context.diagnostics.add("evaluator", {},
-                            "Function not found: " + expression->getName());
-    return makeErrorValue();
+    return makeErrorValue(context,
+                          "Function not found: " + expression->getName());
   }
 
   const auto &prototype = function->getProto();
   if (expression->getArgs().size() != prototype->getArgs().size()) {
-    context.diagnostics.add("evaluator", {},
-                            "Argument count mismatch in " + expression->getName());
-    return makeErrorValue();
+    return makeErrorValue(context,
+                          "Argument count mismatch in " + expression->getName());
   }
 
   std::vector<FCValue> argumentValues;
@@ -310,25 +302,22 @@ FCValue evaluateCall(const FCCallExprAST *expression,
   // 调用前先确认语义期记录存在（帧布局与参数符号都来自它）。
   // 无记录时 pushFrame 已按实参数量分配帧（手工构造 AST 模式的防御行为）
   if (record == nullptr) {
-    context.diagnostics.add(
-        "evaluator", {},
-        "Error: no compiled record for '" + expression->getName() + "'");
-    return makeErrorValue();
+    return makeErrorValue(
+        context, "Error: no compiled record for '" + expression->getName() + "'");
   }
 
   for (size_t i = 0; i < argumentValues.size(); ++i) {
     const auto &parameter = prototype->getArgs()[i];
     if (parameter == nullptr) {
-      return makeErrorValue();
+      return makeErrorValue(context, "parameter declaration is missing");
     }
 
     auto symbol = record->symbols.lookupShared(parameter->name);
     if (symbol == nullptr || symbol->slot < 0 ||
         symbol->slot >= static_cast<int>(frame.locals.size())) {
-      context.diagnostics.add(
-          "evaluator", {},
+      return makeErrorValue(
+          context,
           "Error: unresolved parameter '" + expression->getName() + "'");
-      return makeErrorValue();
     }
     frame.locals[symbol->slot] = argumentValues[i];
   }
@@ -374,23 +363,23 @@ struct EvaluatorVisitor {
   FCValue visit(const FCFunctionAST& n) {
     // callStack 栈底恒为 <global> 帧，故“多于一帧”才说明正处于函数调用中
     if (c.callStack.size() > 1) {
-      c.diagnostics.add(
-          "evaluator", {},
-          "Error: nested function definition '" + n.getProtoName()
-              + "' is not supported by the evaluator");
-      return makeErrorValue();
+      return makeErrorValue(
+          c, "Error: nested function definition '" + n.getProtoName()
+                 + "' is not supported by the evaluator");
     }
     c.functions.registerFunction(const_cast<FCFunctionAST*>(&n));
     return makeVoidValue();  // 定义语句无值
   }
   // FCPrototypeAST 不作为顶层语句出现；不可达防御分支，按“未知节点”归类为 Error。
-  FCValue visit(const FCPrototypeAST& n) { return makeErrorValue(); }
+  FCValue visit(const FCPrototypeAST& n) {
+    return makeErrorValue(c, "unknown AST node kind");
+  }
 };
 
 FCValue evaluateExpression(const FCExprAST *expression,
                            FCEvaluationContext &context) {
   if (!expression)
-    return makeErrorValue();
+    return makeErrorValue(context, "cannot evaluate a null expression");
 
   EvaluatorVisitor v{ context };
   return FCExprClass::dispatchAST(*expression, v);

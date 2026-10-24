@@ -125,6 +125,7 @@ private:
     void runEvaluatorErrorTests();
     void runEvaluatorValueSemanticsTests();
     void runEvaluatorVoidTests();
+    void runErrorDiagnosticsInvariantTests();
     void runEvaluatorTraceTests();
     void runStressTests();
     void runRegistryTests();

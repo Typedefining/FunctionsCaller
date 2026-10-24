@@ -95,6 +95,9 @@ void ComprehensiveTestSuite::runAllTests()
     // ============ Evaluator Void Tests (Dangle→Void/Error 拆分钉住) ============
     runEvaluatorVoidTests();
 
+    // ============ Error Diagnostics Invariant Tests (Error/诊断耦合不变式) ============
+    runErrorDiagnosticsInvariantTests();
+
     // ============ Stress Tests ============
     runStressTests();
 }
