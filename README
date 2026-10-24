@@ -430,6 +430,14 @@ add(10, 3)
 
 解释执行和 LLVM IR 生成都以函数的最后一个表达式（块的最后一条语句）作为返回值。
 
+解释器的运行时值有五个类别：`Integer` / `Floating` / `String` 是携带值的类别；
+`Void` 表示无值（空块、仅含函数定义的程序、`def` 定义语句、`FCValue` 默认构造）；
+`Error` 表示求值失败（如函数未找到、槽位越界），每个 `Error` 都伴随一条结构化诊断
+（打印为 `error[evaluator]: <message>`）。入口程序把求值结果打印为
+`[result] 5` / `[result] "..."` / `[result] Void` / `[result] Error`。
+传播规则：`Void` 流经序列与块（求值继续推进，序列/块的值取最后一个表达式的值，
+最后一个表达式是 `Void` 时整体即为 `Void`）；`Error` 立即中止所在序列/块并向上传播。
+
 ## 单元测试和覆盖率
 
 构建并运行全部测试：
@@ -469,7 +477,7 @@ auto ast = scanner.analysis("def add(a:int, b:int) { a + b } add(2, 3)");
 ```cpp
 FCExprClass::FCEvaluationContext context(scanner.semanticContext().getCompiledProgram());
 auto result = FCExprClass::evaluate(ast.get(), context);
-// result.type 为 FCValueCategory::Integer / Floating / String / Dangle
+// result.type 为 FCValueCategory::Integer / Floating / String / Void / Error
 ```
 
 生成 LLVM IR：

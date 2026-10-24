@@ -25,7 +25,7 @@ static void run(const char* src) {
   FCValue v = evaluate(ast.get(), ctx);
   if (const int* i = v.asInteger()) std::printf("result = %d\n", *i);
   else if (const double* d = v.asFloating()) std::printf("result = %f\n", *d);
-  else std::printf("result = <dangle/other>\n");
+  else std::printf("result = <void/error/other>\n");
 }
 
 int main() {

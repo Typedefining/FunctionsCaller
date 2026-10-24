@@ -2,7 +2,7 @@
 
 前三段把源码变成了 `CompiledProgram`（AST + 符号表 + 每个函数的帧大小）。
 这一段让 AST 真正跑起来：输入是 AST 与 `CompiledProgram`，输出是一个 `FCValue`
-（整数、浮点数、字符串或 `Dangle`）。
+（整数、浮点数、字符串，或 `Void`（无值）/ `Error`（求值失败，伴随结构化诊断））。
 
 求值器不查名字表。它需要的三样东西——变量在哪一帧、在第几个槽位、
 函数帧要分配多大——全部来自语义期写进符号和 `CompiledFunction` 的字段。
@@ -86,12 +86,13 @@ stdout 不变，stderr 多两行：
 ```
 
 ```
-[result] Dangle
-Function not found: missing
-[evaluator] return bad = Dangle
+[result] Error
+[evaluator] call bad() depth=2
+[evaluator] return bad = Error
+error[evaluator]: Function not found: missing
 ```
 
-（第一行来自 stdout，后两行来自 stderr。）
+（第一行来自 stdout，后三行来自 stderr。）
 
 注意实验做完后清空变量，否则后续章节的 stderr 会混进不需要的行：
 
@@ -120,8 +121,10 @@ $env:FC_TRACE = ""
 同一个 `depth` 上出现多次 `call`（例如 `depth=5` 的 `fib(1)` 与 `fib(0)`），
 说明它们是同一个调用帧先后求出的两个实参，不是两次嵌套。
 
-`return` 行的值允许是 `Dangle`：函数体出错时求值器不抛异常，而是把 `Dangle`
-沿调用链返回，`call` 行已经打印过的调用照样有一条 `return` 记录。
+`return` 行的值允许是 `Error` 或 `Void`：函数体出错时求值器不抛异常，而是把 `Error`
+（伴随一条结构化诊断，如上面的 `error[evaluator]: Function not found: missing`）
+沿调用链返回，`call` 行已经打印过的调用照样有一条 `return` 记录；函数体没有产生
+值时（如空块、只含 `def` 定义语句）则返回 `Void`。
 
 ## 第 3 步：按调用顺序读代码（一条路径，不要跳读）
 
@@ -140,7 +143,8 @@ $env:FC_TRACE = ""
    定义），则走 `391-402` 的分支。
 4. `Calculater/evaluator.cc:277-352`：调用表达式走 `evaluateCall()`，顺序是
    - 先取函数 AST（`258-263`），取不到就报 `Function not found`；
-   - 逐个求实参（`272-279`），任一实参是 `Dangle` 就整次调用短路；
+   - 逐个求实参（`272-279`），任一实参是 `Error` 就整次调用短路（`Void` 实参
+     不短路，照常写进形参槽）；
    - `pushFrame()`（`302`）分配新帧；
    - 取该函数的编译记录（`302-312`），缺失就报错并弹帧；
    - 按形参名字查符号，把实参值写进符号的槽位（`314-329`）；
@@ -171,9 +175,15 @@ $env:FC_TRACE = ""
   `pushFrame()` 按它分配，槽位越界说明两侧不一致。
 - **按值传参**：实参先求值成 `FCValue`，再复制进形参槽位；函数体看不到调用方
   的表达式。
-- **Dangle**：求值失败的统一表示，本层有至少四条来源——函数未找到、编译记录
-  缺失、形参槽越界、变量未绑定或槽越界。
-- **块的值**：块按顺序求值，返回最后一条表达式的值；所以
+- **值类别与 `Error` 来源**：求值结果有五个类别——Integer/Floating/String 是携带
+  值的类别；`Void` 表示无值（空块、空序列、`def` 定义语句）；`Error` 表示求值失败，
+  本层有至少四条来源——函数未找到、编译记录缺失、形参槽越界、变量未绑定或槽越界。
+  每个 `Error` 都伴随一条结构化诊断（`context.diagnostics` 中 `error[evaluator]: ...`，
+  不变式：求值返回 `Error` ⇒ 诊断非空）。传播规则：`Error` 立即中止所在序列/块并向上
+  传播（调用实参、if 条件、for 终止条件处均短路）；`Void` 流经序列与块，求值继续推进；
+  if/for 的条件必须数值，`Void` 条件按 `Error` 处理。
+- **块的值**：块按顺序求值，返回最后一条表达式的值（最后一条是 `Void` 时整块
+  为 `Void`）；所以
   `def f() { var x:int = 1; { var x:int = 2; x } x } f()` 得到 `1`，
   内层块的值 `2` 没有被使用。
 
@@ -221,8 +231,8 @@ return FCValue{*lhs.asInteger() / *rhs.asInteger()};
 改成 `frame.locals.resize(0);`，再跑 `add(2, 3)`：
 
 ```
-Error: unresolved parameter 'add'
-[result] Dangle
+error[evaluator]: Error: unresolved parameter 'add'
+[result] Error
 ```
 
 形参有槽位，但帧里一个槽也没有，写参数时越界。这说明帧大小是语义期快照，
@@ -247,7 +257,7 @@ Error: unresolved parameter 'add'
 3. 如果把 `evaluateCall()` 末尾的 `popFrame()` 删掉，最先出问题的是什么？
 4. `add` 的 `a`、`b` 分别落在槽 0 和槽 1，这个分配是谁做的？
 5. 为什么 `for` 循环没有额外的帧，也没有 `call` 日志？
-6. 求值器返回 `Dangle` 的路径至少有几条？各是什么？
+6. 求值器返回 `Error` 的路径至少有几条？各是什么？
 
 <details>
 <summary>参考答案</summary>
@@ -256,13 +266,14 @@ Error: unresolved parameter 'add'
    第一层函数调用时栈里已有 1 个帧。
 2. 打印发生在实参求值、写入形参槽之后（`evaluator.cc:329-342`），此时只有值。
 3. 帧不弹，后续变量定位到错误的帧（`frameForSymbol()` 取 `back()`），
-   表现为错值或 `Dangle`，并且 `depth` 只会增大不会回落。
+   表现为错值或 `Error`，并且 `depth` 只会增大不会回落。
 4. 语义期 `declareVariable()` 分配槽位，参数槽位由 `registerFunction()` 写进
    `CompiledFunction::parametersIdx`；第 3 段的 `FC_TRACE=semantic` 输出里
    `params=[0, 1]` 就是这份结果。
 5. 循环不是函数调用，`evaluateFor()` 直接在当前帧读写循环变量与循环体
    （`evaluator.cc:87-135`），没有 `pushFrame()`。
-6. 四条：函数未找到、函数没有编译记录、形参槽位越界、变量未绑定或槽位越界。
+6. 至少四条：函数未找到、函数没有编译记录、形参槽位越界、变量未绑定或槽位越界；
+   每条路径都先写一条 `error[evaluator]` 诊断再返回 `Error` 值。
 
 </details>
 
