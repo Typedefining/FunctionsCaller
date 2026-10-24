@@ -159,6 +159,29 @@ public:
     bool analyzeNumber(const FCExprClass::FCNumberExprAST *node);
     bool analyzeString(const FCExprClass::FCStringExprAST *node);
 
+    // AST 分派访客：由 dispatchAST 驱动，12 个 visit 重载分别委托
+    // 对应的 analyze* 方法；嵌套类可访问外层私有成员。
+    struct DispatchVisitor {
+      SemanticAnalyzer& a;
+      explicit DispatchVisitor(SemanticAnalyzer& analyzer) : a(analyzer) {}
+
+      bool visit(const FCExprClass::FCProgramAST& n)   { return a.analyzeProgram(&n); }
+      bool visit(const FCExprClass::FCBlockExprAST& n) { return a.analyzeBlock(&n); }
+      bool visit(const FCExprClass::FCSeqExprAST& n)   { return a.analyzeSeq(&n); }
+      bool visit(const FCExprClass::FCVarDeclExprAST& n) { return a.analyzeVarDecl(&n); }
+      bool visit(const FCExprClass::FCVariableExprAST& n) { return a.analyzeVariable(&n); }
+      bool visit(const FCExprClass::FCForExprAST& n) { return a.analyzeFor(&n); }
+      bool visit(const FCExprClass::FCIfExprAST& n) { return a.analyzeIf(&n); }
+      bool visit(const FCExprClass::FCCallExprAST& n) { return a.analyzeCall(&n); }
+      bool visit(const FCExprClass::FCBinaryExprAST& n) { return a.analyzeBinary(&n); }
+      bool visit(const FCExprClass::FCFunctionAST& n) { return a.analyzeFunction(&n); }
+      bool visit(const FCExprClass::FCNumberExprAST& n) { return a.analyzeNumber(&n); }
+      bool visit(const FCExprClass::FCStringExprAST& n) { return a.analyzeString(&n); }
+      // FCPrototypeAST 不作为顶层语句出现（解析器把它包进 FCFunctionAST）；
+      // 手工构造的树遇到孤立原型时保持旧行为：视为已处理（no-op）。
+      bool visit(const FCExprClass::FCPrototypeAST& n) { return true; }
+    };
+
     std::shared_ptr<VariableSymbol> resolveVariable(const std::string &name);
   };
 

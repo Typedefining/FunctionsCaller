@@ -216,7 +216,7 @@ llvm::Function* createFunctionDeclaration(FCCodegenContext& context,
 	return function;
 }
 
-llvm::Function* declareFunction(FCFunctionAST* function,
+llvm::Function* declareFunction(const FCFunctionAST* function,
 	FCCodegenContext& context)
 {
 	if (function == nullptr)
@@ -462,7 +462,7 @@ llvm::Value* codegenPrototype(const FCPrototypeAST* expression,
 		context, expression->getProtoName(), expression->getArgs(), integerType(context));
 }
 
-llvm::Value* codegenFunction(FCFunctionAST* expression,
+llvm::Value* codegenFunction(const FCFunctionAST* expression,
 	FCCodegenContext& context)
 {
 	auto* function = declareFunction(expression, context);
@@ -928,66 +928,53 @@ llvm::Value* codegenBlock(const FCBlockExprAST* expression, FCCodegenContext& co
     return lastValue;
 }
 
-llvm::Value* FCExprClass::codegen(FCExprAST* expression,
-	FCCodegenContext& context)
-{
-	if (expression == nullptr)
-		return nullptr;
-	if (auto* number = dynamic_cast<FCNumberExprAST*>(expression))
-		return codegenNumber(number, context);
-	if (auto* string = dynamic_cast<FCStringExprAST*>(expression))
-		return codegenString(string, context);
-	if (auto* variable = dynamic_cast<FCVariableExprAST*>(expression))
-		return codegenVariable(variable, context);
-	if (auto* binary = dynamic_cast<FCBinaryExprAST*>(expression))
-		return codegenBinary(binary, context);
-	if (auto* call = dynamic_cast<FCCallExprAST*>(expression))
-		return codegenCall(call, context);
-	if (auto* prototype = dynamic_cast<FCPrototypeAST*>(expression))
-		return codegenPrototype(prototype, context);
-	if (auto* function = dynamic_cast<FCFunctionAST*>(expression))
-	{
-		// 函数体内再次遇到 def 即嵌套定义：codegen 不提供生成能力。
-		// 若照旧落到 codegenFunction，它会返回一个 llvm::Function* 值，
-		// 外层把它当表达式值使用，错误要到类型转换时才暴露
-		if (context.currentFunction != nullptr)
-			return logCodegenError(context,
-				"nested function definition is not supported by codegen");
-		return codegenFunction(function, context);
-	}
-	if (auto* conditional = dynamic_cast<FCIfExprAST*>(expression))
-		return codegenIf(conditional, context);
-	if (auto* loop = dynamic_cast<FCForExprAST*>(expression))
-		return codegenFor(loop, context);
-	if (auto* block = dynamic_cast<FCBlockExprAST*>(expression))
-	{
-		if (context.currentFunction == nullptr)
-			return codegenStandaloneTopLevel(block, context);
-		return codegenBlock(block, context);
-	}
-	if (auto* sequence = dynamic_cast<FCSeqExprAST*>(expression))
-	{
-		if (context.currentFunction == nullptr)
-			return codegenStandaloneTopLevel(sequence, context);
-		return codegenSequence(sequence, context);
-	}
-	if (auto* declaration = dynamic_cast<FCVarDeclExprAST*>(expression))
-	{
-		// 函数内的局部变量声明走 codegenDeclaration（按 frameIndex 分全局/局部）；
-		// 顶层（无当前函数）的全局声明走 codegenStandaloneTopLevel。
-		if (context.currentFunction != nullptr)
-			return codegenDeclaration(declaration, context);
-		return codegenStandaloneTopLevel(declaration, context);
-	}
-	if (auto* program = dynamic_cast<FCProgramAST*>(expression))
-		return codegenProgram(program, context);
-	return nullptr;
-}
+struct CodegenVisitor {
+  FCCodegenContext& c;
+  explicit CodegenVisitor(FCCodegenContext& ctx) : c(ctx) {}
+
+  llvm::Value* visit(const FCNumberExprAST& n)   { return codegenNumber(&n, c); }
+  llvm::Value* visit(const FCStringExprAST& n)   { return codegenString(&n, c); }
+  llvm::Value* visit(const FCVariableExprAST& n) { return codegenVariable(&n, c); }
+  llvm::Value* visit(const FCBinaryExprAST& n)   { return codegenBinary(&n, c); }
+  llvm::Value* visit(const FCCallExprAST& n)     { return codegenCall(&n, c); }
+  llvm::Value* visit(const FCFunctionAST& n) {
+    // 函数体内再次遇到 def 即嵌套定义：codegen 不提供生成能力。
+    if (c.currentFunction != nullptr)
+      return logCodegenError(c,
+          "nested function definition is not supported by codegen");
+    return codegenFunction(&n, c);
+  }
+  llvm::Value* visit(const FCIfExprAST& n)       { return codegenIf(&n, c); }
+  llvm::Value* visit(const FCForExprAST& n)      { return codegenFor(&n, c); }
+  llvm::Value* visit(const FCBlockExprAST& n) {
+    if (c.currentFunction == nullptr)
+      return codegenStandaloneTopLevel(&n, c);
+    return codegenBlock(&n, c);
+  }
+  llvm::Value* visit(const FCSeqExprAST& n) {
+    if (c.currentFunction == nullptr)
+      return codegenStandaloneTopLevel(&n, c);
+    return codegenSequence(&n, c);
+  }
+  llvm::Value* visit(const FCVarDeclExprAST& n) {
+    // 函数内的局部变量声明走 codegenDeclaration（按 frameIndex 分全局/局部）；
+    // 顶层（无当前函数）的全局声明走 codegenStandaloneTopLevel。
+    if (c.currentFunction != nullptr)
+      return codegenDeclaration(&n, c);
+    return codegenStandaloneTopLevel(&n, c);
+  }
+  llvm::Value* visit(const FCPrototypeAST& n)   { return codegenPrototype(&n, c); }
+  llvm::Value* visit(const FCProgramAST& n)     { return codegenProgram(&n, c); }
+};
 
 llvm::Value* FCExprClass::codegen(const FCExprAST* expression,
 	FCCodegenContext& context)
 {
-	return FCExprClass::codegen(const_cast<FCExprAST*>(expression), context);
+	if (expression == nullptr)
+		return nullptr;
+
+	CodegenVisitor v{ context };
+	return FCExprClass::dispatchAST(*expression, v);
 }
 
 llvm::Value* FCExprClass::codegenTopLevel(const FCExprAST* expression,

@@ -7,7 +7,9 @@
 //   symbol.h —— 符号表 / 编译记录 / 绑定侧表
 // 运行时值表示（FCValue/Frame）在 runtime.h，不依赖本文件。
 
+#include <cassert>
 #include <iostream>
+#include <stdexcept>
 #include <memory>
 #include <string>
 #include <utility>
@@ -242,4 +244,30 @@ public:
               << " expressions" << std::endl;
   }
 };
+
+/// 唯一节点分派点：Visitor 需提供 12 个 const 成员重载
+/// visit(const FCProgramAST&)、visit(const FCBlockExprAST&)、visit(const FCSeqExprAST&)、
+/// visit(const FCVarDeclExprAST&)、visit(const FCVariableExprAST&)、visit(const FCForExprAST&)、
+/// visit(const FCIfExprAST&)、visit(const FCCallExprAST&)、visit(const FCBinaryExprAST&)、
+/// visit(const FCFunctionAST&)、visit(const FCNumberExprAST&)、visit(const FCStringExprAST&)。
+/// 新增 AST 节点而访客缺重载 ⇒ 编译失败（穷尽性由重载决议保证）。
+/// FCPrototypeAST 不走此分派（独立顶层节点由消费方自行处理）。
+template <class Visitor>
+decltype(auto) dispatchAST(const FCExprAST& node, Visitor& v) {
+  if (auto* n = dynamic_cast<const FCProgramAST*>(&node)) return v.visit(*n);
+  if (auto* n = dynamic_cast<const FCBlockExprAST*>(&node)) return v.visit(*n);
+  if (auto* n = dynamic_cast<const FCSeqExprAST*>(&node)) return v.visit(*n);
+  if (auto* n = dynamic_cast<const FCPrototypeAST*>(&node)) return v.visit(*n);
+  if (auto* n = dynamic_cast<const FCVarDeclExprAST*>(&node)) return v.visit(*n);
+  if (auto* n = dynamic_cast<const FCVariableExprAST*>(&node)) return v.visit(*n);
+  if (auto* n = dynamic_cast<const FCForExprAST*>(&node)) return v.visit(*n);
+  if (auto* n = dynamic_cast<const FCIfExprAST*>(&node)) return v.visit(*n);
+  if (auto* n = dynamic_cast<const FCCallExprAST*>(&node)) return v.visit(*n);
+  if (auto* n = dynamic_cast<const FCBinaryExprAST*>(&node)) return v.visit(*n);
+  if (auto* n = dynamic_cast<const FCFunctionAST*>(&node)) return v.visit(*n);
+  if (auto* n = dynamic_cast<const FCNumberExprAST*>(&node)) return v.visit(*n);
+  if (auto* n = dynamic_cast<const FCStringExprAST*>(&node)) return v.visit(*n);
+  // 兜底：节点类型未登记进分派（新增节点类型时漏改本模板即命中此处）
+  throw std::runtime_error("dispatchAST: unhandled node type");
+}
 } // namespace FCExprClass

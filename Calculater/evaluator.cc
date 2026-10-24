@@ -362,57 +362,46 @@ FCValue evaluateCall(const FCCallExprAST *expression,
   return result;
 }
 
+FCValue evaluateExpression(const FCExprAST *expression, FCEvaluationContext &context);
+
+struct EvaluatorVisitor {
+  FCEvaluationContext& c;
+  explicit EvaluatorVisitor(FCEvaluationContext& ctx) : c(ctx) {}
+
+  FCValue visit(const FCNumberExprAST& n)   { return evaluateNumber(&n); }
+  FCValue visit(const FCStringExprAST& n)   { return makeStringValue(n.m_stringVal); }
+  FCValue visit(const FCVariableExprAST& n) { return evaluateVariable(&n, c); }
+  FCValue visit(const FCBinaryExprAST& n)   { return evaluateBinary(&n, c); }
+  FCValue visit(const FCCallExprAST& n)     { return evaluateCall(&n, c); }
+  FCValue visit(const FCIfExprAST& n)       { return evaluateIf(&n, c); }
+  FCValue visit(const FCForExprAST& n)      { return evaluateFor(&n, c); }
+  FCValue visit(const FCBlockExprAST& n)    { return evaluateBlock(&n, c); }
+  FCValue visit(const FCSeqExprAST& n)      { return evaluateSequence(&n, c); }
+  FCValue visit(const FCVarDeclExprAST& n)  { return evaluateDeclaration(&n, c); }
+  FCValue visit(const FCProgramAST& n)      { return evaluateProgram(&n, c); }
+  FCValue visit(const FCFunctionAST& n) {
+    // callStack 栈底恒为 <global> 帧，故“多于一帧”才说明正处于函数调用中
+    if (c.callStack.size() > 1) {
+      c.diagnostics.add(
+          "evaluator", {},
+          "Error: nested function definition '" + n.getProtoName()
+              + "' is not supported by the evaluator");
+      return makeDangleValue();
+    }
+    c.functions.registerFunction(const_cast<FCFunctionAST*>(&n));
+    return makeDangleValue();
+  }
+  // FCPrototypeAST 不作为顶层语句出现；保持旧兜底行为（视为已处理）。
+  FCValue visit(const FCPrototypeAST& n) { return makeDangleValue(); }
+};
+
 FCValue evaluateExpression(const FCExprAST *expression,
                            FCEvaluationContext &context) {
   if (!expression)
     return makeDangleValue();
 
-  if (auto *node = dynamic_cast<const FCNumberExprAST *>(expression))
-    return evaluateNumber(node);
-
-  if (auto *node = dynamic_cast<const FCStringExprAST *>(expression))
-    return makeStringValue(node->m_stringVal);
-
-  if (auto *node = dynamic_cast<const FCVariableExprAST *>(expression))
-    return evaluateVariable(node, context);
-  if (auto *node = dynamic_cast<const FCBinaryExprAST *>(expression))
-    return evaluateBinary(node, context);
-
-  if (auto *node = dynamic_cast<const FCCallExprAST *>(expression))
-    return evaluateCall(node, context);
-
-  if (auto *node = dynamic_cast<const FCIfExprAST *>(expression))
-    return evaluateIf(node, context);
-
-  if (auto *node = dynamic_cast<const FCForExprAST *>(expression))
-    return evaluateFor(node, context);
-
-  if (auto *node = dynamic_cast<const FCBlockExprAST *>(expression))
-    return evaluateBlock(node, context);
-
-  if (auto *node = dynamic_cast<const FCSeqExprAST *>(expression))
-    return evaluateSequence(node, context);
-
-  if (auto *node = dynamic_cast<const FCVarDeclExprAST *>(expression))
-    return evaluateDeclaration(node, context);
-
-  if (auto *node = dynamic_cast<const FCProgramAST *>(expression))
-    return evaluateProgram(node, context);
-
-  if (auto *node = dynamic_cast<const FCFunctionAST *>(expression)) {
-    // callStack 栈底恒为 <global> 帧，故“多于一帧”才说明正处于函数调用中
-    if (context.callStack.size() > 1) {
-      context.diagnostics.add(
-          "evaluator", {},
-          "Error: nested function definition '" + node->getProtoName()
-              + "' is not supported by the evaluator");
-      return makeDangleValue();
-    }
-    context.functions.registerFunction(const_cast<FCFunctionAST *>(node));
-    return makeDangleValue();
-  }
-
-  return makeDangleValue();
+  EvaluatorVisitor v{ context };
+  return FCExprClass::dispatchAST(*expression, v);
 }
 
 namespace FCExprClass {

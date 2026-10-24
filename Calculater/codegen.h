@@ -19,7 +19,6 @@
 
 namespace FCExprClass
 {
-	llvm::Value* codegen(FCExprAST* expression, struct FCCodegenContext& context);
 	llvm::Value* codegen(const FCExprAST* expression, struct FCCodegenContext& context);
 
 	// 程序级入口：函数/原型/程序包装按原有语义生成，其余顶层表达式

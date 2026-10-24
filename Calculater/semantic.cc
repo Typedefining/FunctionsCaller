@@ -299,32 +299,8 @@ bool FCSemanticContext::SemanticAnalyzer::analyzeExpr(const FCExprClass::FCExprA
     return true;
   }
 
-  if (auto *n = dynamic_cast<const FCExprClass::FCProgramAST *>(expr))
-    return analyzeProgram(n);
-  if (auto *n = dynamic_cast<const FCExprClass::FCBlockExprAST *>(expr))
-    return analyzeBlock(n);
-  if (auto *n = dynamic_cast<const FCExprClass::FCSeqExprAST *>(expr))
-    return analyzeSeq(n);
-  if (auto *n = dynamic_cast<const FCExprClass::FCVarDeclExprAST *>(expr))
-    return analyzeVarDecl(n);
-  if (auto *n = dynamic_cast<const FCExprClass::FCVariableExprAST *>(expr))
-    return analyzeVariable(n);
-  if (auto *n = dynamic_cast<const FCExprClass::FCForExprAST *>(expr))
-    return analyzeFor(n);
-  if (auto *n = dynamic_cast<const FCExprClass::FCIfExprAST *>(expr))
-    return analyzeIf(n);
-  if (auto *n = dynamic_cast<const FCExprClass::FCCallExprAST *>(expr))
-    return analyzeCall(n);
-  if (auto *n = dynamic_cast<const FCExprClass::FCBinaryExprAST *>(expr))
-    return analyzeBinary(n);
-  if (auto *n = dynamic_cast<const FCExprClass::FCFunctionAST *>(expr))
-    return analyzeFunction(n);
-  if (auto *n = dynamic_cast<const FCExprClass::FCNumberExprAST *>(expr))
-    return analyzeNumber(n);
-  if (auto *n = dynamic_cast<const FCExprClass::FCStringExprAST *>(expr))
-    return analyzeString(n);
-
-  return true;
+  DispatchVisitor v{ *this };
+  return FCExprClass::dispatchAST(*expr, v);
 }
 
 bool FCSemanticContext::SemanticAnalyzer::analyzeProgram(const FCExprClass::FCProgramAST *node) {

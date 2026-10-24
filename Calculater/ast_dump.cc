@@ -36,14 +36,6 @@ const char *opSymbol(FCBinaryOp op) {
 
 void dumpNode(const FCExprAST &node, std::ostream &out, int depth);
 
-void dumpChildren(const std::vector<std::unique_ptr<FCExprAST>> &children,
-                  std::ostream &out, int depth) {
-  for (const auto &child : children) {
-    if (child)
-      dumpNode(*child, out, depth + 1);
-  }
-}
-
 void dumpParams(const FCPrototypeAST &proto, std::ostream &out) {
   out << "(";
   const auto &args = proto.getArgs();
@@ -55,106 +47,128 @@ void dumpParams(const FCPrototypeAST &proto, std::ostream &out) {
   out << ")";
 }
 
-void dumpNode(const FCExprAST &node, std::ostream &out, int depth) {
-  if (const auto *program = dynamic_cast<const FCProgramAST *>(&node)) {
-    indentTo(out, depth);
-    out << "Program (" << program->getStatements().size() << " statements)\n";
-    dumpChildren(program->getStatements(), out, depth);
-    return;
+void dumpChildren(const std::vector<std::unique_ptr<FCExprAST>> &children,
+                  std::ostream &out, int depth) {
+  for (const auto &child : children) {
+    if (child)
+      dumpNode(*child, out, depth + 1);
   }
-  if (const auto *block = dynamic_cast<const FCBlockExprAST *>(&node)) {
+}
+
+struct DumperVisitor {
+  std::ostream& out;
+  int depth;
+  explicit DumperVisitor(std::ostream& o, int d) : out(o), depth(d) {}
+
+  void visit(const FCPrototypeAST& n) {
     indentTo(out, depth);
-    out << "Block (" << block->getExpressions().size() << " expressions)\n";
-    dumpChildren(block->getExpressions(), out, depth);
-    return;
+    out << "Prototype " << n.getProtoName();
+    dumpParams(n, out);
+    out << "\n";
   }
-  if (const auto *seq = dynamic_cast<const FCSeqExprAST *>(&node)) {
+
+  void visit(const FCProgramAST& n) {
     indentTo(out, depth);
-    out << "Seq (" << seq->getExpressions().size() << " expressions)\n";
-    dumpChildren(seq->getExpressions(), out, depth);
-    return;
+    out << "Program (" << n.getStatements().size() << " statements)\n";
+    dumpChildren(n.getStatements(), out, depth);
   }
-  if (const auto *function = dynamic_cast<const FCFunctionAST *>(&node)) {
+
+  void visit(const FCBlockExprAST& n) {
     indentTo(out, depth);
-    out << "Function " << function->getProtoName();
-    if (const auto &proto = function->getProto())
+    out << "Block (" << n.getExpressions().size() << " expressions)\n";
+    for (const auto &e : n.getExpressions())
+      dumpNode(*e, out, depth + 1);
+  }
+
+  void visit(const FCSeqExprAST& n) {
+    indentTo(out, depth);
+    out << "Seq (" << n.getExpressions().size() << " expressions)\n";
+    for (const auto &e : n.getExpressions())
+      dumpNode(*e, out, depth + 1);
+  }
+
+  void visit(const FCFunctionAST& n) {
+    indentTo(out, depth);
+    out << "Function " << n.getProtoName();
+    if (const auto &proto = n.getProto())
       dumpParams(*proto, out);
     out << "\n";
-    if (const auto *body = function->getBody())
+    if (const auto *body = n.getBody())
       dumpNode(*body, out, depth + 1);
-    return;
   }
-  if (const auto *proto = dynamic_cast<const FCPrototypeAST *>(&node)) {
+
+  void visit(const FCVarDeclExprAST& n) {
     indentTo(out, depth);
-    out << "Prototype " << proto->getProtoName();
-    dumpParams(*proto, out);
-    out << "\n";
-    return;
+    out << "VarDecl " << n.decl->name << ":" << n.decl->typeName << "\n";
+    if (n.initExpr)
+      dumpNode(*n.initExpr, out, depth + 1);
   }
-  if (const auto *decl = dynamic_cast<const FCVarDeclExprAST *>(&node)) {
+
+  void visit(const FCForExprAST& n) {
     indentTo(out, depth);
-    out << "VarDecl " << decl->decl->name << ":" << decl->decl->typeName << "\n";
-    if (decl->initExpr)
-      dumpNode(*decl->initExpr, out, depth + 1);
-    return;
-  }
-  if (const auto *loop = dynamic_cast<const FCForExprAST *>(&node)) {
-    indentTo(out, depth);
-    out << "For " << loop->getDecl()->name << ":" << loop->getDecl()->typeName
-        << "\n";
-    if (const auto *start = loop->getStart())
+    out << "For " << n.getDecl()->name << ":" << n.getDecl()->typeName << "\n";
+    if (const auto *start = n.getStart())
       dumpNode(*start, out, depth + 1);
-    if (const auto *end = loop->getEnd())
+    if (const auto *end = n.getEnd())
       dumpNode(*end, out, depth + 1);
-    if (const auto *step = loop->getStep())
+    if (const auto *step = n.getStep())
       dumpNode(*step, out, depth + 1);
-    if (const auto *body = loop->getBody())
+    if (const auto *body = n.getBody())
       dumpNode(*body, out, depth + 1);
-    return;
   }
-  if (const auto *branch = dynamic_cast<const FCIfExprAST *>(&node)) {
+
+  void visit(const FCIfExprAST& n) {
     indentTo(out, depth);
     out << "If\n";
-    dumpNode(*branch->getCondition(), out, depth + 1);
-    dumpNode(*branch->getThen(), out, depth + 1);
-    dumpNode(*branch->getElse(), out, depth + 1);
-    return;
+    dumpNode(*n.getCondition(), out, depth + 1);
+    dumpNode(*n.getThen(), out, depth + 1);
+    dumpNode(*n.getElse(), out, depth + 1);
   }
-  if (const auto *call = dynamic_cast<const FCCallExprAST *>(&node)) {
+
+  void visit(const FCCallExprAST& n) {
     indentTo(out, depth);
-    out << "Call " << call->getName() << "\n";
-    dumpChildren(call->getArgs(), out, depth);
-    return;
+    out << "Call " << n.getName() << "\n";
+    for (const auto &e : n.getArgs())
+      dumpNode(*e, out, depth + 1);
   }
-  if (const auto *binary = dynamic_cast<const FCBinaryExprAST *>(&node)) {
+
+  void visit(const FCBinaryExprAST& n) {
     indentTo(out, depth);
-    out << "Binary " << opSymbol(binary->getOperator()) << "\n";
-    dumpNode(*binary->getLHS(), out, depth + 1);
-    dumpNode(*binary->getRHS(), out, depth + 1);
-    return;
+    out << "Binary " << opSymbol(n.getOperator()) << "\n";
+    dumpNode(*n.getLHS(), out, depth + 1);
+    dumpNode(*n.getRHS(), out, depth + 1);
   }
-  if (const auto *variable = dynamic_cast<const FCVariableExprAST *>(&node)) {
+
+  void visit(const FCVariableExprAST& n) {
     indentTo(out, depth);
-    out << "Variable " << variable->name << "\n";
-    return;
+    out << "Variable " << n.name << "\n";
   }
-  if (const auto *text = dynamic_cast<const FCStringExprAST *>(&node)) {
+
+  void visit(const FCStringExprAST& n) {
     indentTo(out, depth);
-    out << "String \"" << text->m_stringVal << "\"\n";
-    return;
+    out << "String \"" << n.m_stringVal << "\"\n";
   }
-  if (const auto *number = dynamic_cast<const FCNumberExprAST *>(&node)) {
+
+  void visit(const FCNumberExprAST& n) {
     indentTo(out, depth);
     out << "Number ";
-    if (number->isFloating())
-      out << number->m_doubleVal;
+    if (n.isFloating())
+      out << n.m_doubleVal;
     else
-      out << number->m_intVal;
+      out << n.m_intVal;
     out << "\n";
-    return;
   }
-  indentTo(out, depth);
-  out << "Expr\n";
+};
+
+void dumpNode(const FCExprAST &node, std::ostream &out, int depth) {
+  DumperVisitor v{ out, depth };
+  try {
+    FCExprClass::dispatchAST(node, v);
+  } catch (const std::runtime_error&) {
+    // 未知节点类型保留旧行为：打印 "Expr\n"
+    indentTo(out, depth);
+    out << "Expr\n";
+  }
 }
 
 } // namespace
