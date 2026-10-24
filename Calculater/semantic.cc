@@ -27,7 +27,7 @@ void FCSemanticContext::reset() {
   // <global> 帧是作用域栈的普通成员（栈底），拥有自己的布局与编译记录；
   // 其记录同时登记进 functions 表，作为函数/全局归一后的单一存放地
   m_scopeStack.emplace_back();
-  m_frameLayouts.push_back(std::make_unique<FrameLayout>());
+  m_frameLayouts.push_back(std::make_unique<SlotLayout>());
   m_frameRecords.push_back(std::make_shared<CompiledFunction>());
   m_compiledProgram->functions["<global>"] = m_frameRecords[0];
 }
@@ -54,7 +54,7 @@ void FCSemanticContext::pushFunctionScope() {
   m_frameAnchor = m_frameRecords.size();
 
   m_scopeStack.emplace_back();
-  m_frameLayouts.push_back(std::make_unique<FrameLayout>());
+  m_frameLayouts.push_back(std::make_unique<SlotLayout>());
   m_frameRecords.push_back(std::make_shared<CompiledFunction>());
 
   m_currentState.isActive = true;
@@ -184,9 +184,7 @@ bool FCSemanticContext::registerFunction(const std::string &functionName,
 
   // 布局快照：注册时刻的参数槽位数；函数体分析结束后由
   // SemanticAnalyzer::analyzeFunction 回填最终 frameSize
-  compiledFunc->frameSize = m_frameLayouts[m_frameAnchor]->frameSize();
-  compiledFunc->maxTempSlots =
-      m_frameLayouts[m_frameAnchor]->frameSize(); // 暂与 frameSize 相同
+  compiledFunc->frameSize = m_frameLayouts[m_frameAnchor]->size();
 
   // 按原型声明顺序记录形参槽位，调用期据此把实参写入帧的固定位置
   if (function != nullptr) {
@@ -208,11 +206,11 @@ FCSemanticContext::currentScopeDeclarations() const {
 }
 
 int FCSemanticContext::currentFrameLayoutSize() const {
-  return m_frameLayouts[m_frameAnchor]->frameSize();
+  return m_frameLayouts[m_frameAnchor]->size();
 }
 
 int FCSemanticContext::currentGlobalLayoutSize() const {
-  return m_frameLayouts[0]->frameSize();
+  return m_frameLayouts[0]->size();
 }
 
 bool FCSemanticContext::mayDefineFunctionHere() const {
@@ -232,8 +230,8 @@ FCSemanticContext::getCompiledFunction(const std::string &name) const {
 void FCSemanticContext::dumpScopes() const {
   printf("=== Scope Debug Info ===\n");
   printf("Scope depth: %zu\n", m_scopeStack.size());
-  printf("Current function frame size: %d\n", m_frameLayouts[m_frameAnchor]->frameSize());
-  printf("Current global layout size: %d\n", m_frameLayouts[0]->frameSize());
+  printf("Current function frame size: %d\n", m_frameLayouts[m_frameAnchor]->size());
+  printf("Current global layout size: %d\n", m_frameLayouts[0]->size());
 
   for (size_t i = 0; i < m_scopeStack.size(); ++i) {
     const auto &scope = m_scopeStack[i];
@@ -247,9 +245,9 @@ void FCSemanticContext::dumpScopes() const {
 
       const auto &decl = symbol.declaration;
 
-      std::printf("  - %s: type=%s, slot=%d, depth=%d, mutable=%s\n",
+      std::printf("  - %s: type=%s, slot=%d, depth=%d\n",
                   decl->name.c_str(), decl->typeName.c_str(), symbol.slot,
-                  symbol.scopeDepth, symbol.isMutable ? "yes" : "no");
+                  symbol.scopeDepth);
     }
   }
 }
@@ -274,9 +272,8 @@ void SymbolTable::dump() const {
     const char *kind = symbol->slot < 0 ? "Unassigned"
                                         : "Local"; // 符号表仅容纳函数域符号
 
-    printf("  %s: slot=%d, kind=%s, depth=%d, mutable=%s\n", name.c_str(),
-           symbol->slot, kind, symbol->scopeDepth,
-           symbol->isMutable ? "yes" : "no");
+    printf("  %s: slot=%d, kind=%s, depth=%d\n", name.c_str(),
+           symbol->slot, kind, symbol->scopeDepth);
   }
 }
 
@@ -452,8 +449,7 @@ bool FCSemanticContext::SemanticAnalyzer::analyzeFunction(const FCExprClass::FCF
   // 函数体分析完成后，回填最终的帧大小（参数 + 局部）
   {
     auto &fn = m_ctx.currentFrameFunction();
-    fn.frameSize = m_ctx.m_frameLayouts[m_ctx.m_frameAnchor]->frameSize();
-    fn.maxTempSlots = fn.frameSize;
+    fn.frameSize = m_ctx.m_frameLayouts[m_ctx.m_frameAnchor]->size();
   }
 
   if (!ok) {

@@ -23,23 +23,17 @@ struct VariableSymbol {
   VarDeclPtr declaration;
   int slot;                    // 所属域内的槽位：全局域对应 globalSymbols 下标，函数域对应帧内下标
   int scopeDepth;              // 声明时的作用域深度
-  bool isMutable;              // 是否可变
-  bool isCaptured;             // 是否被闭包捕获
   VariableRuntimeInfo runtime; // 运行时定位：-1 为全局，>=0 为调用栈帧下标
 
   VariableSymbol()
     : declaration(nullptr)
     , slot{-1}
-    , scopeDepth(0)
-    , isMutable(false)
-    , isCaptured(false) {}
+    , scopeDepth(0) {}
 
   VariableSymbol(VarDeclPtr decl, int st, int depth)
     : declaration(std::move(decl))
     , slot(st)
-    , scopeDepth(depth)
-    , isMutable(false)
-    , isCaptured(false) {}
+    , scopeDepth(depth) {}
 };
 
 
@@ -87,12 +81,10 @@ struct CompiledFunction {
   std::vector<int> parametersIdx;  // 形参槽位，按原型声明顺序，语义期填充
   SymbolTable symbols;
   int frameSize;
-  int maxTempSlots;
 
   CompiledFunction()
     : ast(nullptr)
-    , frameSize(0)
-    , maxTempSlots(0) {}
+    , frameSize(0) {}
 };
 
 struct SemanticBinding {

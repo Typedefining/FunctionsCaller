@@ -374,7 +374,7 @@
             VariableSymbol sym;
             expect(sym.declaration == nullptr, "token-api - default symbol null decl");
             expect(sym.slot == -1, "token-api - default symbol slot -1");
-            expect(sym.scopeDepth == 0 && !sym.isMutable && !sym.isCaptured && sym.runtime.frameIndex == -1,
+            expect(sym.scopeDepth == 0 && sym.runtime.frameIndex == -1,
                 "token-api - default symbol flags and runtime");
 
             auto decl = std::make_shared<VarDecl>("g", "int");
@@ -390,7 +390,7 @@
             expect(prog.getFunction("none") == nullptr, "token-api - compiled program missing function");
 
             CompiledFunction cf;
-            expect(cf.ast == nullptr && cf.frameSize == 0 && cf.maxTempSlots == 0,
+            expect(cf.ast == nullptr && cf.frameSize == 0,
                 "token-api - compiled function defaults");
             expect(cf.parametersIdx.empty(), "token-api - compiled function empty params");
         }

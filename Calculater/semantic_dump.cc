@@ -38,8 +38,7 @@ std::string describeCompiledProgram(const CompiledProgram &program) {
 	for (const auto &name : names) {
 		const auto &record = *program.functions.at(name);
 		out << "  frame " << name << " (" << frameKind(name) << ")"
-		    << " frameSize=" << record.frameSize
-		    << " maxTempSlots=" << record.maxTempSlots;
+		    << " frameSize=" << record.frameSize;
 		if (!record.parametersIdx.empty()) {
 			out << " params=[";
 			for (size_t i = 0; i < record.parametersIdx.size(); ++i) {

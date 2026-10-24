@@ -429,7 +429,6 @@
 
                 expect(ctx.currentScopeDeclarations().size() == 1, "semantic-api - currentScopeDeclarations");
                 expect(ctx.currentFrameLayoutSize() == 1, "semantic-api - currentFrameLayoutSize");
-                expect(ctx.currentFrameLayoutFrameSize() == 1, "semantic-api - currentFrameLayout");
             }
 
             // 离开函数作用域后，局部变量消失
@@ -997,7 +996,6 @@
             const auto* add = prog.getFunction("add");
             expect(add != nullptr, "compiled - getFunction add");
             expect(add->frameSize == 3, "compiled - frame size includes params and locals");
-            expect(add->maxTempSlots == 3, "compiled - max temp slots");
             expect(add->symbols.lookupShared("a") != nullptr && add->symbols.lookupShared("b") != nullptr &&
                    add->symbols.lookupShared("t") != nullptr, "compiled - function symbol table");
             expect(add->symbols.lookupShared("g") == nullptr, "compiled - globals not in function symbols");
@@ -1067,7 +1065,7 @@
             auto ast = scanner.analysis("def f() { 1 }");
             const auto& prog = scanner.semanticContext().getCompiledProgram();
             const auto* f = prog.getFunction("f");
-            expect(f != nullptr && f->frameSize == 0 && f->maxTempSlots == 0,
+            expect(f != nullptr && f->frameSize == 0,
                 "compiled - no-local function frame");
         }
 
@@ -1135,7 +1133,7 @@
         std::string add = dumpOf("def add(a:int, b:int) { a + b }");
         expect(add.find("frame <global> (global)") != std::string::npos,
                "semantic-dump - global frame printed first");
-        expect(add.find("frame add (function) frameSize=2 maxTempSlots=2 params=[0, 1]") !=
+        expect(add.find("frame add (function) frameSize=2 params=[0, 1]") !=
                    std::string::npos,
                "semantic-dump - parameter slots follow prototype order");
         expect(add.find("a:int slot=0 depth=0 frameIndex=0") != std::string::npos,

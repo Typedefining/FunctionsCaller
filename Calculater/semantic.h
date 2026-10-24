@@ -42,44 +42,11 @@ struct Scope {
 
 struct SemanticBinding;
 
-class FrameLayout {
+class SlotLayout {
 public:
-    int allocateSlot()
-    {
-        return m_nextSlot++;
-    }
-
-    int frameSize() const
-    {
-        return m_nextSlot;
-    }
-
-    void reset()
-    {
-        m_nextSlot = 0;
-    }
-
-private:
-    int m_nextSlot = 0;
-};
-
-class GlobalLayout {
-public:
-    int allocateSlot()
-    {
-        return m_nextSlot++;
-    }
-
-    int globalSize() const
-    {
-        return m_nextSlot;
-    }
-
-    void reset()
-    {
-        m_nextSlot = 0;
-    }
-
+    int allocateSlot() { return m_nextSlot++; }
+    int size() const { return m_nextSlot; }
+    void reset() { m_nextSlot = 0; }
 private:
     int m_nextSlot = 0;
 };
@@ -124,9 +91,6 @@ public:
   // 当前位置能否开始一个函数帧：关闭嵌套定义时只允许在 <global> 帧上定义。
   // 判据用帧基址而非作用域栈深度——顶层块里的 def 帧基址仍为 0。
   bool mayDefineFunctionHere() const;
-
-  // 兼容访问器：等价于 currentFrameLayoutSize（供旧测试断言 frameSize 数值）
-  int currentFrameLayoutFrameSize() const { return currentFrameLayoutSize(); }
 
   void dumpScopes() const;
   void dumpSymbolTable() const;
@@ -228,7 +192,7 @@ private:
   // 帧下标走帧计数域，与作用域栈深度解耦，避免 block scope 参与帧寻址）
   struct FrameAnchorEntry { size_t prevAnchor; size_t scopeDepthAtPush; };
   std::vector<FrameAnchorEntry> m_frameAnchorStack;
-  std::vector<std::unique_ptr<FrameLayout>> m_frameLayouts;        // 每个函数帧一个布局
+  std::vector<std::unique_ptr<SlotLayout>> m_frameLayouts;          // 每个函数帧一个布局
   std::vector<std::shared_ptr<CompiledFunction>> m_frameRecords;    // 每帧一个编译记录；注册时移交 functions 表
   std::set<std::string> m_functionSet;
 

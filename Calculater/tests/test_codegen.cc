@@ -162,7 +162,6 @@
             CompiledProgram nestedProgram;
             auto nestedRecord = std::make_shared<CompiledFunction>();
             nestedRecord->frameSize = 0;
-            nestedRecord->maxTempSlots = 0;
             nestedProgram.functions["nestedOuter"] = nestedRecord;
 
             FCCodegenContext nestedContext("NestedTest", nestedProgram);
