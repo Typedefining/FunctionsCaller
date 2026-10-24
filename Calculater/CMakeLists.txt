@@ -88,7 +88,17 @@ target_link_libraries(${PROJECT_NAME}
 	FunctionsCodegen
 )
 
-add_executable(FunctionsUnitTest unit_test.cc)
+add_executable(FunctionsUnitTest
+	tests/test_harness.h
+	tests/test_main.cc
+	tests/test_lexer.cc
+	tests/test_parser.cc
+	tests/test_semantic.cc
+	tests/test_evaluator.cc
+	tests/test_codegen.cc
+	tests/test_ast_dump.cc
+	tests/test_diagnostics.cc
+)
 target_link_libraries(FunctionsUnitTest
 	PRIVATE
 	FunctionsFrontend

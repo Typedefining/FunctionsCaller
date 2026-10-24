@@ -43,6 +43,7 @@ if (-not $coverageTool) {
 	--output $coverageXml `
 	--output-format xml `
 	--include-files (Join-Path $repoRoot "Calculater\*.cc") `
+	--include-files (Join-Path $repoRoot "Calculater\tests\*.cc") `
 	-- $testExecutable
 
 if ($LASTEXITCODE -ne 0) {
@@ -65,7 +66,8 @@ foreach ($module in $report.results.modules.module) {
 		if (-not $sourcePaths.ContainsKey($sourceId)) { continue }
 		$sourcePath = $sourcePaths[$sourceId]
 		if ([IO.Path]::GetExtension($sourcePath) -ne ".cc") { continue }
-		if ($sourcePath -match "\\(unit_test|call_ast_test|main)\.cc$") { continue }
+		if ([IO.Path]::GetDirectoryName($sourcePath) -match '\\tests$') { continue }
+		if ($sourcePath -match "\\(call_ast_test|main)\.cc$") { continue }
 
 		$key = "$sourcePath|$([string]$range.start_line)"
 		$state = switch ([string]$range.covered) {
