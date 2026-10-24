@@ -29,8 +29,8 @@ struct FCEvaluationContext {
   // 按符号身份解析变量：符号既携带槽位，也携带声明时的作用域深度。
   // 全局变量在顶层帧（callStack[0]）中，局部变量在当前调用帧中。
   std::shared_ptr<VariableSymbol> boundSymbol(const void *astNode) const {
-    if (compiledProgram.m_binding->size() != 0)
-      return compiledProgram.m_binding->find(astNode);
+    if (auto symbol = compiledProgram.m_binding->find(astNode))
+      return symbol;
     return localBinding.find(astNode);
   }
 

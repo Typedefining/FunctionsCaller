@@ -324,6 +324,34 @@
             expect(evaluate(nestedCall.get(), nestedCtx).type == FCValueCategory::Dangle,
                    "evaluator - nested definition rejected inside a frame");
         }
+
+        // 8. 混合绑定模式：语义绑定非空时，手工本地绑定仍可见
+        {
+            FCScanner scanner;
+            auto ast = scanner.analysis("var x:int = 1; x");   // 语义绑定表非空（x 已绑定）
+            if (ast)
+            {
+                FCEvaluationContext ctx(scanner.semanticContext().getCompiledProgram());
+                // 先执行程序：var x:int = 1 把值 1 写入全局帧 slot 0
+                (void)evaluate(ast.get(), ctx);
+                // 手工绑定一个与语义绑定无关的变量节点
+                auto varDecl = std::make_shared<VarDecl>("manual", "int");
+                auto manualSymbol = std::make_shared<VariableSymbol>();
+                manualSymbol->declaration = varDecl;
+                manualSymbol->slot = 0;
+                manualSymbol->runtime.frameIndex = -1;   // 全局帧 slot 0，即上面 var x:int = 1 的槽位
+                auto manualVar = std::make_unique<FCVariableExprAST>(std::string("manual"));
+                ctx.bindNode(manualVar.get(), manualSymbol);
+                // 求值手工节点：应读到全局帧 slot 0 的值 1（当前实现返回 Dangle）
+                FCValue v = evaluate(manualVar.get(), ctx);
+                expect(v.type == FCValueCategory::Integer && v.evaluteVal.intVal == 1,
+                       "evaluator - local binding visible when semantic binding nonempty");
+            }
+            else
+            {
+                expect(false, "evaluator - local binding visible (scanner failed)");
+            }
+        }
     }
     // ==================== Evaluator Error Tests ====================
     void ComprehensiveTestSuite::runEvaluatorErrorTests()
