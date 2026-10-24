@@ -200,10 +200,10 @@ $env:FC_TRACE = ""
 
 **实验 1：整数除法改成减法**
 
-把 `evaluator.cc:228-230` 的
+把 `evaluator.cc:229-230` 的
 
 ```cpp
-result.evaluteVal.intVal = lhs.evaluteVal.intVal / rhs.evaluteVal.intVal;
+return FCValue{*lhs.asInteger() / *rhs.asInteger()};
 ```
 
 改成减号，然后跑：

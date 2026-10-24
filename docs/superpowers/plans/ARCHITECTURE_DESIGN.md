@@ -90,9 +90,8 @@ FCScanner::analysis() ─────▶ FCExprAST (抽象语法树)
 | 结构体 | 字段 | 说明 |
 |--------|------|------|
 | `FCValueCategory` | `Integer`, `Floating`, `String`, `Dangle` | 值类型枚举 |
-| `FCValueUnion` | `intVal`, `doubleVal`, `charVal`, `danglingVal` | 值联合体 |
 | `VariableRuntimeInfo` | `frameIndex = -1` | 运行时定位：-1=全局，>=0=调用栈帧下标 |
-| `FCValue` | `type`, `evaluteVal` | 运行时值 |
+| `FCValue` | `storage` (`std::variant<std::monostate, int, double, std::string>`)、`category()`、`asInteger()/asFloating()/asString()` | 运行时值 |
 | `Frame` | `funcName`, `locals` (vector<FCValue>) | 调用栈帧，按 slot 下标存放值 |
 
 **关键设计决策**：
