@@ -279,7 +279,13 @@ FCValue evaluateBinary(const FCBinaryExprAST *expression,
 
 FCValue evaluateCall(const FCCallExprAST *expression,
                      FCEvaluationContext &context) {
-  auto *function = context.functions.findFunction(expression->getName());
+  // 单一解析路径：语义期记录是唯一数据源，原型与槽位同取自该记录；
+  // 无记录（或记录无 ast）时回退 registry（手工构造 AST 模式）
+  auto *record = context.compiledProgram.getFunction(expression->getName());
+  FCFunctionAST *function = (record != nullptr && record->ast != nullptr)
+                                ? record->ast
+                                : context.functions.findFunction(
+                                      expression->getName());
   if (function == nullptr) {
     context.diagnostics.add("evaluator", {},
                             "Function not found: " + expression->getName());
@@ -305,9 +311,9 @@ FCValue evaluateCall(const FCCallExprAST *expression,
   context.pushFrame(expression->getName());
   Frame &frame = context.currentFrame();
 
-  // 调用前先确认语义期记录存在（帧布局与参数符号都来自它）
-  auto func = context.compiledProgram.getFunction(expression->getName());
-  if (func == nullptr) {
+  // 调用前先确认语义期记录存在（帧布局与参数符号都来自它）。
+  // 无记录时 pushFrame 已按实参数量分配帧（手工构造 AST 模式的防御行为）
+  if (record == nullptr) {
     context.diagnostics.add(
         "evaluator", {},
         "Error: no compiled record for '" + expression->getName() + "'");
@@ -322,7 +328,7 @@ FCValue evaluateCall(const FCCallExprAST *expression,
       return makeDangleValue();
     }
 
-    auto symbol = func->symbols.lookupShared(parameter->name);
+    auto symbol = record->symbols.lookupShared(parameter->name);
     if (symbol == nullptr || symbol->slot < 0 ||
         symbol->slot >= static_cast<int>(frame.locals.size())) {
       context.diagnostics.add(

@@ -352,6 +352,37 @@
                 expect(false, "evaluator - local binding visible (scanner failed)");
             }
         }
+
+        // 9. 调用解析优先级：registry 与 compiledProgram 同名且原型不一致时，
+        //    原型与槽位必须同取 compiledProgram 记录（单一数据源）
+        {
+            FCSemanticContext sem;
+            FC::FCDiagnostics diagnostics;
+            auto fnAst = std::make_unique<FCFunctionAST>(
+                std::make_unique<FCPrototypeAST>("conflict", std::vector<VarDeclPtr>{}),
+                std::make_unique<FCNumberExprAST>(7));
+            {
+                FCSemanticContext::SemanticAnalyzer analyzer(sem, diagnostics);
+                expect(analyzer.analyze(fnAst.get()),
+                       "evaluator - conflict function analyzed");
+            }
+            CompiledProgram program = sem.getCompiledProgram();
+            // 构造一个不同原型的 AST（单参数）注册进 registry：两表不一致
+            std::vector<VarDeclPtr> fakeArgs;
+            fakeArgs.push_back(std::make_shared<VarDecl>("p", "int"));
+            auto fakeAst = std::make_unique<FCFunctionAST>(
+                std::make_unique<FCPrototypeAST>("conflict", std::move(fakeArgs)),
+                std::make_unique<FCNumberExprAST>(99));
+            FCEvaluationContext ctx(program);
+            ctx.functions.registerFunction(fakeAst.get());
+            // 零实参调用：compiledProgram 原型（零参数）应执行成功返回 7；
+            // 旧实现按 registry 单参数原型报参数个数不匹配，返回 Dangle
+            std::vector<std::unique_ptr<FCExprAST>> args;
+            auto call = std::make_unique<FCCallExprAST>("conflict", std::move(args));
+            FCValue v = evaluate(call.get(), ctx);
+            expect(v.type == FCValueCategory::Integer && v.evaluteVal.intVal == 7,
+                   "evaluator - call resolves by compiled program record");
+        }
     }
     // ==================== Evaluator Error Tests ====================
     void ComprehensiveTestSuite::runEvaluatorErrorTests()
