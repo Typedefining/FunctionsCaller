@@ -308,7 +308,8 @@ FCValue evaluateCall(const FCCallExprAST *expression,
     argumentValues.push_back(value);
   }
 
-  context.pushFrame(expression->getName());
+  // RAII 守卫：析构时自动弹帧，所有返回路径（含错误分支）均受保护
+  FrameGuard guard{ context, expression->getName() };
   Frame &frame = context.currentFrame();
 
   // 调用前先确认语义期记录存在（帧布局与参数符号都来自它）。
@@ -317,14 +318,12 @@ FCValue evaluateCall(const FCCallExprAST *expression,
     context.diagnostics.add(
         "evaluator", {},
         "Error: no compiled record for '" + expression->getName() + "'");
-    context.popFrame();
     return makeDangleValue();
   }
 
   for (size_t i = 0; i < argumentValues.size(); ++i) {
     const auto &parameter = prototype->getArgs()[i];
     if (parameter == nullptr) {
-      context.popFrame();
       return makeDangleValue();
     }
 
@@ -334,7 +333,6 @@ FCValue evaluateCall(const FCCallExprAST *expression,
       context.diagnostics.add(
           "evaluator", {},
           "Error: unresolved parameter '" + expression->getName() + "'");
-      context.popFrame();
       return makeDangleValue();
     }
     frame.locals[symbol->slot] = argumentValues[i];
@@ -358,7 +356,6 @@ FCValue evaluateCall(const FCCallExprAST *expression,
     std::fprintf(stderr, "[evaluator] return %s = %s\n",
                  expression->getName().c_str(), formatValue(result).c_str());
 
-  context.popFrame();
   return result;
 }
 

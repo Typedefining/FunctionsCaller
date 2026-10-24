@@ -59,6 +59,17 @@ struct FCEvaluationContext {
   Frame &currentFrame();
 };
 
+// RAII 守卫：构造 pushFrame，析构 popFrame。evaluateCall 的所有错误路径
+// 与正常返回路径都通过作用域结束自动弹帧，消除手工 popFrame 的遗漏风险。
+struct FrameGuard {
+  FCEvaluationContext& ctx;
+  FrameGuard(FCEvaluationContext& c, const std::string& name)
+    : ctx(c) { ctx.pushFrame(name); }
+  ~FrameGuard() { ctx.popFrame(); }
+  FrameGuard(const FrameGuard&) = delete;
+  FrameGuard& operator=(const FrameGuard&) = delete;
+};
+
 FCValue evaluate(FCExprAST *expression, struct FCEvaluationContext &context);
 FCValue evaluate(const FCExprAST *expression, struct FCEvaluationContext &context);
 } // namespace FCExprClass

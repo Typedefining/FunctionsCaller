@@ -822,8 +822,34 @@
             expect(reg.index(prog.get()), "registry - index program with functions");
             expect(reg.findFunction("progfn") != nullptr, "registry - program function found");
 
-            reg.clear();
+        // FrameGuard 回归保护：手工构造 AST 函数（无语义期记录）触发
+        // evaluateCall 的错误路径并调用后继续求值，调用栈必须恢复为 1 帧。
+        {
+            FCSemanticContext sem;
+            FC::FCDiagnostics diagnostics;
+            auto fnAst = std::make_unique<FCFunctionAST>(
+                std::make_unique<FCPrototypeAST>("frameguard", std::vector<VarDeclPtr>{}),
+                std::make_unique<FCNumberExprAST>(1));
+            CompiledProgram program;
+            auto rec = std::make_shared<CompiledFunction>();
+            program.functions["frameguard"] = rec;
+            rec->symbols.addSymbol("x", std::make_shared<VariableSymbol>(
+                std::make_shared<VarDecl>("x", "int"), 0, 0));
+            FCEvaluationContext ctx(program);
+            ctx.functions.registerFunction(fnAst.get());
+            // 零参数但记录要求 1 个形参 => 参数个数不匹配，错误路径弹帧
+            std::vector<std::unique_ptr<FCExprAST>> args;
+            args.push_back(std::make_unique<FCNumberExprAST>(1));
+            auto call = std::make_unique<FCCallExprAST>("frameguard", std::move(args));
+            FCValue v = evaluate(call.get(), ctx);
+            expect(v.type == FCValueCategory::Dangle,
+                   "evaluator - frameguard error path returns dangle");
+            // 后续求值若帧栈泄漏，frame.locals size 不匹配；断言栈深恢复
+            expect(ctx.callStack.size() == 1,
+                   "evaluator - frameguard frame depth restored after error path");
+        }            reg.clear();
             expect(reg.findFunction("solo") == nullptr, "registry - clear");
             expect(reg.findFunction("progfn") == nullptr, "registry - clear removes all");
         }
     }
+
