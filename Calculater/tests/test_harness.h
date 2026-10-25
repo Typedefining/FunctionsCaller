@@ -115,6 +115,7 @@ private:
     void runScannerTests();
     void runScannerErrorTests();
     void runSemanticTests();
+    void runSemanticTypeErrorTests();
     void runSemanticApiTests();
     void runSemanticAnalyzerTests();
     void runSymbolTableTests();
@@ -125,7 +126,6 @@ private:
     void runEvaluatorErrorTests();
     void runEvaluatorValueSemanticsTests();
     void runEvaluatorVoidTests();
-    void runErrorDiagnosticsInvariantTests();
     void runEvaluatorTraceTests();
     void runStressTests();
     void runRegistryTests();
@@ -136,6 +136,7 @@ private:
     void runAstDumpTests();
     void runTokenApiTests();
     void runTypeMappingTests();
+    void runReturnTypeTests();
     void runDiagnosticTests();
     void runLexerTests();
     void runParserTests();

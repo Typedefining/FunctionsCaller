@@ -27,127 +27,6 @@ llvm::Value* logCodegenError(FCCodegenContext& context, const char* message)
 	return nullptr;
 }
 
-llvm::Type* inferExprType(const FCExprAST* expression,
-	FCCodegenContext& context,
-	std::unordered_set<const FCFunctionAST*>& visitingFunctions);
-
-llvm::Type* inferFunctionReturnType(const FCFunctionAST* function,
-	FCCodegenContext& context,
-	std::unordered_set<const FCFunctionAST*>& visitingFunctions)
-{
-	if (function == nullptr || function->getBody() == nullptr)
-		return integerType(context);
-
-	if (!visitingFunctions.insert(function).second)
-		return integerType(context);
-
-	auto* result = inferExprType(function->getBody(), context, visitingFunctions);
-	visitingFunctions.erase(function);
-	return result == nullptr ? integerType(context) : result;
-}
-
-llvm::Type* inferExprType(const FCExprAST* expression,
-	FCCodegenContext& context,
-	std::unordered_set<const FCFunctionAST*>& visitingFunctions)
-{
-	if (expression == nullptr)
-		return integerType(context);
-
-	if (auto* number = dynamic_cast<const FCNumberExprAST*>(expression))
-	{
-		return number->isFloating()
-			? llvm::Type::getDoubleTy(context.llvmContext)
-			: integerType(context);
-	}
-
-	if (dynamic_cast<const FCStringExprAST*>(expression) != nullptr)
-		return stringType(context);
-
-	if (auto* variable = dynamic_cast<const FCVariableExprAST*>(expression))
-	{
-		// 语法节点只携带变量名，类型需通过语义绑定回到符号的声明上查询
-		auto symbol = context.boundSymbol(variable);
-		if (symbol == nullptr || symbol->declaration == nullptr)
-			return integerType(context);
-		auto* symbolType = context.getType(symbol->declaration->type);
-		return symbolType != nullptr ? symbolType : integerType(context);
-	}
-
-	if (auto* binary = dynamic_cast<const FCBinaryExprAST*>(expression))
-	{
-		if (binary->getOperator() == FCBinaryOp::Assign)
-			return inferExprType(binary->getRHS(), context, visitingFunctions);
-
-		auto* lhsType = inferExprType(binary->getLHS(), context, visitingFunctions);
-		auto* rhsType = inferExprType(binary->getRHS(), context, visitingFunctions);
-		if (binary->getOperator() == FCBinaryOp::Less)
-			return integerType(context);
-		if (lhsType->isDoubleTy() || rhsType->isDoubleTy())
-			return llvm::Type::getDoubleTy(context.llvmContext);
-		return lhsType;
-	}
-
-	if (auto* call = dynamic_cast<const FCCallExprAST*>(expression))
-	{
-		// 单一数据源：优先语义期记录（CompiledFunction::ast）；
-		// 无记录再走 LLVM 模块签名回退
-		const auto* record = context.compiledProgram.getFunction(call->getName());
-		if (record != nullptr && record->ast != nullptr)
-			return inferFunctionReturnType(record->ast, context, visitingFunctions);
-
-		if (auto* function = context.module->getFunction(call->getName()))
-			return function->getReturnType();
-
-		return integerType(context);
-	}
-
-	if (auto* conditional = dynamic_cast<const FCIfExprAST*>(expression))
-	{
-		auto* thenType = inferExprType(conditional->getThen(), context, visitingFunctions);
-		auto* elseType = inferExprType(conditional->getElse(), context, visitingFunctions);
-		if (thenType->isDoubleTy() || elseType->isDoubleTy())
-			return llvm::Type::getDoubleTy(context.llvmContext);
-		return thenType;
-	}
-
-	if (auto* loop = dynamic_cast<const FCForExprAST*>(expression))
-		return inferExprType(loop->getBody(), context, visitingFunctions);
-
-	if (auto* block = dynamic_cast<const FCBlockExprAST*>(expression))
-	{
-		if (block->getExpressions().empty())
-			return integerType(context);
-		return inferExprType(block->getExpressions().back().get(), context, visitingFunctions);
-	}
-
-	if (auto* sequence = dynamic_cast<const FCSeqExprAST*>(expression))
-	{
-		if (sequence->getExpressions().empty())
-			return integerType(context);
-		return inferExprType(sequence->getExpressions().back().get(), context, visitingFunctions);
-	}
-
-	if (auto* declaration = dynamic_cast<const FCVarDeclExprAST*>(expression))
-	{
-		if (declaration->decl == nullptr)
-			return inferExprType(declaration->initExpr.get(), context, visitingFunctions);
-		auto* declaredType = context.getType(declaration->decl->type);
-		return declaredType != nullptr ? declaredType : integerType(context);
-	}
-
-	if (auto* function = dynamic_cast<const FCFunctionAST*>(expression))
-		return inferFunctionReturnType(function, context, visitingFunctions);
-
-	return integerType(context);
-}
-
-llvm::Type* inferFunctionReturnType(const FCFunctionAST* function,
-	FCCodegenContext& context)
-{
-	std::unordered_set<const FCFunctionAST*> visitingFunctions;
-	return inferFunctionReturnType(function, context, visitingFunctions);
-}
-
 llvm::Value* castValue(FCCodegenContext& context, llvm::Value* value,
 	llvm::Type* targetType)
 {
@@ -229,11 +108,16 @@ llvm::Function* declareFunction(const FCFunctionAST* function,
 	if (function == nullptr)
 		return nullptr;
 
+	auto* record = context.compiledProgram.getFunction(function->getProtoName());
+	auto* returnType = record != nullptr && record->returnType != FCExprClass::FCTypeId::Error
+		? context.getType(record->returnType)
+		: integerType(context);
+
 	return createFunctionDeclaration(
 		context,
 		function->getProtoName(),
 		function->getProto()->getArgs(),
-		inferFunctionReturnType(function, context));
+		returnType);
 }
 
 } // namespace
@@ -590,12 +474,20 @@ llvm::Value* codegenIf(const FCIfExprAST* expression,
 	function->insert(function->end(), mergeBlock);
 	context.builder.SetInsertPoint(mergeBlock);
 
-	std::unordered_set<const FCFunctionAST*> noFunctions;
-	// The branch type is inferred independently from the two branches.
-	auto* thenType = inferExprType(expression->getThen(), context, noFunctions);
-	auto* elseType = inferExprType(expression->getElse(), context, noFunctions);
-	auto* phiType = thenType->isDoubleTy() || elseType->isDoubleTy()
-		? llvm::Type::getDoubleTy(context.llvmContext) : thenType;
+	auto* phiType = thenValue->getType();
+	if (thenValue->getType() != elseValue->getType())
+	{
+		if (thenValue->getType()->isDoubleTy())
+		{
+			elseValue = context.builder.CreateSIToFP(elseValue, thenValue->getType(), "doouble");
+			phiType = thenValue->getType();
+		}
+		else if (elseValue->getType()->isDoubleTy())
+		{
+			thenValue = context.builder.CreateSIToFP(thenValue, elseValue->getType(), "doouble");
+			phiType = elseValue->getType();
+		}
+	}
 	thenValue = castValue(context, thenValue, phiType);
 	elseValue = castValue(context, elseValue, phiType);
 	if (thenValue == nullptr || elseValue == nullptr)

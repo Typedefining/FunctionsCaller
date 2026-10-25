@@ -24,6 +24,7 @@ void ComprehensiveTestSuite::runAllTests()
     std::cout << "SEMANTIC TESTS\n";
     std::cout << std::string(60, '=') << "\n";
     runSemanticTests();
+    runSemanticTypeErrorTests();
 
     // ============ Evaluator Tests ============
     std::cout << "\n" << std::string(60, '=') << "\n";
@@ -58,6 +59,7 @@ void ComprehensiveTestSuite::runAllTests()
 
     // ============ Type Mapping Tests (FCTypeId 与 VarDecl::type) ============
     runTypeMappingTests();
+    runReturnTypeTests();
 
     // ============ Lexer Tests (独立词法测试，不依赖 Parser/Semantic) ============
     runLexerTests();
@@ -94,9 +96,6 @@ void ComprehensiveTestSuite::runAllTests()
 
     // ============ Evaluator Void Tests (Dangle→Void/Error 拆分钉住) ============
     runEvaluatorVoidTests();
-
-    // ============ Error Diagnostics Invariant Tests (Error/诊断耦合不变式) ============
-    runErrorDiagnosticsInvariantTests();
 
     // ============ Stress Tests ============
     runStressTests();

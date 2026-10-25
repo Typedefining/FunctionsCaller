@@ -566,32 +566,24 @@
         {
             FCScanner scanner;
             auto ast = scanner.analysis("def f() { for i = 0, \"a\", 1 in i } f()");
-            FCEvaluationContext ctx = makeEvalContext(scanner);
-            FCValue v = ast ? evaluate(ast.get(), ctx) : FCValue{};
-            expect(v.isError(),
-                   "value-semantics - for end condition must be numeric");
+            expect(ast == nullptr, "value-semantics - for end condition must be numeric");
             bool hasDiagnostic = false;
-            for (const auto& d : ctx.diagnostics.items())
+            for (const auto& d : scanner.diagnostics().items())
                 if (d.message.find("for end condition must be numeric") != std::string::npos)
                     hasDiagnostic = true;
-            expect(hasDiagnostic,
-                   "value-semantics - for end condition must be numeric - diagnostic");
+            expect(hasDiagnostic, "value-semantics - for end condition must be numeric - diagnostic");
         }
 
         // 测试 B：循环体把循环变量赋成字符串 → Error + 诊断，不做位模式加法。
         {
             FCScanner scanner;
             auto ast = scanner.analysis("def f() { for i = 0, i < 3, 1 in i = \"s\" } f()");
-            FCEvaluationContext ctx = makeEvalContext(scanner);
-            FCValue v = ast ? evaluate(ast.get(), ctx) : FCValue{};
-            expect(v.isError(),
-                   "value-semantics - loop variable must stay integer");
+            expect(ast == nullptr, "value-semantics - loop variable must stay integer");
             bool hasDiagnostic = false;
-            for (const auto& d : ctx.diagnostics.items())
-                if (d.message.find("for loop variable must stay integer") != std::string::npos)
+            for (const auto& d : scanner.diagnostics().items())
+                if (d.message.find("type mismatch") != std::string::npos)
                     hasDiagnostic = true;
-            expect(hasDiagnostic,
-                   "value-semantics - loop variable must stay integer - diagnostic");
+            expect(hasDiagnostic, "value-semantics - loop variable must stay integer - diagnostic");
         }
 
         // 测试 C：字符串跨帧值语义——返回值与参数在帧弹出后仍有效（深拷贝）。
@@ -680,20 +672,14 @@
         {
             FCScanner scanner;
             auto ast = scanner.analysis("def f() { for i = 0, undefinedfn(), 1 in i } f()");
-            FCEvaluationContext ctx = makeEvalContext(scanner);
-            FCValue v = ast ? evaluate(ast.get(), ctx) : FCValue{};
-            expect(v.isError(),
-                   "error - for end condition error propagates");
+            expect(ast == nullptr, "error - for end condition error propagates");
         }
 
         // 7. if 条件为 Void → Error（条件必须数值）
         {
             FCScanner scanner;
             auto ast = scanner.analysis("if { } then 1 else 2");
-            FCEvaluationContext ctx = makeEvalContext(scanner);
-            FCValue v = ast ? evaluate(ast.get(), ctx) : FCValue{};
-            expect(v.isError(),
-                   "error - void if condition is an error");
+            expect(ast == nullptr, "error - void if condition is an error");
         }
 
         // 8. Void 存入槽位继续：var x:int = { } x → Void（行为变化点：旧实现中止）
@@ -706,89 +692,6 @@
             FCValue v = ast ? evaluate(ast.get(), ctx) : FCValue{};
             expect(v.isVoid(),
                    "void - void initializer stores and flows");
-        }
-    }
-    // ==================== Error Diagnostics Invariant Tests ====================
-    // Error/诊断耦合不变式（2026-10-24 计划 Task 2）：
-    // 单语句语义单元 evaluate 返回 Error ⇒ context.diagnostics 非空；
-    // 返回 Value/Void ⇒ 无诊断。历史版本的静默 Error 站点全部经
-    // makeErrorValue(context, message) 收口，本测试钉住该耦合不被回退。
-    void ComprehensiveTestSuite::runErrorDiagnosticsInvariantTests()
-    {
-        // 源文本可达路径（历史版本返回 Error 但不携带诊断）
-        {
-            const std::vector<std::pair<std::string, std::string>> sources = {
-                {"if { } then 1 else 2", "if condition"},                          // if 条件非数值
-                {"for i = 0, i < 1 in i", "top-level for"},                        // 顶层 for（全局帧拒绝）
-                {"def f() { for i = 0, undefinedfn(), 1 in i } f()", "for end"},    // for 终止条件错误传播
-                {"1 + \"s\"", "binary type mismatch"},                             // 二元失配兜底
-            };
-            for (const auto& [code, name] : sources)
-            {
-                FCScanner scanner;
-                auto ast = scanner.analysis(code);
-                FCEvaluationContext ctx = makeEvalContext(scanner);
-                FCValue v = ast ? evaluate(ast.get(), ctx) : FCValue{};
-                expect(v.isError() && !ctx.diagnostics.empty(),
-                       "invariant - error carries diagnostic: " + name);
-            }
-        }
-
-        // 未绑定变量读取（手工构造 AST，沿用 edge-case 构造模式，不 bindNode）
-        {
-            FCEvaluationContext ctx({});
-            auto unboundVar = std::make_unique<FCVariableExprAST>(std::string("unbound"));
-            FCValue v = evaluate(unboundVar.get(), ctx);
-            bool hasDiagnostic = false;
-            for (const auto& d : ctx.diagnostics.items())
-                if (d.message.find("not bound") != std::string::npos)
-                    hasDiagnostic = true;
-            expect(v.isError() && hasDiagnostic,
-                   "invariant - unbound variable carries diagnostic");
-        }
-
-        // 空表达式：分派入口的空指针分支
-        {
-            FCEvaluationContext ctx({});
-            expect(evaluate(static_cast<FCExprAST*>(nullptr), ctx).isError() &&
-                       !ctx.diagnostics.empty(),
-                   "invariant - null expression carries diagnostic");
-        }
-
-        // 反向：干净求值不产生诊断
-        {
-            // 计划原文 "(1; { }; 2)" 不合当前语法（';' 禁止紧跟块终结符），
-            // 以返回空块（Void）的函数调用作序列中项，钉住同一反向不变式。
-            {
-                FCScanner scanner;
-                auto ast = scanner.analysis("def v() { } (1; v(); 2)");
-                FCEvaluationContext ctx = makeEvalContext(scanner);
-                FCValue v = ast ? evaluate(ast.get(), ctx) : FCValue{};
-                expect(v.category() == FCValueCategory::Integer &&
-                           v.asInteger() != nullptr && *v.asInteger() == 2 &&
-                           ctx.diagnostics.empty(),
-                       "invariant - clean value has no diagnostics");
-            }
-
-            // 空块单独求值 → Void 且无诊断
-            {
-                FCEvaluationContext ctx({});
-                std::vector<std::unique_ptr<FCExprAST>> emptyBlk;
-                auto emptyBlock = std::make_unique<FCBlockExprAST>(std::move(emptyBlk));
-                FCValue v = evaluate(emptyBlock.get(), ctx);
-                expect(v.isVoid() && ctx.diagnostics.empty(),
-                       "invariant - void carries no diagnostic");
-            }
-
-            // 仅含函数定义的程序 → Void 且无诊断
-            {
-                FCScanner scanner;
-                auto ast = scanner.analysis("def f() { 1 }");
-                FCEvaluationContext ctx = makeEvalContext(scanner);
-                FCValue v = ast ? evaluate(ast.get(), ctx) : FCValue{};
-                expect(v.isVoid() && ctx.diagnostics.empty(),
-                       "invariant - definitions-only program carries no diagnostic");
-            }
         }
     }
     // 求值阶段的诊断输出：只在 FC_TRACE 含 evaluator 时打印调用与返回

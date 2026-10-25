@@ -280,7 +280,7 @@ add(1 + 2, 3 * 4)
 add(square(2), 3)
 ```
 
-参数个数与类型在解释执行 / codegen 阶段校验（例如 `f(1, 2)` 对单参数函数 `f` 会报错）。
+参数个数与类型在语义分析阶段校验（前向引用合法）。例如 `f(1, 2)` 对单参数函数 `f` 会被语义检查拒绝。
 
 ## 变量声明
 
@@ -424,19 +424,12 @@ add(10, 3)
 其他已知行为：
 
 - 循环变量仅支持 `int`，浮点循环变量会报错；
+- 混合数值运算（`int` 与 `double` 互运算）为类型错误，无隐式转换；
 - LLVM 生成的顶层 `__fc_main` 会把最终表达式 cast 成整数，cast 失败时回退为常量 `0`；
 - 字符串拼接的 LLVM codegen 调用 `strlen` / `malloc` / `strcpy` / `strcat`（作为外部函数声明），拼接结果不释放内存，且链接时需要这些 libc 符号；
 - `vcpkg.json` 中的 `name` 字段仍是旧名称（`sampler-array-shader-compiler`），不影响构建。
 
 解释执行和 LLVM IR 生成都以函数的最后一个表达式（块的最后一条语句）作为返回值。
-
-解释器的运行时值有五个类别：`Integer` / `Floating` / `String` 是携带值的类别；
-`Void` 表示无值（空块、仅含函数定义的程序、`def` 定义语句、`FCValue` 默认构造）；
-`Error` 表示求值失败（如函数未找到、槽位越界），每个 `Error` 都伴随一条结构化诊断
-（打印为 `error[evaluator]: <message>`）。入口程序把求值结果打印为
-`[result] 5` / `[result] "..."` / `[result] Void` / `[result] Error`。
-传播规则：`Void` 流经序列与块（求值继续推进，序列/块的值取最后一个表达式的值，
-最后一个表达式是 `Void` 时整体即为 `Void`）；`Error` 立即中止所在序列/块并向上传播。
 
 ## 单元测试和覆盖率
 
@@ -477,7 +470,7 @@ auto ast = scanner.analysis("def add(a:int, b:int) { a + b } add(2, 3)");
 ```cpp
 FCExprClass::FCEvaluationContext context(scanner.semanticContext().getCompiledProgram());
 auto result = FCExprClass::evaluate(ast.get(), context);
-// result.type 为 FCValueCategory::Integer / Floating / String / Void / Error
+// result.type 为 FCValueCategory::Integer / Floating / String / Dangle
 ```
 
 生成 LLVM IR：

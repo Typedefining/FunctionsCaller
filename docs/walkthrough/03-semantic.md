@@ -162,7 +162,7 @@ Remove-Item Env:\FC_TRACE
 
 1. **两个函数共享同一条帧记录**：早期用占位名登记帧，注册函数名时“改名 + 移动”逻辑错位，`isEven` 与 `isOdd` 一度指向同一个 `CompiledFunction`（`params=[0, 0]`、`frameSize=2`）。现在 `registerFunction()` 把当前帧记录**移交**给函数名（`semantic.cc:184-186`），每个函数独立持有自己的记录。
 2. **两个深度共用一个计数器**：帧基址曾取 `m_scopeStack.size()`，而帧记录数组只按函数帧增长——函数体内再定义函数时，下标越界，Debug 下断言失败。现在帧基址用帧计数域（`m_frameRecords.size()`），同时保存进入时的作用域深度用于弹出（`semantic.cc:46-62`）。
-3. **声明节点没有绑定**：`analyzeVarDecl()` 曾只声明不绑定，语义分析照样通过，求值阶段才因为取不到符号返回 `Error`。现在声明后立刻 `bindVariable()`（`semantic.cc:394`）。
+3. **声明节点没有绑定**：`analyzeVarDecl()` 曾只声明不绑定，语义分析照样通过，求值阶段才因为取不到符号返回 `Dangle`。现在声明后立刻 `bindVariable()`（`semantic.cc:394`）。
 4. **符号表同名不覆盖**：`SymbolTable::addSymbol()` 遇到同名直接返回已有符号，而 `declareVariable()` 不检查返回值——遮蔽时内层声明在符号表里“消失”，只有绑定表还保留两条不同的绑定。这个行为是刻意的（符号表用于摘要），但读代码时容易误判成丢符号。
 
 ---

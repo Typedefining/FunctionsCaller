@@ -10,7 +10,7 @@
             {"\"hello\" + \" world\"", "string literal"},
             {"# comment\n1 + 2", "comment handling"},
             {"var g:int = 2; g = g + 3; g", "top-level declaration"},
-            {"def add(a:int, b:double) { a + b }", "function with typed params"},
+            {"def add(a:int, b:double) { a }", "function with typed params"},
             {"def empty() { 42 }", "zero-argument function"},
             {"def choose(a:int) { if a < 1 then 10 else 20 }", "if expression"},
             {"def loop(n:int) { for i = 0, i < n, 1 in i }", "for expression"},
@@ -47,7 +47,7 @@
             {"var g:double = 1.5; def r() { g }", "double global"},
             {"def many(a:int, b:int, c:int, d:int) { a + b + c + d }", "four-argument function"},
             {"def mix(a:int, b:double, c:string) { a }", "mixed parameter types"},
-            {"1.0 + 2", "float int expression"},
+            {"1.0 + 2.0", "float int expression"},
             {"def deep(x:int) { if x < 1 then 1 else (x * deep(x - 1)) }", "recursive deep expression"},
             // ---- 新增：边界输入 ----
             {"", "empty input"},
@@ -67,7 +67,7 @@
             {"var g:int = 1; def bump() { g = g + 1 } bump()", "global function call"},
             {"def f() { (1 + 2) * (3 + 4) - 5 / 2 }", "arithmetic with parens"},
             {"0.5 + 0.25", "fractional literals"},
-            {"def f(a:int, b:double, c:string, d:int) { a + b }", "four mixed params"}
+            {"def f(a:int, b:double, c:string, d:int) { a }", "four mixed params"}
         };
 
         for (const auto& [code, name] : scannerCases)
@@ -281,13 +281,14 @@
             {"var s:string = \"x\"; def get() { s }", "global string read", true},
             {"def nest() { { var a:int = 1; { var b:int = 2; a + b } } }", "deeply nested blocks", true},
             {"def two() { var x:int = 1; var y:int = 2; x + y }", "multiple locals", true},
-            {"var g1:int = 1; var g2:double = 2.5; def f() { g1 + g2 }", "mixed globals", true},
+            {"var g1:int = 1; var g2:double = 2.5; def f() { g1 + g2 }", "mixed globals", false},
             {"def cmp(a:int, b:int) { if a < b then a else b }", "comparison expression", true},
             {"def strcat(a:string, b:string) { a + b }", "string concat function", true},
             {"def seq() { (var x:int = 1; x + 1; x + 2) }", "sequence with declaration", true},
             {"def recurse(n:int) { if n < 1 then 0 else recurse(n - 1) + 1 }", "recursion", true},
             {"def many(a:int, b:int, c:int, d:int, e:int) { a + b + c + d + e }", "five parameters", true},
-            {"var g:int = 1; var h:double = 2.0; var s:string = \"x\"; g + h", "three typed globals", true},
+            {"var g:int = 1; var h:double = 2.0; var s:string = \"x\"; g", "three typed globals", true},
+            {"var g:int = 1; var h:double = 2.0; var s:string = \"x\"; g + h", "mixed globals top", false},
             {"def f() { var x:int = 1; if x then 2 else 3 }", "local in if", true},
             {"def f(n:int) { var s:int = 0; for i = 0, i < n, 1 in s = s + i; s }", "accumulator function", true}
         };
@@ -301,8 +302,16 @@
             auto ast = scanner.analysis(code);
             if (!ast)
             {
-                expect(false, "semantic - " + name + " (scanner failed)");
-                continue;
+                if (expected)
+                {
+                    expect(false, "semantic - " + name + " (scanner failed)");
+                    continue;
+                }
+                else
+                {
+                    expect(true, "semantic - " + name + " (expected error)");
+                    continue;
+                }
             }
 
             const auto& semanticCtx = scanner.semanticContext();
@@ -880,7 +889,63 @@
                    "semantic-analyzer - bindVariable rejects null symbol");
         }
     }
-    // ==================== Symbol Table Tests ====================
+    // ==================== Semantic Type Error Tests ====================
+    void ComprehensiveTestSuite::runSemanticTypeErrorTests()
+    {
+        std::cout << "\n" << std::string(60, '=') << "\n";
+        std::cout << "SEMANTIC TYPE ERROR TESTS\n";
+        std::cout << std::string(60, '=') << "\n";
+
+        std::vector<std::string> errorCases = {
+            "var x:int = \"s\"",
+            "var x:int = 1.5",
+            "var x:double = 1",
+            "def f() { 1 + 2.0 }",
+            "def f() { 1.0 + 2 }",
+            "def f() { 1 = 2 }",
+            "def f() { \"a\" - \"b\" }",
+            "def f() { \"a\" * 2 }",
+            "def f(a:string,b:string) { a < b }",
+            "def f() { if \"a\" then 1 else 2 }",
+            "def f() { if 1 then 1 else 2.0 }",
+            "def f() { for i = 0.0, i < 3, 1 in i }",
+            "def f() { for i = 0, \"a\", 1 in i }",
+            "def f() { for i = 0, i < 3, \"s\" in i }",
+            "var x:int = { }",
+            "var g1:int = 1; var g2:double = 2.5; def f() { g1 + g2 }",
+            "var g:int = 1; var h:double = 2.0; var s:string = \"x\"; g + h",
+            "def f(a:double) { a } def g() { f(1) }",
+            "def mixed(a:int, b:double) { a + b }",
+            "var gd:double = 1.5; var gi:int = 2; def mix2() { gd + gi }",
+            "def f(a:double) { a } def g() { f(1) }",
+        };
+
+        for (const auto& code : errorCases)
+        {
+            std::cout << "  Testing error: " << code << "\n";
+            FCScanner scanner;
+            auto ast = scanner.analysis(code);
+            bool isErr = (ast == nullptr);
+            bool stageOk = false;
+            if (isErr && !scanner.diagnostics().empty()) {
+                stageOk = scanner.diagnostics()[0].stage == "semantic";
+            }
+            expect(isErr && stageOk, "semantic-type-error - " + code);
+        }
+
+        std::vector<std::string> successCases = {
+            "def concat(a:string,b:string) { a + b }",
+            "def f(n:double) { if n < 2.0 then n else n }",
+            "if 1.5 then 1 else 2",
+        };
+        for (const auto& code : successCases)
+        {
+            std::cout << "  Testing success: " << code << "\n";
+            FCScanner scanner;
+            auto ast = scanner.analysis(code);
+            expect(ast != nullptr, "semantic-type-success - " + code);
+        }
+    }
     void ComprehensiveTestSuite::runSymbolTableTests()
     {
         std::cout << "\n" << std::string(60, '=') << "\n";
@@ -1170,4 +1235,50 @@
         expect(VarDecl("a", "double").type == FCTypeId::Double, "type-map - double");
         expect(VarDecl("a", "string").type == FCTypeId::String, "type-map - string");
         expect(VarDecl("a", "bogus").type == FCTypeId::Error, "type-map - unknown maps to Error");
+    }
+
+    // ==================== Return Type Tests (Phase 2 不动点产物) ====================
+    void ComprehensiveTestSuite::runReturnTypeTests()
+    {
+        std::cout << "\n" << std::string(60, '=') << "\n";
+        std::cout << "RETURN TYPE TESTS\n";
+        std::cout << std::string(60, '=') << "\n";
+
+        struct ReturnTypeCase
+        {
+            std::string code;
+            std::string functionName;
+            FCTypeId expected;
+        };
+
+        std::vector<ReturnTypeCase> cases = {
+            {"def f() { 1 }", "f", FCTypeId::Int},
+            {"def f() { 1.5 }", "f", FCTypeId::Double},
+            {"def f() { \"s\" }", "f", FCTypeId::String},
+            {"def f() { }", "f", FCTypeId::Error},                       // 空函数体契约：analysis 成功 + Error
+            {"def fib(n:int) { if n < 2 then n else fib(n - 1) + fib(n - 2) }", "fib", FCTypeId::Int},
+            {"def a() { b() } def b() { 2.0 }", "a", FCTypeId::Double},   // 前向引用
+            {"def d(n:double) { if n < 2.0 then n else d(n - 1.0) }", "d", FCTypeId::Double},  // 不动点必要性
+        };
+
+        for (const auto& testCase : cases)
+        {
+            FCScanner scanner;
+            auto ast = scanner.analysis(testCase.code);
+            expect(ast != nullptr, "return-type - analysis ok: " + testCase.code);
+
+            const auto* record =
+                scanner.semanticContext().getCompiledFunction(testCase.functionName);
+            expect(record != nullptr, "return-type - record exists: " + testCase.functionName);
+            expect(record->ast != nullptr, "return-type - ast linked: " + testCase.functionName);
+            expect(record->returnType == testCase.expected,
+                   "return-type - " + testCase.functionName + " has expected type");
+        }
+
+        // 空函数体契约：analysis 不失败（ast 非空）
+        {
+            FCScanner scanner;
+            auto ast = scanner.analysis("def f() { }");
+            expect(ast != nullptr, "return-type - empty body analysis succeeds");
+        }
     }

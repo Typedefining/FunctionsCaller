@@ -16,13 +16,13 @@
 
 | 特性 | 说明 |
 |------|------|
-| 类型 | `int` / `double` / `string`；求值结果类别为 Integer/Floating/String/Void/Error（Void=无值，Error=错误） |
+| 类型 | `int` / `double` / `string`，值缺失用 `Dangle` 哨兵表示 |
 | 变量 | `var name:type = init`（强制初始化），顶层任意位置（含块/分支内）声明一律为全局（README:291 规则） |
 | 函数 | `def name(a:type, b:type) { body }`，函数体为块，末表达式即返回值 |
 | 控制流 | `if c then e else e`（else 必选）、`for i = start, end[, step] in body` |
 | 运算符 | `=`(5) `<`(9) `+ -`(10) `* /`(20)，无逻辑运算符与一元负号 |
 | 作用域 | 块级嵌套作用域 + 同名遮蔽（shadowing），先声明后使用 |
-| 错误处理 | 各阶段均返回错误表示（null AST / Error 值 + 结构化诊断），不中断进程 |
+| 错误处理 | 各阶段均返回错误哨兵（null AST / Dangle 值），不中断进程 |
 
 工程特性：
 
@@ -87,7 +87,7 @@ runtime.h → token.h → lexer.h → parser.h
 
 | 模块 | 文件（行数） | CMake 目标 | 核心职责 |
 |------|------------|-----------|---------|
-| **Runtime** | `runtime.h` (37) | — | `FCValue`（Integer/Floating/String/Void/Error 变体；monostate=Void，FCErrorValue=Error）、`Frame`（funcName + locals 槽位向量）、`VariableRuntimeInfo::frameIndex`（-1=全局，≥0=帧下标） |
+| **Runtime** | `runtime.h` (37) | — | `FCValue`（Integer/Floating/String/Dangle 联合体）、`Frame`（funcName + locals 槽位向量）、`VariableRuntimeInfo::frameIndex`（-1=全局，≥0=帧下标） |
 | **Token** | `token.h/cc` (387/153) | FunctionsCore | AST 节点族（13 种）；`FCToken`/`FCBinaryOp` 枚举；`binaryOpOf` 为 kind→运算符唯一映射点（替代已删除的 `charToBinaryOp` 与 `Token::binop`）；`VariableSymbol`（declaration/slot/scopeDepth/runtime）；`SemanticBinding`（AST节点→符号身份绑定表）；`SymbolTable`；`CompiledFunction`/`CompiledProgram` |
 | **Lexer** | `lexer.h/cc` (52/186) | FunctionsCore | `FC::Lexer`：字符流→Token 流；Token 只携带 `kind/lexeme/line/column`（词法类别与位置；运算符种类由解析层推得）；读取位置与识别逻辑封装在可复制的 `Cursor` 中，`peekToken()` 在游标副本上识别、不推进主游标（无 `mutable`/缓存）；`nextToken/peekToken/currentToken/isAtEnd/reset`；标识符/关键字/数字/字符串/注释/标点全路径；词法错误返回 `tok_error`；**100% 行覆盖** |
 | **Trace** | `trace.h/cc` (16/56) | FunctionsCore | `traceEnabled(stage)`：按环境变量 `FC_TRACE` 的逗号分隔阶段列表判断是否输出诊断；各阶段只在入口/出口调用，业务分支不含打印；**100% 行覆盖** |
@@ -201,7 +201,7 @@ Evaluator/Codegen: switch (FCBinaryOp) 分派
 | Lexer | 词法错误→`tok_error`（`lexeme` 携带可直接展示的说明，如 `unterminated string literal`） | 终止扫描，Parser 报错并置 `hadError()` |
 | Parser | `nullptr` + `hadError()` 标志 | 跳过当前 token 继续尝试 |
 | SemanticAnalyzer | `analyze()` 返回 false + stderr 诊断（如 `variable 'x' is not declared`） | Facade 标记 `hadSemanticError` |
-| Evaluator | `Error` 值 + 结构化诊断（Error/诊断耦合不变式） | 逐表达式向上传播，中止所在序列/块 |
+| Evaluator | `Dangle` 值哨兵 | 逐表达式向上传播 |
 | Codegen | `nullptr` + stderr 诊断 | 保留已生成 IR 片段 |
 
 ---
@@ -252,7 +252,7 @@ Evaluator/Codegen: switch (FCBinaryOp) 分派
 - 循环变量仅 `int`；浮点循环报错
 - 字符串拼接 codegen 调用 libc（strlen/malloc/strcpy/strcat），不释放内存
 - LLVM 顶层 `__fc_main` 将最终表达式 cast 为 int，失败回退常量 0
-- `for` 循环变量为函数域局部；顶层 for（无函数帧）求值返回 Error（有诊断，受保护路径）
+- `for` 循环变量为函数域局部；顶层 for（无函数帧）求值返回 Dangle（受保护路径）
 - 同一 `FCEvaluationContext` 复用时，`popFrame` 不清除 `isCaptured` 符号值（闭包预留，当前语言不可触发）
 
 ---

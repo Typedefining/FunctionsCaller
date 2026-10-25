@@ -165,11 +165,10 @@
         {
             FCScanner scanner;
             auto ast = scanner.analysis("def f() { 1 = 2 } f()");
-            FCEvaluationContext context(scanner.semanticContext().getCompiledProgram());
-            FCValue v = evaluate(ast.get(), context);
-            expect(v.isError(), "diag: bad assign yields Error");
-            expect(!context.diagnostics.empty()
-                   && context.diagnostics.items()[0].message.find("assignment") != std::string::npos,
+            expect(ast == nullptr, "diag: bad assign yields Error (semantic stage)");
+            expect(!scanner.diagnostics().empty()
+                   && scanner.diagnostics().items()[0].stage == "semantic"
+                   && scanner.diagnostics().items()[0].message.find("assignment") != std::string::npos,
                    "diag: bad assignment recorded");
         }
         // 15. codegen 错误：赋值左侧非变量

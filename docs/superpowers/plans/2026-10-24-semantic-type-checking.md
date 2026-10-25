@@ -24,7 +24,7 @@
 
 ## Review Focus
 
-1. **混合类型算术裁决**：现有基线自相矛盾——evaluator 错误用例（unit_test.cc:3342-3343 `1 + 2.0` 判 Dangle）vs semantic/codegen 成功用例（:688、:1250 mixed globals 判成功）。本计划裁决为**错误**（严格同型）。若审核要求 C 式加宽（int→double 提升），Phase 3 二元规则、Task 3 re-baseline 清单与 evaluator 零修改前提全部重写。→ Task 3 测试。
+1. **混合类型算术裁决**：现有基线自相矛盾——evaluator 错误用例（test_semantic.cc:3342-3343 `1 + 2.0` 判 Dangle）vs semantic/codegen 成功用例（test_semantic.cc:284/291 mixed globals 判成功）。本计划裁决为**错误**（严格同型）。若审核要求 C 式加宽（int→double 提升），Phase 3 二元规则、Task 3 re-baseline 清单与 evaluator 零修改前提全部重写。→ Task 3 测试。
 2. **递归函数返回类型**：现 codegen 以"环上谎报 Int"工作（codegen.cc:41-42 visiting 集合），加宽路径掩盖谎报；严格同型下谎报暴露（double 自递归将错判）。Phase 2 不动点替代之。测试必须包含 double 自递归。→ Task 2 测试。
 3. **前向引用**：现由 evaluator `index()` 与 codegen 先声明全部函数支持；Phase 2/3 在注册完成后运行，天然支持，测试钉住。→ Task 4 测试。
 4. **手工构造 AST 的 codegen 路径**（无语义记录）：declareFunction 改读记录后，手工函数节点报错。Task 5 审计现有手工用例（已知 :1466 期望失败、:1469-1472 nullBody2 构造后未使用）；若存在期望成功的手工函数用例，改为经 FCScanner 产出 AST。→ Task 5 步骤 3。
@@ -47,8 +47,8 @@
 ### Task 1: `FCTypeId` 枚举与唯一映射点；codegen `getType(FCTypeId)`
 
 **Files:**
-- Modify: `Calculater/ast.h`（VarDecl）、`Calculater/ast.cc`（若构造函数在外实现则同步）、`Calculater/codegen.h`、`Calculater/codegen.cc:238-245,71,197,613,730`（getType 调用点）、`Calculater/unit_test.cc:1486-1490`（getType API 断言）
-- Test: `Calculater/unit_test.cc`（新增 runTypeMappingTests，并入 runTokenApiTests 区块旁）
+- Modify: `Calculater/ast.h`（VarDecl）、`Calculater/ast.cc`（若构造函数在外实现则同步）、`Calculater/codegen.h`、`Calculater/codegen.cc:238-245,71,197,613,730`（getType 调用点）、`Calculater/tests/test_codegen.cc:264-275`（getType API 断言）
+- Test: `Calculater/tests/test_codegen.cc`（新增 runTypeMappingTests，并入 runCodegenApiTests 区块旁）
 
 **Interfaces:**
 - Produces（ast.h）:
@@ -67,7 +67,7 @@ struct VarDecl {
 - Consumes: 无（首任务）。
 - 测试构造 `VarDecl("a","int")` 的既有代码全部不变（构造签名保持字符串入参）。
 
-- [ ] **Step 1: 写失败测试**——VarDecl 映射四例（int/double/string/未知→Error）与 `getType(FCTypeId::*)` 三例；把 unit_test.cc:1486-1490 的字符串版 getType 断言改写为枚举版（这五条同属本步，一次过编译期）。
+- [ ] **Step 1: 写失败测试**——VarDecl 映射四例（int/double/string/未知→Error）与 `getType(FCTypeId::*)` 三例；把 test_codegen.cc:264-275 的字符串版 getType 断言改写为枚举版（这五条同属本步，一次过编译期）。
 
 ```cpp
 expect(VarDecl("a", "int").type == FCTypeId::Int, "type-map - int");
@@ -85,8 +85,8 @@ expect(cc.getType(FCTypeId::Double)->isDoubleTy(), "codegen-api - getType Double
 ### Task 2: Phase 2——返回类型不动点；`CompiledFunction::returnType` 语义产物
 
 **Files:**
-- Modify: `Calculater/symbol.h`（CompiledFunction 加字段）、`Calculater/semantic.h`（SemanticAnalyzer 私有方法）、`Calculater/semantic.cc`（analyze 入口后接 Phase 2）、`Calculater/unit_test.cc`
-- Test: `Calculater/unit_test.cc`（新增 runReturnTypeTests）
+- Modify: `Calculater/symbol.h`（CompiledFunction 加字段）、`Calculater/semantic.h`（SemanticAnalyzer 私有方法）、`Calculater/semantic.cc`（analyze 入口后接 Phase 2）、`Calculater/tests/test_semantic.cc`
+- Test: `Calculater/tests/test_semantic.cc`（新增 runReturnTypeTests）
 
 **Interfaces:**
 - Produces（symbol.h）: `CompiledFunction` 增 `FCTypeId returnType = FCTypeId::Error;`（Phase 2 回填）。
@@ -124,8 +124,8 @@ void computeReturnTypes();
 ### Task 3: Phase 3 走查 A——声明/赋值/二元/if/for 类型规则
 
 **Files:**
-- Modify: `Calculater/semantic.h`（`bool checkTypes(const FCExprClass::FCExprAST*)`）、`Calculater/semantic.cc`、`Calculater/unit_test.cc:688,694`（re-baseline 两例）与错误用例区
-- Test: `Calculater/unit_test.cc`（新增 runSemanticTypeErrorTests；errorCases 列表驱动）
+- Modify: `Calculater/semantic.h`（`bool checkTypes(const FCExprClass::FCExprAST*)`）、`Calculater/semantic.cc`、`Calculater/tests/test_semantic.cc:284,290-291`（re-baseline 两例）与错误用例区
+- Test: `Calculater/tests/test_semantic.cc`（新增 runSemanticTypeErrorTests；errorCases 列表驱动）
 
 **Interfaces:**
 - Produces: `checkTypes(root)`——与 analyzeExpr 同构的分派走查（12 节点），每规则先递归子节点再自检，首个违规 `reportError` 并返回 false（沿用 Phase 1 的 fail-fast 单错误风格）。`analyze()` 顺序：Phase 1 → Phase 2 → checkTypes。
@@ -136,8 +136,9 @@ void computeReturnTypes();
   - If：条件 Int/Double，否则 `if condition must be numeric`；then/else 同型，否则 `if branch types do not match`。
   - For：start/end/step 均 Int，否则 `for <part> must be int`（part=start/end/step）。此规则在源程序层面消除 evaluator union 误读（审查项 #3 子条）。
 - Re-baseline（本任务仅此两处翻转，其余全部不变）：
-  - unit_test.cc:688 `{"var g1:int = 1; var g2:double = 2.5; def f() { g1 + g2 }", "mixed globals", true}` → 移入错误用例（期望 analysis 失败 + semantic 诊断）。
-  - unit_test.cc:694 `{"var g:int = 1; var h:double = 2.0; var s:string = \"x\"; g + h", "three typed globals", true}` → 代码尾部 `g + h` 改为 `g`（保留三类型声明成功原意），另新增 `g + h` 混合顶层错误用例。
+  - test_semantic.cc:284 `{"var g1:int = 1; var g2:double = 2.5; def f() { g1 + g2 }", "mixed globals", false}` → 已改为期望 false（scanner 阶段已因类型错误返回 null）。
+  - test_semantic.cc:290 `{"var g:int = 1; var h:double = 2.0; var s:string = \"x\"; g", "three typed globals", true}` → 保留，`g` 的三类型声明成功原意。
+  - test_semantic.cc:291 `{"var g:int = 1; var h:double = 2.0; var s:string = \"x\"; g + h", "mixed globals top", false}` → 已改为期望 false。
 
 - [ ] **Step 1: 写失败测试**——错误列表（每例断言 `analysis()` 返回 nullptr 且 `scanner.diagnostics()` 首条 stage=="semantic"）：`var x:int = "s"`、`var x:int = 1.5`、`var x:double = 1`（严格同型）、`def f() { 1 + 2.0 }`、`def f() { 1.0 + 2 }`、`def f() { 1 = 2 }`、`def f() { "a" - "b" }`、`def f() { "a" * 2 }`、`def f(a:string,b:string) { a < b }`、`def f() { if "a" then 1 else 2 }`、`def f() { if 1 then 1 else 2.0 }`、`def f() { for i = 0.0, i < 3, 1 in i }`、`def f() { for i = 0, "a", 1 in i }`、`def f() { for i = 0, i < 3, "s" in i }`、`var x:int = { }`、:688/:1250 两例混合全局。成功钉子：`def concat(a:string,b:string) { a + b }`、`def f(n:double) { if n < 2.0 then n else n }`、`if 1.5 then 1 else 2`（条件 double 合法）。
 - [ ] **Step 2: 构建 + ctest 确认红**。
@@ -148,8 +149,8 @@ void computeReturnTypes();
 ### Task 4: Phase 3 走查 B——调用检查（存在性/元数/实参类型）
 
 **Files:**
-- Modify: `Calculater/semantic.cc`（checkTypes 的 Call 分支）、`Calculater/unit_test.cc:585-621`（diag #12/#13/#14 re-baseline）、错误用例区
-- Test: `Calculater/unit_test.cc`
+- Modify: `Calculater/semantic.cc`（checkTypes 的 Call 分支）、`Calculater/tests/test_semantic.cc`（diag 区：`undefinedfn(1)` / `add(2,3,4)` / `1 = 2` 归属改写）与错误用例区
+- Test: `Calculater/tests/test_semantic.cc`
 
 **Interfaces:**
 - Call 规则：被调函数不在 `getCompiledProgram().functions`（`ast != nullptr` 判真）→ `function '<n>' is not defined`；实参数 ≠ 原型形参数 → `argument count mismatch in '<n>'`；逐实参 `typeOfExpr(arg)` ≠ 形参 `decl->type` → `argument type mismatch in '<n>'`。Phase 2/3 在注册完成后运行，**前向引用天然合法**，无需延迟队列。
@@ -167,8 +168,8 @@ void computeReturnTypes();
 ### Task 5: codegen 消费语义产物；删除 inferExprType 家族与 definitions 映射
 
 **Files:**
-- Modify: `Calculater/codegen.h:34`（删 definitions 成员）、`Calculater/codegen.cc`（删 :30-143 inferExprType/inferFunctionReturnType、:91-99 其 call 分支、:785 definitions 填充、:583-588 codegenIf 类型推断、declareFunction 改造）、`Calculater/unit_test.cc`（手工 AST 用例审计）
-- Test: `Calculater/unit_test.cc`（既有 codegen 全套；无新增断言家族，审计修正属本任务）
+- Modify: `Calculater/codegen.h:34`（删 definitions 成员）、`Calculater/codegen.cc`（删 inferExprType/inferFunctionReturnType 家族、definitions 填充、codegenIf 类型推断、declareFunction 改造）、`Calculater/tests/test_codegen.cc`（手工 AST 用例审计）
+- Test: `Calculater/tests/test_codegen.cc`（既有 codegen 全套；无新增断言家族，审计修正属本任务）
 
 **Interfaces:**
 - `declareFunction`：`context.compiledProgram.getFunction(name)` 有记录且 `record->ast == function` → 返回类型 `getType(record->returnType)`；`returnType == Error`（空函数体）或无记录（手工 AST）→ `logCodegenError` 并返回 nullptr。**`inferFunctionReturnType`/`inferExprType` 全家族删除。**
@@ -178,7 +179,7 @@ void computeReturnTypes();
 
 - [ ] **Step 1: 基线三连**（记录绿与覆盖率基线）。
 - [ ] **Step 2: 实现**——declareFunction 改造 + codegenIf phi 改造 + 删三个函数/成员。
-- [ ] **Step 3: 手工 AST 审计**——grep unit_test.cc 中 `make_unique<FCFunctionAST>`、`make_unique<FCIfExprAST>`、`codegen(` 直驱用例：已知 :1466 期望 nullptr ✓、:1469-1472 nullBody2 未使用 ✓、:1454-1461 原型/空指针 API 用例不经过 declareFunction ✓。若发现"手工构造带函数体且期望 codegen 成功"的用例，改为经 FCScanner 产出 AST（保持期望值不变）；发现依赖 definitions 的断言一并删除。
+- [ ] **Step 3: 手工 AST 审计**——grep test_codegen.cc 中 `make_unique<FCFunctionAST>`、`make_unique<FCIfExprAST>`、`codegen(` 直驱用例：已知 :1466 期望 nullptr ✓、:1469-1472 nullBody2 未使用 ✓、:1454-1461 原型/空指针 API 用例不经过 declareFunction ✓。若发现"手工构造带函数体且期望 codegen 成功"的用例，改为经 FCScanner 产出 AST（保持期望值不变）；发现依赖 definitions 的断言一并删除。
 - [ ] **Step 4: 三连验证**（重点：`def empty() {}` 仍"analysis 成功 + codegen 失败"；空指针/原型 API 用例不变）。
 - [ ] **Step 5: Commit** `git commit -m "refactor: codegen consumes semantic return types, drop inferExprType"`
 

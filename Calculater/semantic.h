@@ -159,6 +159,14 @@ public:
     bool analyzeNumber(const FCExprClass::FCNumberExprAST *node);
     bool analyzeString(const FCExprClass::FCStringExprAST *node);
 
+    // 全类型计算：读绑定符号与 callReturns；非法组合返回 Error（不报告——报告职责在 Phase 3）
+    FCExprClass::FCTypeId typeOfExpr(const FCExprClass::FCExprAST *expr,
+                        const std::unordered_map<std::string, FCExprClass::FCTypeId> &callReturns);
+    // Phase 3：严格类型走查（声明/赋值/二元/if/for），先递归子节点再自检，首错即返 false
+    bool checkTypes(const FCExprClass::FCExprAST *root);
+    // Phase 2：不动点迭代（乐观初值 Int，固定 4 轮），结果写入各 CompiledFunction::returnType
+    void computeReturnTypes();
+
     // AST 分派访客：由 dispatchAST 驱动，12 个 visit 重载分别委托
     // 对应的 analyze* 方法；嵌套类可访问外层私有成员。
     struct DispatchVisitor {
@@ -183,6 +191,9 @@ public:
     };
 
     std::shared_ptr<VariableSymbol> resolveVariable(const std::string &name);
+
+    // Phase 2/3 共享的调用返回类型表（computeReturnTypes 填充，checkTypes/typeOfExpr 消费）
+    std::unordered_map<std::string, FCExprClass::FCTypeId> m_callReturns;
   };
 
 private:

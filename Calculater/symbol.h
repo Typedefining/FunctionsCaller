@@ -81,6 +81,7 @@ struct CompiledFunction {
   std::vector<int> parametersIdx;  // 形参槽位，按原型声明顺序，语义期填充
   SymbolTable symbols;
   int frameSize;
+  FCExprClass::FCTypeId returnType = FCExprClass::FCTypeId::Error;  // Phase 2 不动点产物；Error=未定/非法
 
   CompiledFunction()
     : ast(nullptr)
