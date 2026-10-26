@@ -49,7 +49,7 @@ ctest --preset nested
 
 依赖管理要点：
 
-- triplet 使用仓库内 `triplets/x64-windows-debug.cmake`（仅安装 debug 库，省一半磁盘）；
+- triplet 使用标准 `x64-windows`（release+debug 双份库在仓库外的依赖目录）；
 - 依赖安装目录在仓库外：`../FunctionsCaller-deps`（由 preset 的 `VCPKG_INSTALLED_DIR`
   指定），仓库内不再出现 `vcpkg_installed`；
 - VS Code（CMake Tools）、CLion、Visual Studio open-folder 均直接识别 CMakePresets，
@@ -493,7 +493,7 @@ tools/
 └── coverage.ps1      行覆盖率收集脚本（默认阈值 95%）
 
 triplets/
-└── x64-windows-debug.cmake   vcpkg triplet（仅安装 debug 库）
+└── x64-windows-debug.cmake   debug-only triplet（保留备用；llvm port 不支持）
 
 CMakeLists.txt        根 CMake 配置
 CMakePresets.json     构建 preset：toolchain、triplet、依赖目录、双配置
