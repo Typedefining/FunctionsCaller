@@ -271,21 +271,19 @@ Evaluator/Codegen: switch (FCBinaryOp) 分派
 ## 10. 构建、测试与工具链
 
 ```powershell
-# 依赖（vcpkg.json 声明 llvm）
-vcpkg install --triplet x64-windows
+# 依赖：vcpkg.json 声明 llvm（基线锁定），由 CMakePresets 驱动在配置阶段自动安装。
+# 前置：环境变量 VCPKG_ROOT 指向 vcpkg 仓库根目录。
+# triplet 为仓库内 triplets/x64-windows-debug.cmake（仅装 debug 库）；
+# 依赖安装目录在仓库外（../FunctionsCaller-deps，由 VCPKG_INSTALLED_DIR 指定）。
 
-# 配置
-cmake -S . -B build-debug `
-  -DLLVM_DIR="D:\Code\github\FunctionsCaller\vcpkg_installed\x64-windows\share\llvm"
-
-# 构建与测试
-cmake --build build-debug --config Debug --parallel 16
-ctest --test-dir build-debug -C Debug --output-on-failure
+# 配置、构建与测试（strict 为默认配置）
+cmake --preset strict
+cmake --build --preset strict
+ctest --preset strict
 
 # 嵌套函数开关（默认 OFF）：打开只放开前端表示，后端仍拒绝执行
-cmake -S . -B build-nested `
-  -DLLVM_DIR="D:\Code\github\FunctionsCaller\vcpkg_installed\x64-windows\share\llvm" `
-  -DFC_ENABLE_NESTED_FUNCTIONS=ON
+cmake --preset nested
+cmake --build --preset nested
 
 # 双配置验证（构建 + 全量断言）
 pwsh -NoProfile -File .\tools\verify-configurations.ps1
@@ -303,9 +301,9 @@ pwsh -NoProfile -File .\tools\coverage.ps1 `
 主要产物：
 
 ```
-build-debug/Calculater/Debug/FunctionsCalculater.exe   # 最小入口：分析并求值，源码由第一个参数给出
-build-debug/Calculater/Debug/FunctionsUnitTest.exe    # 803 断言测试套件（默认配置）
-build-debug/Calculater/Debug/ShadowRepro.exe          # 遮蔽行为复现工具
+build-strict/Calculater/Debug/FunctionsCalculater.exe   # 最小入口：分析并求值，源码由第一个参数给出
+build-strict/Calculater/Debug/FunctionsUnitTest.exe    # 803 断言测试套件（默认配置）
+build-strict/Calculater/Debug/ShadowRepro.exe          # 遮蔽行为复现工具
 ```
 
 ---

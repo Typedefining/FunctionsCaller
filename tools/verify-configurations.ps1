@@ -1,17 +1,14 @@
 param(
-	[string]$LLVMDir = "",
 	[switch]$SkipBuild
 )
 
-# 双配置验证：开关关闭（build-strict）与打开（build-nested）都必须构建成功并全绿。
-# 关闭态是默认交付形态；打开态只放开前端对嵌套 def 的表示能力，后端仍然拒绝执行。
+# 双配置验证：strict（嵌套 def 前端拒绝）与 nested（仅放开前端表示能力）都必须构建成功并全绿。
+# 依赖安装与配置由 CMakePresets（strict/nested）驱动：toolchain、triplet、安装目录全部来自 preset，
+# 本脚本不再手动传 vcpkg/LLVM 路径。
 
 $ErrorActionPreference = "Stop"
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-if ([string]::IsNullOrWhiteSpace($LLVMDir)) {
-	$LLVMDir = Join-Path $repoRoot "vcpkg_installed\x64-windows\share\llvm"
-}
 
 $cmakeCandidates = @(
 	"C:\Program Files\CMake\bin\cmake.exe",
@@ -40,9 +37,7 @@ foreach ($configuration in $configurations)
 	if (-not (Test-Path -LiteralPath $buildDir))
 	{
 		$configureLog = Join-Path $repoRoot "cfg-$label.log"
-		$arguments = "-S `"$repoRoot`" -B `"$buildDir`" -DCMAKE_BUILD_TYPE=Debug " +
-			"-DLLVM_DIR=`"$LLVMDir`" -DFC_ENABLE_NESTED_FUNCTIONS=$($configuration.Switch)"
-		& cmd /c "`"$cmake`" $arguments > `"$configureLog`" 2>&1"
+		& cmd /c "`"$cmake`" --preset $label > `"$configureLog`" 2>&1"
 		if ($LASTEXITCODE -ne 0)
 		{
 			throw "Configure failed for $label (see $configureLog)."
@@ -52,7 +47,7 @@ foreach ($configuration in $configurations)
 	if (-not $SkipBuild)
 	{
 		$buildLog = Join-Path $repoRoot "bld-$label.log"
-		& cmd /c "`"$cmake`" --build `"$buildDir`" --config Debug --target FunctionsUnitTest --parallel 16 > `"$buildLog`" 2>&1"
+		& cmd /c "`"$cmake`" --build --preset $label > `"$buildLog`" 2>&1"
 		if ($LASTEXITCODE -ne 0)
 		{
 			throw "Build failed for $label (see $buildLog)."

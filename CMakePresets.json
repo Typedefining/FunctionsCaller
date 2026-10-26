@@ -1,0 +1,38 @@
+{
+	"version": 3,
+	"cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+	"configurePresets": [
+		{
+			"name": "vcpkg",
+			"hidden": true,
+			"generator": "Visual Studio 18 2026",
+			"cacheVariables": {
+				"CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+				"VCPKG_TARGET_TRIPLET": "x64-windows-debug",
+				"VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/triplets",
+				"VCPKG_INSTALLED_DIR": "${sourceParentDir}/FunctionsCaller-deps"
+			}
+		},
+		{
+			"name": "strict",
+			"displayName": "Strict (default): nested def rejected in frontend",
+			"inherits": "vcpkg",
+			"binaryDir": "${sourceDir}/build-strict"
+		},
+		{
+			"name": "nested",
+			"displayName": "Nested def allowed in frontend representation",
+			"inherits": "vcpkg",
+			"binaryDir": "${sourceDir}/build-nested",
+			"cacheVariables": { "FC_ENABLE_NESTED_FUNCTIONS": "ON" }
+		}
+	],
+	"buildPresets": [
+		{ "name": "strict", "configurePreset": "strict", "configuration": "Debug", "jobs": 16 },
+		{ "name": "nested", "configurePreset": "nested", "configuration": "Debug", "jobs": 16 }
+	],
+	"testPresets": [
+		{ "name": "strict", "configurePreset": "strict", "configuration": "Debug", "output": { "outputOnFailure": true } },
+		{ "name": "nested", "configurePreset": "nested", "configuration": "Debug", "output": { "outputOnFailure": true } }
+	]
+}

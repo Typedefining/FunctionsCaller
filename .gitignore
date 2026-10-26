@@ -1,9 +1,11 @@
-﻿/*
-
+/*
 */build
 */debug
 */release
-
+*/build-strict
+*/build-nested
+*/vcpkg_installed
+*.log
 
 !header
 !src
@@ -15,6 +17,10 @@
 !tools/coverage.ps1
 
 !CMakeLists.txt
+!CMakePresets.json
 !README
+!vcpkg.json
+!triplets
 
 !.gitignore
+!.vscode
