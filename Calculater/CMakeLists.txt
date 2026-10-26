@@ -107,6 +107,3 @@ target_link_libraries(FunctionsUnitTest
 )
 
 add_test(NAME FunctionsUnitTest COMMAND FunctionsUnitTest)
-
-add_executable(ShadowRepro shadow_repro.cc)
-target_link_libraries(ShadowRepro PRIVATE FunctionsFrontend FunctionsEvaluator)
