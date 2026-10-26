@@ -1,5 +1,5 @@
 param(
-	[string]$BuildDir = "build-debug",
+	[string]$BuildDir = "build-strict",
 	[string]$Configuration = "Debug",
 	[double]$MinimumCoverage = 95.0
 )
