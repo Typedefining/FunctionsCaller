@@ -51,6 +51,9 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 [xml]$report = Get-Content -LiteralPath $coverageXml -Raw
+if (-not $report.results.modules.module) {
+	throw "Coverage collection produced no data (XML has zero modules). The test process ran, but the profiler captured nothing (typical causes: profiler environment conflict, antivirus interference, or an already-running coverage session). Re-run in a fresh terminal."
+}
 $sourcePaths = @{}
 foreach ($source in $report.results.modules.module.source_files.source_file) {
 	$sourcePaths[[string]$source.id] = [string]$source.path
