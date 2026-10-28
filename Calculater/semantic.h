@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <set>
@@ -87,11 +88,6 @@ public:
   // 帧布局查询：锚点帧大小 / <global> 帧大小（布局对象存于 vector，不外露引用）
   int currentFrameLayoutSize() const;
   int currentGlobalLayoutSize() const;
-
-  // 当前位置能否开始一个函数帧：关闭嵌套定义时只允许在 <global> 帧上定义。
-  // 判据用帧基址而非作用域栈深度——顶层块里的 def 帧基址仍为 0。
-  bool mayDefineFunctionHere() const;
-
   void dumpScopes() const;
   void dumpSymbolTable() const;
   void dumpCompiledProgram() const;
@@ -197,23 +193,10 @@ public:
   };
 
 private:
-  struct CurrentCompilationState {
-    std::string functionName;
-    bool isActive;
-
-    CurrentCompilationState()
-      : isActive(false) {}
-  };
-
-  CurrentCompilationState m_currentState;
-
-  bool isInFunctionScope() const;
   bool isCurrentFrameGlobal() const;
-
-  // 当前帧基址处的编译记录（<global> 记录或当前函数）
-  CompiledFunction& currentFrameFunction() const;
-  // 当前帧记录指针（注册时移交用）
-  std::shared_ptr<CompiledFunction> currentFrameRecord() const;
+  bool isInFuncDef() const;
+  std::shared_ptr<SlotLayout> currentFuncLayout() const;
+  std::shared_ptr<CompiledFunction> currentFunction() const;
 
   // 分析失败时撤销已登记的函数记录，避免半成品记录被后端当成可调用函数
   void discardFunction(const std::string &functionName);
@@ -221,12 +204,7 @@ private:
 
 private:
   std::vector<Scope> m_scopeStack;                                 // 可见性栈（块只动栈顶）
-  size_t m_frameAnchor = 0;                                        // 当前函数帧基址（帧计数域）；0 = <global>
-  // 外层帧基址与进入时作用域栈深（函数可在任意嵌套块位置定义；
-  // 帧下标走帧计数域，与作用域栈深度解耦，避免 block scope 参与帧寻址）
-  struct FrameAnchorEntry { size_t prevAnchor; size_t scopeDepthAtPush; };
-  std::vector<FrameAnchorEntry> m_frameAnchorStack;
-  std::vector<std::unique_ptr<SlotLayout>> m_frameLayouts;          // 每个函数帧一个布局
+  std::vector<std::shared_ptr<SlotLayout>> m_frameLayouts;          // 每个函数帧一个布局
   std::vector<std::shared_ptr<CompiledFunction>> m_frameRecords;    // 每帧一个编译记录；注册时移交 functions 表
   std::set<std::string> m_functionSet;
 

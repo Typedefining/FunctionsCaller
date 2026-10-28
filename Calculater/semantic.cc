@@ -16,18 +16,15 @@ FCSemanticContext::~FCSemanticContext() = default;
 void FCSemanticContext::reset() {
   m_scopeStack.clear();
   m_functionSet.clear();
-  m_frameAnchor = 0;
   m_frameLayouts.clear();
   m_frameRecords.clear();
-  m_frameAnchorStack.clear();
 
   m_compiledProgram = std::make_shared<CompiledProgram>();
-  m_currentState = CurrentCompilationState();
 
   // <global> 帧是作用域栈的普通成员（栈底），拥有自己的布局与编译记录；
   // 其记录同时登记进 functions 表，作为函数/全局归一后的单一存放地
   m_scopeStack.emplace_back();
-  m_frameLayouts.push_back(std::make_unique<SlotLayout>());
+  m_frameLayouts.push_back(std::make_shared<SlotLayout>());
   m_frameRecords.push_back(std::make_shared<CompiledFunction>());
   m_compiledProgram->functions["<global>"] = m_frameRecords[0];
 }
@@ -43,54 +40,37 @@ void FCSemanticContext::popScope() {
 }
 
 void FCSemanticContext::pushFunctionScope() {
-  // 关闭嵌套定义时，帧记录栈至多只有 <global> 与当前函数两层；
-  // 有人绕过 analyzer 直接压第二个函数帧，Debug 下立刻暴露
-  assert(kNestedFunctionDefinitions || m_frameAnchor == 0);
-
-  // 帧基址走帧计数域（layout/records 的下标），与作用域栈深度解耦；
-  // 函数体自带的作用域压在记录的 scopeDepthAtPush+1 位置
-  const size_t scopeDepthAtPush = m_scopeStack.size();
-  m_frameAnchorStack.push_back({m_frameAnchor, scopeDepthAtPush});
-  m_frameAnchor = m_frameRecords.size();
-
+  assert(m_frameRecords.size() == 1);
+  assert(m_scopeStack.size() == 1);
   m_scopeStack.emplace_back();
-  m_frameLayouts.push_back(std::make_unique<SlotLayout>());
+  m_frameLayouts.push_back(std::make_shared<SlotLayout>());
   m_frameRecords.push_back(std::make_shared<CompiledFunction>());
-
-  m_currentState.isActive = true;
 }
+
 
 void FCSemanticContext::popFunctionScope() {
-  assert(m_frameRecords.size() == m_frameAnchor + 1);
-  assert(m_frameAnchorStack.size() >= 1);
-  // 弹出本帧：作用域栈裁回进入前深度，帧级向量裁到锚点（本帧条目移除），
-  // 再从帧基址栈恢复外层帧基址（嵌套函数定义由此支持）
-  const auto entry = m_frameAnchorStack.back();
-  m_frameAnchorStack.pop_back();
-  m_scopeStack.resize(entry.scopeDepthAtPush);
-  m_frameLayouts.resize(m_frameAnchor);
-  m_frameRecords.resize(m_frameAnchor);
-  m_frameAnchor = entry.prevAnchor;
-
-  m_currentState.isActive = (m_frameAnchor != 0);
-}
-
-bool FCSemanticContext::isInFunctionScope() const {
-  return m_currentState.isActive;
+  assert(m_frameRecords.size() == 2);
+  m_frameRecords.pop_back();
+  m_frameLayouts.pop_back();
+  m_scopeStack.resize(1);               // 顶层定义 ⇒ 外层作用域恒为 <global>
 }
 
 bool FCSemanticContext::isCurrentFrameGlobal() const {
-  // 肯定式谓词：锚点即 <global> 帧
-  return m_frameAnchor == 0;
+  return m_frameRecords.size() == 1;
 }
 
-CompiledFunction &FCSemanticContext::currentFrameFunction() const {
-  return *m_frameRecords[m_frameAnchor];
+bool FCSemanticContext::isInFuncDef() const {
+  return m_scopeStack.size() > 1;
 }
 
 std::shared_ptr<CompiledFunction>
-FCSemanticContext::currentFrameRecord() const {
-  return m_frameRecords[m_frameAnchor];
+FCSemanticContext::currentFunction() const {
+  return m_frameRecords.back();
+}
+
+std::shared_ptr<SlotLayout>
+FCSemanticContext::currentFuncLayout() const {
+  return m_frameLayouts.back();
 }
 
 void FCSemanticContext::discardFunction(const std::string &functionName) {
@@ -147,7 +127,7 @@ FCSemanticContext::declareVariable(VarDeclPtr declaration) {
   }
 
   // 唯一分配路径：从当前帧基址的布局分配槽位（<global> 帧也是普通布局）
-  const int slot = m_frameLayouts[m_frameAnchor]->allocateSlot();
+  const int slot = currentFuncLayout()->allocateSlot();
 
   const std::string name = declaration->name;
   auto symbol = std::make_shared<VariableSymbol>(std::move(declaration), slot,
@@ -156,7 +136,7 @@ FCSemanticContext::declareVariable(VarDeclPtr declaration) {
   scope.variables.emplace(name, symbol);
 
   // 唯一登记路径：登记进当前帧的编译记录（<global> 记录也存 functions 表）
-  currentFrameFunction().symbols.addSymbol(name, symbol);
+  currentFunction()->symbols.addSymbol(name, symbol);
   if (isCurrentFrameGlobal()) {
     m_compiledProgram->globalSymbols.push_back(symbol);
   }
@@ -172,21 +152,14 @@ bool FCSemanticContext::hasFunction(const std::string &functionName) const {
 bool FCSemanticContext::registerFunction(const std::string &functionName,
                                          const FCFunctionAST *function) {
   if (hasFunction(functionName)) {
-    // 失败静默：报告职责在调用方（SemanticAnalyzer），此处只返回失败值
     return false;
   }
 
-  // 锚点帧记录（含已声明的参数符号）整体移交给 functions 表：
-  // shared_ptr 同一对象，declareVariable 的登记与后端消费天然一致
-  auto compiledFunc = currentFrameRecord();
+  auto compiledFunc = currentFunction();
   compiledFunc->ast = const_cast<FCFunctionAST *>(function);
+  compiledFunc->frameSize = currentFuncLayout()->size();
   m_compiledProgram->functions[functionName] = compiledFunc;
 
-  // 布局快照：注册时刻的参数槽位数；函数体分析结束后由
-  // SemanticAnalyzer::analyzeFunction 回填最终 frameSize
-  compiledFunc->frameSize = m_frameLayouts[m_frameAnchor]->size();
-
-  // 按原型声明顺序记录形参槽位，调用期据此把实参写入帧的固定位置
   if (function != nullptr) {
     for (const auto &varDecl : function->getProto()->getArgs()) {
       auto param = compiledFunc->symbols.lookupShared(varDecl->name);
@@ -206,16 +179,11 @@ FCSemanticContext::currentScopeDeclarations() const {
 }
 
 int FCSemanticContext::currentFrameLayoutSize() const {
-  return m_frameLayouts[m_frameAnchor]->size();
+  return currentFuncLayout()->size();
 }
 
 int FCSemanticContext::currentGlobalLayoutSize() const {
   return m_frameLayouts[0]->size();
-}
-
-bool FCSemanticContext::mayDefineFunctionHere() const {
-  // <global> 帧上定义函数始终合法；函数体内定义只有在开启嵌套时才合法
-  return kNestedFunctionDefinitions || m_frameAnchor == 0;
 }
 
 const CompiledProgram &FCSemanticContext::getCompiledProgram() const {
@@ -230,7 +198,7 @@ FCSemanticContext::getCompiledFunction(const std::string &name) const {
 void FCSemanticContext::dumpScopes() const {
   printf("=== Scope Debug Info ===\n");
   printf("Scope depth: %zu\n", m_scopeStack.size());
-  printf("Current function frame size: %d\n", m_frameLayouts[m_frameAnchor]->size());
+  printf("Current function frame size: %d\n", currentFuncLayout()->size());
   printf("Current global layout size: %d\n", m_frameLayouts[0]->size());
 
   for (size_t i = 0; i < m_scopeStack.size(); ++i) {
@@ -404,8 +372,7 @@ bool FCSemanticContext::SemanticAnalyzer::analyzeBinary(const FCExprClass::FCBin
 }
 
 bool FCSemanticContext::SemanticAnalyzer::analyzeFunction(const FCExprClass::FCFunctionAST *node) {
-  // 守卫必须在压帧与声明参数之前：被拒绝时不得留下任何帧副作用
-  if (!m_ctx.mayDefineFunctionHere()) {
+  if (m_ctx.isInFuncDef()) {
     reportError("Error: nested function definition '" + node->getProtoName()
                 + "' requires FC_ENABLE_NESTED_FUNCTIONS");
     return false;
@@ -433,8 +400,8 @@ bool FCSemanticContext::SemanticAnalyzer::analyzeFunction(const FCExprClass::FCF
 
   // 函数体分析完成后，回填最终的帧大小（参数 + 局部）
   {
-    auto &fn = m_ctx.currentFrameFunction();
-    fn.frameSize = m_ctx.m_frameLayouts[m_ctx.m_frameAnchor]->size();
+    auto fn = m_ctx.currentFunction();
+    fn->frameSize = m_ctx.currentFuncLayout()->size();
   }
 
   if (!ok) {
