@@ -9,7 +9,8 @@
 			"cacheVariables": {
 				"CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
 				"VCPKG_TARGET_TRIPLET": "x64-windows",
-				"VCPKG_INSTALLED_DIR": "${sourceParentDir}/FunctionsCaller-deps"
+				"VCPKG_INSTALLED_DIR": "${sourceParentDir}/FunctionsCaller-deps",
+				"CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
 			}
 		},
 		{
@@ -27,11 +28,15 @@
 		}
 	],
 	"buildPresets": [
-		{ "name": "strict", "configurePreset": "strict", "configuration": "Debug", "jobs": 16 },
-		{ "name": "nested", "configurePreset": "nested", "configuration": "Debug", "jobs": 16 }
+		{ "name": "strict-debug", "configurePreset": "strict", "configuration": "Debug", "jobs": 16 },
+		{ "name": "nested-debug", "configurePreset": "nested", "configuration": "Debug", "jobs": 16 },
+		{ "name": "strict-release", "configurePreset": "strict", "configuration": "Release", "jobs": 16 },
+		{ "name": "nested-release", "configurePreset": "nested", "configuration": "Release", "jobs": 16 }
 	],
 	"testPresets": [
-		{ "name": "strict", "configurePreset": "strict", "configuration": "Debug", "output": { "outputOnFailure": true } },
-		{ "name": "nested", "configurePreset": "nested", "configuration": "Debug", "output": { "outputOnFailure": true } }
+		{ "name": "strict-debug", "configurePreset": "strict", "configuration": "Debug", "output": { "outputOnFailure": true } },
+		{ "name": "nested-debug", "configurePreset": "nested", "configuration": "Debug", "output": { "outputOnFailure": true } },
+		{ "name": "strict-release", "configurePreset": "strict", "configuration": "Release", "output": { "outputOnFailure": true } },
+		{ "name": "nested-release", "configurePreset": "nested", "configuration": "Release", "output": { "outputOnFailure": true } }
 	]
 }
